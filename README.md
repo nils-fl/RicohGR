@@ -1,5 +1,7 @@
 # Ricoh GR IIIx firmware: offline AF analysis
 
+[![Documentation](https://img.shields.io/badge/docs-index-9a3412)](docs/index.html)
+
 A personal, read-only study of how the Ricoh GR IIIx autofocus works, built
 from the official firmware package.
 
