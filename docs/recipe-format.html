@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recipe file format</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#recipe-file-format" id="toc-recipe-file-format">Recipe
+file format</a>
+<ul>
+<li><a href="#file-layout" id="toc-file-layout">File layout</a></li>
+<li><a href="#keys" id="toc-keys">Keys</a></li>
+<li><a href="#checking-a-file" id="toc-checking-a-file">Checking a
+file</a></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="recipe-file-format">Recipe file format</h1>
+<p>A recipe is a saved set of image-control settings for the GR IIIx.
+This describes a plain-text file, <code>RECIPES.TXT</code>, that holds a
+library of them, and the offline checker
+<code>tools/recipes.py</code>.</p>
+<p>The file is <strong>not</strong> installed on the camera and needs no
+firmware change. It is a reference you keep on a phone or computer: the
+checker prints each recipe as a dial-in list for the in-camera RAW
+development screen (playback → RAW Development), or for the two Custom
+image-control slots that the Wi-Fi API can switch between. The values
+and the rules come from the firmware (see <a
+href="firmware-mod-feasibility.html">Firmware modification:
+feasibility</a> §4.3-4.4).</p>
+<h2 id="file-layout">File layout</h2>
+<ul>
+<li>UTF-8 text in the card root, named <code>RECIPES.TXT</code>.</li>
+<li>First non-blank line: <code>format 1</code>.</li>
+<li>Each recipe is a <code>[Name]</code> header followed by
+<code>key = value</code> lines.</li>
+<li><code>#</code> starts a comment. Blank lines are ignored. Names are
+case-insensitive for keys and values; recipe names keep their case.</li>
+<li>A setting that is left out is simply not dialled in; it is not
+forced to 0.</li>
+<li>At most 32 recipes; names at most 16 characters (one screen
+line).</li>
+</ul>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode ini"><code class="sourceCode ini"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># GR recipes, format 1</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="dt">format 1</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">[Warm Slide]</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="dt">control </span><span class="ot">=</span><span class="st"> positive_film</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="dt">saturation </span><span class="ot">=</span><span class="st"> +1</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="dt">hue </span><span class="ot">=</span><span class="st"> </span><span class="dv">-1</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="dt">contrast </span><span class="ot">=</span><span class="st"> +1</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="dt">contrast_highlight </span><span class="ot">=</span><span class="st"> </span><span class="dv">-1</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="dt">shading </span><span class="ot">=</span><span class="st"> </span><span class="dv">-1</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="dt">clarity </span><span class="ot">=</span><span class="st"> +1</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="kw">[Street Mono]</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="dt">control </span><span class="ot">=</span><span class="st"> hard_monotone</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a><span class="dt">key </span><span class="ot">=</span><span class="st"> </span><span class="dv">-1</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="dt">contrast </span><span class="ot">=</span><span class="st"> +2</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="dt">toning </span><span class="ot">=</span><span class="st"> sepia</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a><span class="dt">grain </span><span class="ot">=</span><span class="st"> </span><span class="dv">2</span></span></code></pre></div>
+<h2 id="keys">Keys</h2>
+<p><code>control</code> is required. Its value is one of:</p>
+<p><code>standard</code>, <code>vivid</code>, <code>monotone</code>,
+<code>soft_monotone</code>, <code>hard_monotone</code>,
+<code>hi_contrast_bw</code>, <code>negative_film</code>,
+<code>positive_film</code>, <code>bleach_bypass</code>,
+<code>retro</code>, <code>hdr_tone</code>,
+<code>cross_process</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Values</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>saturation</code>, <code>hue</code>, <code>key</code>,
+<code>contrast</code>, <code>contrast_highlight</code>,
+<code>contrast_shadow</code>, <code>sharpness</code>,
+<code>shading</code>, <code>clarity</code></td>
+<td><code>-4</code>..<code>+4</code></td>
+<td>nine steps</td>
+</tr>
+<tr>
+<td><code>toning</code></td>
+<td>monotone controls: <code>none</code>, <code>sepia</code>,
+<code>red</code>, <code>green</code>, <code>blue</code>,
+<code>purple</code>; bleach bypass / retro / HDR tone / cross process:
+<code>none</code>, <code>1</code>, <code>2</code>, <code>3</code></td>
+<td>meaning depends on the control</td>
+</tr>
+<tr>
+<td><code>filter</code></td>
+<td><code>none</code>, <code>1</code>, <code>2</code>, <code>3</code>,
+<code>4</code>, <code>custom</code></td>
+<td>monotone family only</td>
+</tr>
+<tr>
+<td><code>grain</code></td>
+<td><code>0</code>..<code>3</code></td>
+<td>0 = off</td>
+</tr>
+<tr>
+<td><code>hdr_strength</code></td>
+<td><code>0</code>..<code>3</code></td>
+<td>HDR Tone only</td>
+</tr>
+</tbody>
+</table>
+<p>Each control supports only some parameters. The checker rejects a
+parameter the control does not have (for example <code>saturation</code>
+on a monotone control, or <code>clarity</code> on Soft Monotone). The
+supported sets follow the camera's capability table (<a
+href="firmware-mod-feasibility.html">feasibility doc</a> §4.4).</p>
+<h2 id="checking-a-file">Checking a file</h2>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/recipes.py RECIPES.TXT</span></code></pre></div>
+<ul>
+<li>On success it prints every recipe as a dial-in list and exits
+0.</li>
+<li>On a mistake it prints each problem with the recipe name and exits
+1, for example
+<code>Street Mono: Contrast +9 out of range (-4..+4)</code>.</li>
+</ul>
+<p>White balance is not part of a recipe: the camera keeps it outside
+the image-control settings. A later format version could add it.</p>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>

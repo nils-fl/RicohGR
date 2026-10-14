@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GR IIIx contrast-AF search: state machine outline</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#gr-iiix-contrast-af-search-state-machine-outline"
+id="toc-gr-iiix-contrast-af-search-state-machine-outline">GR IIIx
+contrast-AF search: state machine outline</a>
+<ul>
+<li><a href="#1-interface-read" id="toc-1-interface-read">1. Interface
+(Read)</a></li>
+<li><a
+href="#2-action-codes-returned-in-out-inferred-from-the-callers-context"
+id="toc-2-action-codes-returned-in-out-inferred-from-the-callers-context">2.
+Action codes returned in <code>*out</code> (Inferred from the callers'
+context)</a></li>
+<li><a href="#3-search-path-and-reversals-read-with-inferred-labels"
+id="toc-3-search-path-and-reversals-read-with-inferred-labels">3. Search
+path and reversals (Read, with Inferred labels)</a></li>
+<li><a href="#4-sample-handling-and-the-peak-check-partly-resolved"
+id="toc-4-sample-handling-and-the-peak-check-partly-resolved">4. Sample
+handling and the peak check (partly resolved)</a></li>
+<li><a href="#5-what-this-says-about-lever-1"
+id="toc-5-what-this-says-about-lever-1">5. What this says about lever
+1</a></li>
+<li><a href="#6-open" id="toc-6-open">6. Open</a></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="gr-iiix-contrast-af-search-state-machine-outline">GR IIIx
+contrast-AF search: state machine outline</h1>
+<p>Offline decode of the per-frame contrast-AF step
+(<code>0x53404b24</code>, 957 instructions) in GR IIIx 1.60. It was read
+to answer one question: what happens between the phase-guided jump and
+the peak fit, and where would a shorter confirmation fit (<a
+href="af-subsystem.html">af-subsystem</a> §10.5, lever 1)?</p>
+<p><strong>This is an outline, not a full decode.</strong> Labels:
+<strong>Read</strong> (from the instructions), <strong>Inferred</strong>
+(interpreted), <strong>Unresolved</strong>. Field names in
+<code>+0x…</code> come from the debug writer (<a
+href="af-subsystem.html">af-subsystem</a> §4.8) where one exists; the
+rest are my own tags. No timings were measured.</p>
+<h2 id="1-interface-read">1. Interface (Read)</h2>
+<p><code>0x53404b24(obj, uint8_t *dir, uint16_t *out)</code> runs once
+per frame. It reads and writes fields of a large state object
+<code>obj</code> (offsets from <code>obj</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>*dir</code></td>
+<td>Scan direction, 0 or 1. Flipped by <code>eor #1</code> on each
+reversal.</td>
+</tr>
+<tr>
+<td><code>*out</code></td>
+<td>Action code returned to the caller (section 2).</td>
+</tr>
+<tr>
+<td><code>+0x4388</code></td>
+<td>Mode word, compared with 2 and 4, and with 6…9 in one test.</td>
+</tr>
+<tr>
+<td><code>+0xf7c</code></td>
+<td>Signed area or status index. <code>−2</code> means "range exceeded"
+and <code>−3</code> "end point" (Inferred), both consumed at
+<code>0x53404f38</code>.</td>
+</tr>
+<tr>
+<td><code>+0xc4ca</code></td>
+<td><code>[ContrastAfSearchPath]</code>, values 0, 1, 2 (section
+3).</td>
+</tr>
+<tr>
+<td><code>+0x14bd6</code></td>
+<td>Reversal counter, capped at 2.</td>
+</tr>
+<tr>
+<td><code>+0x14e88</code></td>
+<td>Guide mode. <strong>3</strong> selects the 300·N µm margin of <a
+href="af-subsystem.html">af-subsystem</a> §5.5.</td>
+</tr>
+<tr>
+<td><code>+0x14b9c</code></td>
+<td><code>[ElegantQuickSearch]</code> flag.</td>
+</tr>
+<tr>
+<td><code>+0xc468</code>, <code>+0xc469</code></td>
+<td>Run flags. With <code>+0xc469</code> set and <code>+0xc468</code>
+clear the function returns code 4 at once.</td>
+</tr>
+<tr>
+<td><code>+0xc4df</code></td>
+<td>Small guard counter, decremented once per call.</td>
+</tr>
+</tbody>
+</table>
+<p>It calls helpers for the drive:</p>
+<ul>
+<li><code>0x533fe85c(obj, 1 or 2)</code> starts a lens sweep in the
+given direction.</li>
+<li><code>0x533faadc(obj)</code> is called before every hand-off. It is
+probably "stop lens and take the current position" (Inferred).</li>
+<li><code>0x533fac3c</code> converts pulses to µm (<a
+href="af-subsystem.html">af-subsystem</a> §4.3).</li>
+<li><code>0x5340ba6c</code> and <code>0x5340bc4c</code> judge the
+contrast samples (section 4).</li>
+</ul>
+<h2
+id="2-action-codes-returned-in-out-inferred-from-the-callers-context">2.
+Action codes returned in <code>*out</code> (Inferred from the callers'
+context)</h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Set at</th>
+<th>Reading</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4</td>
+<td>function entry, <code>0x53404f48</code>,
+<code>0x5340567c</code></td>
+<td>No action this frame, or search not running.</td>
+</tr>
+<tr>
+<td>2</td>
+<td>after <code>0x533fe85c</code> (<code>0x53404e5c</code>,
+<code>0x5340553c</code>, <code>0x53405600</code>)</td>
+<td>A sweep was started or continued.</td>
+</tr>
+<tr>
+<td>8</td>
+<td>default at <code>0x53404c18</code>; after a peak check at
+<code>0x53405000</code></td>
+<td>Search is in progress, or a result was accepted (the accept case
+also sets <code>+0xc470</code>, <code>+0x14ea6</code>, calls
+<code>0x533fb3c0(obj, 2)</code> and writes <code>2</code> to
+<code>+0xfec</code>).</td>
+</tr>
+<tr>
+<td>0x20</td>
+<td><code>0x53405170</code></td>
+<td>End-point hand-off, after <code>+0xc450</code>
+(<code>FarEndPointState</code>) is set to 1, 2 or 3.</td>
+</tr>
+<tr>
+<td>0x40</td>
+<td><code>0x53405138</code></td>
+<td>Reverse and continue.</td>
+</tr>
+<tr>
+<td>0x80</td>
+<td><code>0x53405140</code></td>
+<td>Give up (reversal cap reached, section 3).</td>
+</tr>
+</tbody>
+</table>
+<p>I could not tie every code to its consumer, so treat this table as a
+hypothesis. The codes are clearly a bit set, not an enumeration.</p>
+<h2 id="3-search-path-and-reversals-read-with-inferred-labels">3. Search
+path and reversals (Read, with Inferred labels)</h2>
+<p><code>+0xc4ca</code> records how far the search has got:</p>
+<ul>
+<li><strong>Path 0: first pass.</strong> The lens sweeps in the
+direction the phase result suggested (or a default). The stop test
+compares the travel so far (<code>GetLensDriveDistanceUm</code>,
+<code>0x533fac3c</code>) with <code>|phase defocus| + margin</code>
+(guided path <code>0x534051c8</code>: margin <code>3 × 10 × x</code>).
+When the travel exceeds it, <code>+0xf7c</code> is set to
+<code>−2</code>.</li>
+<li><strong>Path 1: after the first reversal</strong>
+(<code>strb #1</code> at <code>0x5340539c</code>,
+<code>0x53404e1c</code>, <code>0x534055e8</code>,
+<code>0x53405630</code>). The direction bit is flipped and
+<code>0x533fe85c</code> starts a sweep the other way. In the state-4
+branch the margin <code>10 × 10 × x</code> is scaled by 2, or by 3 when
+<code>+0x14bd6</code> is non-zero
+(<code>0x534052e0</code>–<code>0x534052ec</code>; the exact meaning of
+that flag is Unresolved).</li>
+<li><strong>Path 2</strong> (<code>strb #2</code> at
+<code>0x5340576c</code>): set after a comparison of two floats from
+<code>0x533f93c8</code> and <code>0x533f928c</code>, together with a
+direction flip. What those floats are is
+<strong>Unresolved</strong>.</li>
+<li><strong>Cap.</strong> Each reversal increments
+<code>+0x14bd6</code>, clamped to 2
+(<code>0x53404e2c</code>–<code>0x53404e40</code>,
+<code>0x53405504</code>–<code>0x53405518</code>). At 2 the function
+returns code <code>0x80</code> (<code>0x53405140</code>).</li>
+</ul>
+<p>So a failed guess costs one or two reversals, each a stop, a restart
+and the sweep back through the peak. This matches <a
+href="af-subsystem.html">af-subsystem</a> §5.5.</p>
+<h2 id="4-sample-handling-and-the-peak-check-partly-resolved">4. Sample
+handling and the peak check (partly resolved)</h2>
+<p><strong>The sample detector (Read).</strong> The contrast-sample
+class (<code>CafDetection</code>, functions <code>0x5340bd24</code>,
+<code>0x5340bdf0</code>, <code>0x5340bf78</code>) is fed once per frame
+with a raw contrast value and a lens position:</p>
+<ul>
+<li>Both are smoothed with a [1 2 1]/4 filter over the last three values
+(<code>0x5340bf78</code>: <code>(a + 2b + c) &gt;&gt; 2</code> for
+positions, and the same with 0.25 × (x + 2y + z) for the
+noise-normalised contrast of §4.4).</li>
+<li>It keeps a sliding three-entry window of smoothed contrast and
+position. It counts consecutive rises (<code>+0xbc</code>) and
+consecutive falls (<code>+0xbe</code>), and resets the other counter on
+each change of direction. It also records the window's lowest and
+highest position (<code>+0x60</code>, <code>+0x64</code>) and two
+indices, <code>+0x10</code> for the rising side and <code>+0x14</code>
+for the falling side.</li>
+<li>The raw history array (pointed to by <code>+0x00</code>) is written
+three entries at a time (<code>0x5340c17c</code>), so the entries after
+the newest sample are copies of it. This is how a five-sample window can
+be read at the newest sample.</li>
+</ul>
+<p><strong>The peak helpers (Read).</strong></p>
+<ul>
+<li><code>0x5340ba6c(area)</code> returns <code>+0x10</code>, minus one
+if the smoothed value at that index is above the one after it.</li>
+<li><code>0x5340bc4c(area, n)</code> returns 1 when <code>n ≤ 1</code>.
+Otherwise it walks the five raw entries <code>n−2 … n+2</code>, carries
+a running maximum forward, counts steps where the next entry does not
+exceed it, and returns 1 if there is any. It therefore returns 0 only
+when all five entries are strictly rising. Because the entries after the
+newest sample are copies of it, that needs at least two real samples
+beyond <code>n</code>.</li>
+<li>The peak fit (<code>0x5340b4f8</code>) works on five samples and
+returns early with fewer than two.</li>
+</ul>
+<p><strong>What the <code>bc4c == 0</code> branch does (Read).</strong>
+The branch (<code>0x53404fb8</code>) sets <code>+0xc470</code>, calls
+<code>0x533fb3c0(obj, 2)</code>, writes 2 to <code>+0xfec</code>, clears
+<code>+0x14e84</code> and sets the flag <code>+0x14ea6</code>:</p>
+<ul>
+<li><code>0x533fb3c0</code> builds a result record for every AF area and
+hands it to the result consumer (<code>0x533ef0d8</code>) with mode 1 or
+2. Mode 2 is the one used here.</li>
+<li>The only function that reads <code>+0x14ea6</code> to act on it is
+<code>0x5340a5a0</code>. When the flag is set it posts a completion
+event (<code>0x533e7010</code>, id 4, with <code>+0xc470</code>), sets
+<code>+0xc460</code> and <code>+0xfec</code>, clears
+<code>+0x14e84</code>, and runs the final steps, ending in the debug
+writer <code>0x53409000</code>.</li>
+</ul>
+<p>So the branch is "the search has a result: publish it and finish". It
+is the success exit of the search (Inferred, from the completion
+event).</p>
+<p><strong>Still unresolved: why 0 means success.</strong> By my reading
+of the instructions, <code>bc4c</code> returns 0 only when five raw
+entries are strictly rising. A peak window does not look like that.
+Either the entries are not plain contrast (they may be a transformed or
+position-ordered series), or the array holds copies I have mis-indexed.
+I cannot say which. So the exact criterion, and so the minimum number of
+frames, is still not fixed by the code alone.</p>
+<h2 id="5-what-this-says-about-lever-1">5. What this says about lever
+1</h2>
+<ol type="1">
+<li><strong>There is no separate "verify at the phase target"
+state.</strong> After the jump, the machine runs the ordinary search
+(path 0) from the target. The phase result changes the direction, the
+margin and the start point, not the confirmation procedure.</li>
+<li><strong>Success needs samples on both sides of the peak</strong> (a
+five-sample fit and at least two real samples beyond the candidate,
+section 4). A confirmation shorter than that would be a new procedure,
+not a threshold change.</li>
+<li><strong>Two independent costs can be attacked separately.</strong>
+The reversals (up to two, section 3) come from a wrong or missing
+direction. The five-sample minimum comes from the fit.</li>
+<li><strong>A wrong guided direction is the expensive case.</strong> A
+correct one finishes on path 0. The direction comes from the phase sign.
+Better direction handling on weak but usable phase results would
+therefore save whole reversals, which is a bigger saving than trimming
+samples.</li>
+</ol>
+<h2 id="6-open">6. Open</h2>
+<ul>
+<li>What series <code>bc4c</code> tests, and so why 0 means
+success.</li>
+<li>The meaning of every action code and where each is consumed.</li>
+<li>The floats behind path 2 (<code>0x533f93c8</code>,
+<code>0x533f928c</code>).</li>
+<li>The tail of the function at <code>0x53405840</code>, which sets
+<code>+0x14b9a…9d</code> and restarts a sweep.</li>
+<li>The frame count from the jump to acceptance. It needs a run on a
+camera.</li>
+</ul>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>

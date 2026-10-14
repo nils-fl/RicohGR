@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GR IIIx remote control: what Wi-Fi and USB can set</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#gr-iiix-remote-control-what-wi-fi-and-usb-can-set"
+id="toc-gr-iiix-remote-control-what-wi-fi-and-usb-can-set">GR IIIx
+remote control: what Wi-Fi and USB can set</a>
+<ul>
+<li><a href="#1-where-the-code-lives" id="toc-1-where-the-code-lives">1.
+Where the code lives</a></li>
+<li><a href="#2-wi-fi-api-webapid" id="toc-2-wi-fi-api-webapid">2. Wi-Fi
+API (<code>webapid</code>)</a></li>
+<li><a href="#3-usb-mtpd" id="toc-3-usb-mtpd">3. USB
+(<code>mtpd</code>)</a>
+<ul>
+<li><a href="#31-name-tables" id="toc-31-name-tables">3.1 Name
+tables</a></li>
+<li><a href="#32-vendor-pentax-tether-operations-read"
+id="toc-32-vendor-pentax-tether-operations-read">3.2 Vendor ("Pentax
+tether") operations (Read)</a></li>
+<li><a href="#33-vendor-properties-read"
+id="toc-33-vendor-properties-read">3.3 Vendor properties (Read)</a></li>
+<li><a href="#34-image-settings-cannot-be-written-over-usb-read"
+id="toc-34-image-settings-cannot-be-written-over-usb-read">3.4 Image
+settings cannot be written over USB (Read)</a></li>
+<li><a href="#35-camera-as-connected-measured-2026-10-14"
+id="toc-35-camera-as-connected-measured-2026-10-14">3.5 Camera as
+connected (measured, 2026-10-14)</a></li>
+</ul></li>
+<li><a href="#4-the-factory-channel-0x90900x9095"
+id="toc-4-the-factory-channel-0x90900x9095">4. The factory channel
+(<code>0x9090</code>–<code>0x9095</code>)</a></li>
+<li><a href="#5-what-a-recipe-manager-can-do-on-a-gr-iiix"
+id="toc-5-what-a-recipe-manager-can-do-on-a-gr-iiix">5. What a recipe
+manager can do on a GR IIIx</a></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="gr-iiix-remote-control-what-wi-fi-and-usb-can-set">GR IIIx
+remote control: what Wi-Fi and USB can set</h1>
+<p>Question behind this document: can a computer or phone write a full
+image "recipe" (image control plus its fine parameters) to a GR IIIx
+without modified firmware? Firmware 1.60, Linux user space taken from
+the initramfs with <code>tools/initramfs.py</code>.</p>
+<p>Labels as in the other documents: <strong>Read</strong> (from code or
+data), <strong>Structural</strong> (from names, strings and
+dependencies), <strong>Inferred</strong> (interpreted). Section 3.5 also
+records what a connected camera reported.</p>
+<p><strong>Short answer:</strong> no. Wi-Fi can switch between image
+controls, including Custom 1 and 2, and set WB mode and exposure. USB
+cannot write image settings at all. The only other channel is the
+factory adjustment interface, which is not meant for user settings.</p>
+<h2 id="1-where-the-code-lives">1. Where the code lives</h2>
+<table>
+<thead>
+<tr>
+<th>Path in initramfs</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>usr/bin/webapid</code></td>
+<td>Wi-Fi HTTP API (crow + rapidjson),
+<code>webapi_server::*</code></td>
+</tr>
+<tr>
+<td><code>usr/bin/mtpd</code></td>
+<td>USB MTP/PTP server (Android MTP plus Ricoh and Pentax code)</td>
+</tr>
+<tr>
+<td><code>usr/lib/libcamera-controller.so</code></td>
+<td><code>camera_controller::*</code>: the Linux-side client for the
+RTOS (IPCU)</td>
+</tr>
+<tr>
+<td><code>usr/bin/camctld</code></td>
+<td>Camera-controller daemon</td>
+</tr>
+</tbody>
+</table>
+<p>All three ELF files are stripped, but their C++ symbols are exported
+in <code>.dynsym</code>, so <code>nm -D | c++filt</code> names every
+function. (Read)</p>
+<h2 id="2-wi-fi-api-webapid">2. Wi-Fi API (<code>webapid</code>)</h2>
+<p><strong>Endpoints (Read):</strong> <code>GET /v1/ping</code>,
+<code>/v1/props</code>, <code>/v1/liveview</code>,
+<code>/v1/photos[...]</code>, <code>/v1/transfers</code>,
+<code>/v1/changes</code> (websocket),
+<code>PUT /v1/params/camera|device|lens</code>,
+<code>POST /v1/camera/shoot[/cancel|/compose]</code>,
+<code>POST /v1/lens/focus</code>, <code>POST /v1/device/finish</code>,
+<code>POST /v1/device/wlan/finish</code>,
+<code>GET /v1/debug/revisions</code>.</p>
+<p><strong>Settable camera parameters (Read, from
+<code>webapi_server::&lt;name&gt;::SetValue</code>):</strong>
+<code>av</code>, <code>tv</code>, <code>sv</code>, <code>xv</code>,
+<code>exposure_mode</code>, <code>metering_mode</code>,
+<code>focus_setting</code>, <code>effect</code>, <code>wb_mode</code>,
+<code>still_size</code>, <code>still_format</code>,
+<code>movie_size</code>, <code>shoot_mode</code>,
+<code>capture_mode</code>, <code>reso</code>,
+<code>operation_mode</code>, <code>datetime</code>,
+<code>geo_tagging</code>, <code>auto_resize</code>,
+<code>power_off_transfer</code>, <code>channel</code>,
+<code>ble_enable_condition</code>.</p>
+<p><strong><code>effect</code> value table (Read, static initializer at
+<code>0xe3680</code>; the same table is used for still and
+movie):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>String</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>off</code> (Standard)</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>col_vivid</code></td>
+</tr>
+<tr>
+<td>2–4</td>
+<td><code>efc_monochrome</code>, <code>efc_softMonochrome</code>,
+<code>efc_hardMonochrome</code></td>
+</tr>
+<tr>
+<td>5–9</td>
+<td><code>efc_highContrast</code>, <code>efc_posiFilm</code>,
+<code>efc_bleachBypass</code>, <code>efc_retro</code>,
+<code>efc_HDRTone</code></td>
+</tr>
+<tr>
+<td>10, 11</td>
+<td><code>col_custom1</code>, <code>col_custom2</code></td>
+</tr>
+</tbody>
+</table>
+<p>Negative Film and Cross Processing cannot be selected through the
+API.</p>
+<p><strong><code>wb_mode</code> (Read, <code>0xed5a0</code>):</strong>
+<code>auto</code>, <code>multiAuto</code>, <code>daylight</code>,
+<code>shade</code>, <code>cloud</code>, four fluorescent types,
+<code>tungsten</code>, <code>incandescent</code>, <code>cte</code>,
+<code>colorTemp1</code>–<code>3</code>,
+<code>manual1</code>–<code>3</code>,
+<code>custom1</code>–<code>3</code>. There is no WB shift value and no
+Kelvin value.</p>
+<p>There are no keys for saturation, hue, key, contrast, shading,
+clarity, toning, grain or sharpness. (Read: no such strings or classes
+exist.)</p>
+<h2 id="3-usb-mtpd">3. USB (<code>mtpd</code>)</h2>
+<h3 id="31-name-tables">3.1 Name tables</h3>
+<p>The debug name tables are arrays of
+<code>{const char *name; u32 code}</code>. Reading them as
+<code>{code, name}</code> shifts every code by one entry. The standard
+codes expose this: for example <code>0xD407</code> is
+PerceivedDeviceType. (Read)</p>
+<h3 id="32-vendor-pentax-tether-operations-read">3.2 Vendor ("Pentax
+tether") operations (Read)</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Name</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0x9001</code></td>
+<td>SET_PENTAX_VENDORMODE</td>
+</tr>
+<tr>
+<td><code>0x9002</code></td>
+<td>PENTAX_CAMERA_SHUTDOWN</td>
+</tr>
+<tr>
+<td><code>0x900F</code></td>
+<td>GET_ALLCONDITIONS</td>
+</tr>
+<tr>
+<td><code>0x9011</code> / <code>0x9012</code></td>
+<td>INITIATE / TERMINATE_PENTAXCAPTURE</td>
+</tr>
+<tr>
+<td><code>0x9006</code></td>
+<td>GET_LIVEVIEWFRAMEDATA</td>
+</tr>
+<tr>
+<td><code>0x9090</code>–<code>0x9095</code></td>
+<td>GENERAL_PURPOSE_SET_VALUE, RUN_FUNC, END_CHECK, GET_VALUE, GET_DATA,
+SET_DATA</td>
+</tr>
+</tbody>
+</table>
+<p><code>doSetPentaxVendorMode</code> (<code>0x503f4</code>) needs an
+open session and more than four parameters. It passes parameter 3, which
+must be 0 or 1, to <code>ChangeTetherMode()</code>. The responses are
+0x2019 (device busy) and 0x2002 (error). (Read)</p>
+<h3 id="33-vendor-properties-read">3.3 Vendor properties (Read)</h3>
+<p><code>GetSupportedVendorDeviceProperties</code>
+(<code>0x67d70</code>) lists these codes for the GR (the K-3 Mark III
+Monochrome has its own list): <code>0xD009</code> live-view area,
+<code>D00F</code> shutter speed, <code>D013</code> drive mode,
+<code>D014</code>/<code>D015</code> bracketing, <code>D018</code> colour
+temperature, <code>D01B</code> file format, <code>D01E</code> ISO,
+<strong><code>D020</code> image tone, <code>D021</code> saturation,
+<code>D022</code> hue, <code>D023</code> key, <code>D024</code> filter
+effect, <code>D025</code> monotone toning, <code>D026</code>
+muted/bleach toning, <code>D027</code> fine sharpness,
+<code>D028</code>/<code>D029</code> contrast highlight/shadow</strong>,
+<code>D02A</code> composition adjustment, <code>D02B</code> focus
+assist, <code>D02C</code> cross process, <code>D02D</code> filter-effect
+user setting, <code>D035</code>–<code>D039</code> live view and
+movie.</p>
+<h3 id="34-image-settings-cannot-be-written-over-usb-read">3.4 Image
+settings cannot be written over USB (Read)</h3>
+<ul>
+<li><code>DeviceProperty::SetDevicePropertyValue</code>
+(<code>0x68dd4</code>) accepts only <code>0x5011</code> (date and time)
+and <code>0xD406</code>. For anything else it logs "device prop not
+supported".</li>
+<li><code>SetIpcuSaturation</code>, <code>SetIpcuHue</code>,
+<code>SetIpcuKey</code>, <code>SetIpcuContrast*</code>,
+<code>SetIpcuCustomImage</code>, <code>SetIpcuCrossProcessType</code>,
+<code>SetIpcu*Toning</code> and <code>SetIpcuWhiteBalance</code> exist,
+but no <code>bl</code> calls them and no pointer refers to them. They
+are dead code shared with Pentax bodies.</li>
+</ul>
+<h3 id="35-camera-as-connected-measured-2026-10-14">3.5 Camera as
+connected (measured, 2026-10-14)</h3>
+<p>USB ID <code>0x25FB:0x2115</code>, <code>bcdDevice</code>
+<code>0x0160</code>, interface class 6 (still image), USB 2.0.
+<code>gphoto2 --summary</code> reports vendor extension
+"microsoft.com/DeviceServices" and only properties <code>5001</code>,
+<code>5011</code>, <code>D406</code>, <code>D407</code> and
+<code>D303</code>, with no capture. No vendor command was sent.</p>
+<h2 id="4-the-factory-channel-0x90900x9095">4. The factory channel
+(<code>0x9090</code>–<code>0x9095</code>)</h2>
+<ul>
+<li>In <code>mtpd</code>, <code>RicohCommand::doGeneralPurpose*</code>
+pass their parameters through to
+<code>CameraController::GetFactoryCommand()</code>
+(<code>FactoryCommandImpl::GPSetValue(data, len, u16, u16)</code>,
+<code>GPGetData(u32, u32, …)</code>, <code>GPRunFunc(u8, u8)</code>).
+<code>mtpd</code> does no checks of its own. (Read)</li>
+<li>On the RTOS side the commands reach
+<code>HostCameraCommand::FactoryCommandServer</code> and
+<code>FactoryContentsControlService</code>. Each service checks a
+category byte at command <code>+0xaf8</code> and an item byte at
+<code>+0xaf9</code>. About 25 functions dispatch on the category: for
+example AF handles <code>0x15</code>, <code>0x25</code> and
+<code>0x40</code> (<code>0x533ebab8</code>), and BE-still handles 2 and
+3 (<code>0x535250d4</code>). (Read)</li>
+<li>The services around it hold adjustment data: AWB gain, SR gyro and
+hall, ND filter, black level, defect pixels, Wi-Fi info. A "Factory
+Menu" also exists. (Structural)</li>
+<li>No category for image-control or menu settings was found. (Inferred;
+not every dispatcher was decoded.)</li>
+<li>Whether <code>mtpd</code> accepts these operations only in vendor
+mode was not checked.</li>
+</ul>
+<p>Writing to this channel without a full map risks overwriting
+calibration data. It is not a route for recipes.</p>
+<h2 id="5-what-a-recipe-manager-can-do-on-a-gr-iiix">5. What a recipe
+manager can do on a GR IIIx</h2>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Full recipe?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Built-in RAW development (playback)</td>
+<td>Yes, but the parameters are entered by hand; only Custom 1/2 are
+stored</td>
+</tr>
+<tr>
+<td>Wi-Fi API</td>
+<td>Switches image control (incl. Custom 1/2), WB mode and exposure</td>
+</tr>
+<tr>
+<td>USB, standard or vendor mode</td>
+<td>No (§3.4)</td>
+</tr>
+<tr>
+<td>USB factory channel</td>
+<td>Not usable for this (§4)</td>
+</tr>
+<tr>
+<td>Modified firmware</td>
+<td>In principle; the update check and recovery are unknown</td>
+</tr>
+</tbody>
+</table>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>

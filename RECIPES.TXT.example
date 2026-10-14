@@ -1,0 +1,25 @@
+# GR IIIx recipe library (example). Copy to RECIPES.TXT and edit.
+# Check with: python3 tools/recipes.py RECIPES.TXT.example
+format 1
+
+[Warm Slide]
+control = positive_film
+saturation = +1
+hue = -1
+contrast = +1
+contrast_highlight = -1
+shading = -1
+clarity = +1
+
+[Street Mono]
+control = hard_monotone
+key = -1
+contrast = +2
+toning = sepia
+grain = 2
+
+[Muted Everyday]
+control = standard
+saturation = -1
+contrast = -1
+clarity = -1

@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GR IIIx vs GR IV: firmware comparison</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#gr-iiix-vs-gr-iv-firmware-comparison"
+id="toc-gr-iiix-vs-gr-iv-firmware-comparison">GR IIIx vs GR IV: firmware
+comparison</a>
+<ul>
+<li><a href="#1-container-format-identical-read"
+id="toc-1-container-format-identical-read">1. Container format:
+identical (Read)</a></li>
+<li><a href="#2-platform-read-from-each-firmwares-device-tree"
+id="toc-2-platform-read-from-each-firmwares-device-tree">2. Platform
+(Read, from each firmware's device tree)</a></li>
+<li><a href="#3-rtos-image-read" id="toc-3-rtos-image-read">3. RTOS
+image (Read)</a></li>
+<li><a href="#4-where-the-two-firmwares-differ-by-subsystem-structural"
+id="toc-4-where-the-two-firmwares-differ-by-subsystem-structural">4.
+Where the two firmwares differ by subsystem (Structural)</a></li>
+<li><a href="#5-af-at-address-level-read-unless-marked"
+id="toc-5-af-at-address-level-read-unless-marked">5. AF at address level
+(Read, unless marked)</a>
+<ul>
+<li><a href="#51-identical-code" id="toc-51-identical-code">5.1
+Identical code</a></li>
+<li><a href="#52-same-algorithm-small-change"
+id="toc-52-same-algorithm-small-change">5.2 Same algorithm, small
+change</a></li>
+<li><a href="#53-phase-detection-what-changed"
+id="toc-53-phase-detection-what-changed">5.3 Phase detection: what
+changed</a></li>
+<li><a href="#54-not-compared" id="toc-54-not-compared">5.4 Not
+compared</a></li>
+</ul></li>
+<li><a href="#6-product-records-read" id="toc-6-product-records-read">6.
+Product records (Read)</a></li>
+<li><a href="#7-open" id="toc-7-open">7. Open</a></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="gr-iiix-vs-gr-iv-firmware-comparison">GR IIIx vs GR IV: firmware
+comparison</h1>
+<p>Offline comparison of two official firmware packages. Both were
+downloaded from Ricoh with <code>tools/fetch_firmware.py</code> and
+decoded with <code>tools/gr_unpack.py</code>. Nothing was run on a
+camera.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>GR IIIx</th>
+<th>GR IV</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Package</td>
+<td><code>gr3x_v160.zip</code> → <code>fwdc243b.bin</code></td>
+<td><code>gr4_v111.zip</code> → <code>fwdc248b.bin</code></td>
+</tr>
+<tr>
+<td>Header model / version</td>
+<td><code>GR IIIx</code> / 1.60.11.17</td>
+<td><code>GR IV</code> / 1.11.10.7</td>
+</tr>
+<tr>
+<td>File size</td>
+<td>30,391,788 bytes</td>
+<td>38,648,776 bytes</td>
+</tr>
+<tr>
+<td>Decoded payload</td>
+<td>59,718,388 bytes</td>
+<td>67,948,280 bytes</td>
+</tr>
+<tr>
+<td>Whole-file 32-bit word sum</td>
+<td>0 (mod 2³²)</td>
+<td>0 (mod 2³²)</td>
+</tr>
+</tbody>
+</table>
+<p>The GR IV file's SHA-256 (<code>a2f664df…655f</code>) and its decoded
+payload (<code>c4e597c7…33ae</code>) match the sample documented in <a
+href="https://github.com/radium-wang/ricoh-gr4-firmware-analysis-and-feature-expansion">radium-wang's
+GR IV repository</a>. The GR IV side of this comparison therefore
+describes the same binary that project analysed.</p>
+<p>Evidence labels match <a
+href="af-subsystem.html">af-subsystem</a>:</p>
+<ul>
+<li><strong>Read</strong> means taken from the data or code
+directly.</li>
+<li><strong>Inferred</strong> means interpreted.</li>
+</ul>
+<h2 id="1-container-format-identical-read">1. Container format:
+identical (Read)</h2>
+<ul>
+<li>Both files have the same 0x80-byte header: model string at
+<code>0x08</code>, and a four-part version at <code>0x38</code>.</li>
+<li>Both use the same frame/LZ compression, as documented by <a
+href="https://github.com/yeahnope/gr_unpack">yeahnope/gr_unpack</a> for
+the GR III.</li>
+<li>Both carry a whole-file additive checksum.</li>
+<li>One decoder handles both unchanged.</li>
+</ul>
+<h2 id="2-platform-read-from-each-firmwares-device-tree">2. Platform
+(Read, from each firmware's device tree)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>GR IIIx</th>
+<th>GR IV</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Device-tree model</td>
+<td><code>Socionext SC2000A EVB w/ RTOS and NETSEC</code></td>
+<td>same</td>
+</tr>
+<tr>
+<td>CPU listed for Linux</td>
+<td>one Cortex-A7 (<code>cpu@3</code>)</td>
+<td>same</td>
+</tr>
+<tr>
+<td>Linux memory</td>
+<td>one region: <code>0x40000000</code>, <strong>191 MiB</strong></td>
+<td>two regions: <strong>48 + 112 MiB</strong>, plus a <strong>31
+MiB</strong> RAM block device (<code>slram</code>) between them</td>
+</tr>
+<tr>
+<td>Linux root file system</td>
+<td>eMMC partition (<code>root=/dev/mmcblk0p2</code>); gzip-compressed
+cpio initramfs in the payload</td>
+<td>RAM-backed MTD (<code>root=/dev/mtdblock0</code>,
+<code>slram</code>); the payload uses xz/squashfs-style packing</td>
+</tr>
+<tr>
+<td>Kernel log level</td>
+<td><code>loglevel=4</code></td>
+<td><code>loglevel=0</code></td>
+</tr>
+</tbody>
+</table>
+<p>Both cameras use the same SoC (Milbeaut M10V / SC2000A) and the same
+two-OS split. A real-time OS on the image side runs capture, AF, AE and
+UI. Linux on one A7 core handles Wi-Fi, Bluetooth and USB. The notable
+change is where Linux boots from:</p>
+<ul>
+<li>the GR IIIx mounts its root file system from eMMC;</li>
+<li>the GR IV unpacks it into a 31 MiB RAM disk, which costs Linux about
+31 MiB of its address map (160 MiB usable, compared with 191 MiB).</li>
+</ul>
+<p>The GR IV repository reports 2 GiB of physical LPDDR3 from a
+teardown. Neither device tree shows how the rest of physical memory is
+split between the domains.</p>
+<h2 id="3-rtos-image-read">3. RTOS image (Read)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>GR IIIx</th>
+<th>GR IV</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Load address</td>
+<td><code>0x53000000</code></td>
+<td><code>0x53000000</code></td>
+</tr>
+<tr>
+<td>File offset in decoded payload</td>
+<td><strong><code>0x10870</code></strong></td>
+<td><strong><code>0x17D10</code></strong></td>
+</tr>
+<tr>
+<td><code>src/*.cpp</code> names</td>
+<td>856</td>
+<td>909</td>
+</tr>
+</tbody>
+</table>
+<p>|</p>
+<p>Source-file and class names come from the strings in each RTOS image
+(<code>tools/strings_index.py</code>, output in
+<code>work/index-gr3x.json</code> and <code>work/index-gr4.json</code>).
+Name counts are <strong>Structural</strong>: they show which code exists
+in the image, not what it does.</p>
+<h2 id="4-where-the-two-firmwares-differ-by-subsystem-structural">4.
+Where the two firmwares differ by subsystem (Structural)</h2>
+<p>Source files (<code>src/*.cpp</code>) present in only one image:</p>
+<table>
+<thead>
+<tr>
+<th>Subsystem</th>
+<th>GR IIIx only</th>
+<th>GR IV only</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AF</td>
+<td><code>AeAfLinkData</code>, <code>AfLensDrive</code>,
+<code>AfLromCommunication</code>, <code>ZafContrast</code>,
+<code>ZafControl</code>, <code>ZafDefine</code>, <code>ZafFilter</code>,
+<code>ZafShadingAlgorithm</code></td>
+<td><code>AfCommonFilter</code>, <code>CafProjectDependData</code></td>
+</tr>
+<tr>
+<td>Lens</td>
+<td><code>LensInformation</code>,
+<code>LensVignettingCorrection</code></td>
+<td><code>LensFocusControl</code>, <code>LensState</code>,
+<code>ShutterControl</code></td>
+</tr>
+<tr>
+<td>AE / AWB</td>
+<td><code>AeApertureCorrect</code>, <code>AeChangeData</code>,
+<code>AeCheckComposition</code></td>
+<td><code>AeFlashAlgorithm</code></td>
+</tr>
+<tr>
+<td>Stabilisation</td>
+<td><code>SricCenterDriveControlService</code></td>
+<td><code>SricClient</code>, <code>SricFwUpdate</code> and seven
+<code>SricM343*</code> files</td>
+</tr>
+<tr>
+<td>Communication</td>
+<td><code>WlanRfPower</code>, <code>WlanRfTestCommand</code></td>
+<td><code>WlanRegionCodeInfo</code></td>
+</tr>
+<tr>
+<td>System / UI</td>
+<td>none</td>
+<td><code>BootOther</code>, <code>MeasurementController</code></td>
+</tr>
+</tbody>
+</table>
+<p>What stands out:</p>
+<ul>
+<li><strong>Stabilisation is the largest hardware change.</strong> The
+GR IV image carries a full <code>SricM343*</code> client stack: gyro and
+accelerometer requests, LPF and filter data, firmware update, memory
+read/write and boot commands. The class count for the subsystem goes
+from 44 to 114. The GR IIIx has no such stack. Read as
+<strong>Inferred</strong>: the GR IV talks to a separate stabilisation
+controller over a command protocol.</li>
+<li><strong>The AF code is mostly the same, with targeted
+changes.</strong> The GR IV image keeps every <code>Zaf*</code> and
+<code>Caf*</code> class that the algorithm needs. The names missing from
+it (<code>ZafPixelInfo</code>, <code>ZafSensorInfo</code>,
+<code>ZafPulse</code>, <code>ZafShadingAlgorithm</code>,
+<code>AfLensDrive</code>, <code>AfLensCommunication</code>) do not mean
+the algorithm is gone. §5 compares the code at address level.</li>
+<li><strong>AF log strings match.</strong> Both images have the same 12
+AF log strings.</li>
+<li><strong>Lens and shutter control moved into new classes</strong> on
+the GR IV (<code>LensState</code>, <code>LensFocusControl</code>,
+<code>ShutterControl</code>), while the GR IIIx has
+<code>LensFmmCalc</code>, <code>LensInformation</code> and
+<code>LensLromData</code>. The GR IIIx AF document's lens-calibration
+path (<code>AfLromCommunication</code>,
+<code>CafIndividualLensCorrect</code>, see §3.8b) therefore may not
+carry over to the GR IV unchanged.</li>
+<li><strong>UI grew</strong> (about 286 to 312 classes) with user-mode
+box, outdoor monitor, mobile-app guide and measurement controllers.</li>
+<li><strong>The Wi-Fi RF test code differs</strong>
+(<code>WlanRfPower</code>, <code>WlanRfTestCommand</code> only on the GR
+IIIx; <code>WlanRegionCode*</code> only on the GR IV).</li>
+</ul>
+<h2 id="5-af-at-address-level-read-unless-marked">5. AF at address level
+(Read, unless marked)</h2>
+<p><strong>Method.</strong> Both RTOS images were disassembled with
+Capstone. Every function was fingerprinted by its instruction sequence
+with addresses removed. The 75 functions that <a
+href="af-subsystem.html">af-subsystem</a> cites by address were then
+matched to the GR IV image, and their instruction sequences and
+immediate constants were compared by hand where they differed. Load
+<code>tools/rtos_analysis.py</code> with
+<code>GR_FW=work/fwdc248b-v111.decoded.bin</code> and set
+<code>OFF = 0x17D10</code> to read the GR IV image with the same
+helpers.</p>
+<p>Function addresses are GR IIIx → GR IV.</p>
+<h3 id="51-identical-code">5.1 Identical code</h3>
+<p>These functions have the same instructions and the same
+constants:</p>
+<table>
+<thead>
+<tr>
+<th>Function (section in <a
+href="af-subsystem.html">af-subsystem</a>)</th>
+<th>GR IIIx</th>
+<th>GR IV</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Broadcast helpers (5.1)</td>
+<td><code>0x533e5ccc</code>, <code>0x533e6084</code>,
+<code>0x533e6980</code>, <code>0x533e72d0</code></td>
+<td><code>0x535e3f64</code>, <code>0x535e4350</code>,
+<code>0x535e4c48</code>, <code>0x535e54dc</code></td>
+</tr>
+<tr>
+<td>Equiangular (V-line) sub-sample fit (3.9)</td>
+<td><code>0x533e9ef0</code></td>
+<td><code>0x535e6ea0</code></td>
+</tr>
+<tr>
+<td>Parabolic 64-bit sub-sample fit (3.9)</td>
+<td><code>0x533e9f78</code></td>
+<td><code>0x535e6f2c</code></td>
+</tr>
+<tr>
+<td>Phase-block lookup for contrast AF (5.4)</td>
+<td><code>0x534007c4</code></td>
+<td><code>0x535f8a04</code></td>
+</tr>
+<tr>
+<td>Wobble step decision (4.5b)</td>
+<td><code>0x534100dc</code></td>
+<td><code>0x536066e8</code></td>
+</tr>
+<tr>
+<td>Contrast-history gate (4.5b)</td>
+<td><code>0x534110e4</code></td>
+<td><code>0x53607680</code></td>
+</tr>
+<tr>
+<td>Wobbling peak estimate (4.5)</td>
+<td><code>0x53412110</code></td>
+<td><code>0x536086b0</code></td>
+</tr>
+<tr>
+<td>Wobble history length (4.5b)</td>
+<td><code>0x53412418</code></td>
+<td><code>0x536089b8</code></td>
+</tr>
+<tr>
+<td>Wobble driver (4.5b)</td>
+<td><code>0x53414750</code></td>
+<td><code>0x5360ace8</code></td>
+</tr>
+<tr>
+<td>Wobble start and stop thresholds (4.5b)</td>
+<td><code>0x53415674</code>, <code>0x53415858</code></td>
+<td><code>0x5360bc08</code>, <code>0x5360bdec</code></td>
+</tr>
+</tbody>
+</table>
+<p>So the wobble logic, its constants (3, 2.5, 0.012, …) and both
+sub-sample shift formulas carry over unchanged. The 300·N µm and 1000·N
+µm scan margins (5.5) use the same arithmetic
+(<code>400 × field / 40 × 10</code>) in the GR IV main contrast routine
+(<code>0x535fc24c</code>), with different structure offsets.</p>
+<h3 id="52-same-algorithm-small-change">5.2 Same algorithm, small
+change</h3>
+<ul>
+<li><strong>Peak fit</strong> (<code>CalcQuadraticCurve</code>, 4.2,
+<code>0x5340ed10</code> → <code>0x53605668</code>). The three-point
+parabola uses the same floating-point operations. The GR IIIx converts
+the result to an integer (<code>vcvt.u32.f64</code>) before returning
+it. The GR IV returns the <code>double</code> unrounded. I did not trace
+what the callers do with the extra precision.</li>
+<li><strong>Phase result used by contrast AF</strong> (5.4,
+<code>0x533fed24</code> → <code>0x535f7550</code>). The
+<code>reliability ≤ 128</code> test is still there
+(<code>cmp #0x80</code> on the block record). The per-block record
+stride goes from 7 to 9 (Inferred: two more bytes of per-block
+data).</li>
+<li><strong>Wobble history evaluation</strong> (<code>0x53413588</code>
+→ <code>0x53609660</code>) grows from 1,138 to 1,442 instructions. The
+old thresholds are still present. About 50 new constants are added
+(values such as 120, 15, 14 and 13), so this function gained logic. I
+did not decode it.</li>
+</ul>
+<h3 id="53-phase-detection-what-changed">5.3 Phase detection: what
+changed</h3>
+<p><strong>Correlation metric.</strong> The NEON kernels use the same
+<code>vabd.u16</code> / <code>vpadal</code> (SAD) and <code>vmlal</code>
+(SSD) pattern with a lane-mask tail. The GR IIIx has four kernels
+(<code>0x533e807c</code>, <code>0x533e8130</code>,
+<code>0x533e8234</code>, <code>0x533e8304</code>). The GR IV has three
+(<code>0x535e6328</code>, <code>0x535e63f4</code>,
+<code>0x535e6504</code>), and its first kernel uses a fixed one-sample
+offset (<code>add r0, r3, #2</code>) where the GR IIIx takes it as a
+parameter.</p>
+<p><strong>Pre-filter.</strong> This changed most.</p>
+<ul>
+<li>The GR IIIx has four levels (spacing 2^k, k = 0…3) of both the [1 2
+1] smoothing and the [1 0 −1] difference kernel, plus a dispatcher that
+picks the level (<code>0x5341c884</code>). The higher levels use
+<code>vld2</code>/<code>vld4</code> loads.</li>
+<li>The GR IV has no <code>vld4.16</code> in the AF code and no level
+query. The difference kernel (<code>0x535e6d24</code>,
+<code>y = x + 0x8000 − x[i+2s]</code>) is one generic routine, and its
+dispatcher (<code>0x53612830</code>) calls it with fixed arguments. A
+single <code>vhadd</code> smoothing kernel remains
+(<code>0x535e6bbc</code>).</li>
+<li>In the GR IIIx 1.60 the level function (<code>0x5341c884</code>)
+always returns 0, so only the level-0 kernels ever run there too. The GR
+IV removed dead code; it did not lose a working feature (Read).</li>
+</ul>
+<p><strong>Reliability grading.</strong> The GR IIIx compares fixed
+limits in code (64, 15, 128, 192, 216, 256, 11; §3.8). In the GR IV,
+<code>0x5360f894</code> computes the same two quantities and compares
+them with values read from tables (<code>0x53eaa840</code> and
+<code>0x53eaba58</code>, indexed by a mode byte):</p>
+<ul>
+<li>The error limit is <strong>64</strong> and the valley-depth limit is
+<strong>16</strong> (a depth of 15 or less is shallow). Both equal the
+GR IIIx values for the first four table entries.</li>
+<li>The relaxed limits 128, 192, 216 and 256 and the near-focus
+exception (|shift| ≤ 11) do not appear as constants anywhere in the GR
+IV AF code. If they exist, they now live in data. The table entries
+after the fourth are other data and were not interpreted.</li>
+<li>The <strong>error term is computed differently</strong>:
+<code>max(0, S₀ − |S₊ − S₋| / 2)</code>, where S₀, S₋ and S₊ are the SAD
+values at and beside the minimum. The GR IIIx uses
+<code>SADmin − H0</code> with the noise floor <code>H0</code> of §3.7.
+The GR IV has no <code>CalcH0</code> string or function. The depth is
+<code>SADneighbour − S₀</code>, with no <code>H0</code>. Reading this as
+a V-shape residual is Inferred.</li>
+<li>The candidate-selection cross-multiplication (<code>SAD₁·C₂</code>
+vs <code>SAD₂·C₁</code>) is still present
+(<code>0x5360f98c</code>).</li>
+</ul>
+<p><strong>New phase-detection features (Structural).</strong> The GR IV
+<code>ZafOperationAccessor</code> has backup fields with no GR IIIx
+counterpart: <code>ZafDeadZoneCorr*</code> (Exe, Defocus,
+DefocusBeforeUpdate, PredictorOk, ReliabilityData, BottomLinearNg),
+<code>ZafSaturation</code>, <code>ZafDefect</code>,
+<code>FakeBottomDoubt</code>, <code>BottomLinearNg</code>,
+<code>BottomLinearShiftZero</code>, <code>Gradation</code>,
+<code>DifferentialFilterExe</code>, <code>WaveLevelGapCorrectExe</code>,
+<code>NormalContrastOk</code> and <code>FinalContrastOk</code>. From the
+names, the GR IV detects saturated pixels, treats a "fake" or
+linear-bottom SAD minimum as doubtful, and has a dead-zone correction of
+the defocus. No call site for these setters was found by a static scan,
+so where they are set is not known. The per-block summary flag word
+(<code>0x53613d3c</code>) combines 16 boolean getters, against 20 in the
+GR IIIx (<code>0x5341fea4</code>); the two sets of bits differ.</p>
+<p><strong>Shift → defocus</strong> (§3.8b). The GR IV keeps the
+structure <code>K = table[index] × polynomial(x)</code>
+(<code>0x53614688</code>) but generalises it:</p>
+<ul>
+<li>a four-entry ring buffer of lens-state snapshots feeds the
+calculation;</li>
+<li>parameters are chosen by a lens-type byte, with a coefficient triple
+per type and bank, and the table is indexed by a bank bit plus the
+aperture;</li>
+<li>the aperture index is clamped to 24…64 for types 0–3 (GR IIIx:
+24…96);</li>
+<li>97-entry tables are used, as in the GR IIIx.</li>
+</ul>
+<p>I did not decode what feeds <code>x</code> or the table contents, so
+the GR IV calibration values are not compared with the GR IIIx ones.</p>
+<h3 id="54-not-compared">5.4 Not compared</h3>
+<p>The ISO-dependent AF filter strength (4.6), the scan stepping (4.7),
+the continuous-AF re-trigger (5.6, <code>0x53405e8c</code> →
+<code>0x53601914</code>, a similar but modified function) and the motor
+parameters were not compared in detail.</p>
+<h2 id="6-product-records-read">6. Product records (Read)</h2>
+<p>The GR IV firmware carries the same kind of product records as §3.8b
+of the AF document, and contains six of them:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Tag</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GR IV</td>
+<td><code>GR_IV</code></td>
+</tr>
+<tr>
+<td>GR IV HDF</td>
+<td><code>GR4_HDF</code></td>
+</tr>
+<tr>
+<td>GR IV Monochrome</td>
+<td><code>GR_IVM</code></td>
+</tr>
+<tr>
+<td>GR IV EXT256</td>
+<td><code>GR4_HC1</code></td>
+</tr>
+<tr>
+<td><strong>GR IVx</strong></td>
+<td><code>GR_IVX</code></td>
+</tr>
+<tr>
+<td><strong>GR IVx HDF</strong></td>
+<td><code>GR4x_HDF</code></td>
+</tr>
+</tbody>
+</table>
+<p>The image's start-up code logs the project type as one of
+<code>KB636</code>, <code>KB636 Ext256</code>, <code>KB648</code>,
+<code>KB649</code>, <code>KB650</code> or <code>KB652</code>. The GR
+IIIx image had only <code>KB609</code> and <code>KB588</code>. I did not
+map project codes to cameras. That the strings exist does not show that
+a GR IVx has been sold.</p>
+<h2 id="7-open">7. Open</h2>
+<ul>
+<li>The GR IV AF thresholds after the fourth table entry, and where the
+relaxed reliability limits went.</li>
+<li>What the new dead-zone, saturation and "fake bottom" fields do, and
+where they are set.</li>
+<li>The GR IV shift → defocus calibration tables against the GR IIIx
+ones.</li>
+<li>The remaining items in 5.4.</li>
+<li>What the <code>SricM343</code> command set does beyond its
+names.</li>
+</ul>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>

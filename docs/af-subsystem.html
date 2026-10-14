@@ -1,0 +1,1633 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GR IIIx autofocus: how it works</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#gr-iiix-autofocus-how-it-works"
+id="toc-gr-iiix-autofocus-how-it-works">GR IIIx autofocus: how it
+works</a>
+<ul>
+<li><a href="#1-where-af-runs" id="toc-1-where-af-runs">1. Where AF
+runs</a></li>
+<li><a href="#2-object-graph-structural"
+id="toc-2-object-graph-structural">2. Object graph (Structural)</a></li>
+<li><a href="#3-phase-detection-af-zaf-step-by-step"
+id="toc-3-phase-detection-af-zaf-step-by-step">3. Phase-detection AF
+(Zaf): step by step</a>
+<ul>
+<li><a href="#31-data-source" id="toc-31-data-source">3.1 Data
+source</a></li>
+<li><a
+href="#32-per-block-pipeline-zafoperationsequence-read-0x53425380"
+id="toc-32-per-block-pipeline-zafoperationsequence-read-0x53425380">3.2
+Per-block pipeline (<code>ZafOperationSequence</code>, Read,
+<code>0x53425380</code>)</a></li>
+<li><a href="#33-level-matching-correctwavelevelgap-read-0x5341e6a0"
+id="toc-33-level-matching-correctwavelevelgap-read-0x5341e6a0">3.3 Level
+matching (<code>CorrectWaveLevelGap</code>, Read,
+<code>0x5341e6a0</code>)</a></li>
+<li><a href="#34-filtering-zaffilter-read-0x5341e8b4-0x5341e300"
+id="toc-34-filtering-zaffilter-read-0x5341e8b4-0x5341e300">3.4 Filtering
+(<code>ZafFilter</code>, Read, <code>0x5341e8b4</code>,
+<code>0x5341e300</code>)</a></li>
+<li><a href="#35-correlation-zafcorrelation-read-main-loop-0x5341ae00"
+id="toc-35-correlation-zafcorrelation-read-main-loop-0x5341ae00">3.5
+Correlation (<code>ZafCorrelation</code>, Read, main loop
+<code>0x5341ae00</code>)</a></li>
+<li><a href="#36-verification-pass-0x5341a650-read"
+id="toc-36-verification-pass-0x5341a650-read">3.6 Verification pass
+(<code>0x5341a650</code>, Read)</a></li>
+<li><a href="#37-noise-floor-h0-0x5341a8b4-read"
+id="toc-37-noise-floor-h0-0x5341a8b4-read">3.7 Noise floor, "H0"
+(<code>0x5341a8b4</code>, Read)</a></li>
+<li><a href="#38-reliability-grading-0x5341a9d0-read"
+id="toc-38-reliability-grading-0x5341a9d0-read">3.8 Reliability grading
+(<code>0x5341a9d0</code>, Read)</a></li>
+<li><a href="#38b-shift--defocus-the-conversion-factor-read-zaflensinfo"
+id="toc-38b-shift--defocus-the-conversion-factor-read-zaflensinfo">3.8b
+Shift → defocus: the conversion factor (Read,
+<code>ZafLensInfo</code>)</a></li>
+<li><a href="#39-zafpredictor-precise-shift-not-subject-motion-read"
+id="toc-39-zafpredictor-precise-shift-not-subject-motion-read">3.9
+<code>ZafPredictor</code>: precise shift, not subject motion
+(Read)</a></li>
+</ul></li>
+<li><a href="#4-contrast-af-caf" id="toc-4-contrast-af-caf">4. Contrast
+AF (Caf)</a>
+<ul>
+<li><a
+href="#41-lens-position-of-a-sample-calcintegralcenterpulse-read-0x533f979c"
+id="toc-41-lens-position-of-a-sample-calcintegralcenterpulse-read-0x533f979c">4.1
+Lens position of a sample (<code>CalcIntegralCenterPulse</code>, Read,
+<code>0x533f979c</code>)</a></li>
+<li><a href="#42-peak-fitting-calcquadraticcurve-read-0x5340ed10"
+id="toc-42-peak-fitting-calcquadraticcurve-read-0x5340ed10">4.2 Peak
+fitting (<code>CalcQuadraticCurve</code>, Read,
+<code>0x5340ed10</code>)</a></li>
+<li><a href="#43-other-caf-pieces" id="toc-43-other-caf-pieces">4.3
+Other Caf pieces</a></li>
+<li><a href="#44-noise-normalised-contrast-0x5340b3ac-read"
+id="toc-44-noise-normalised-contrast-0x5340b3ac-read">4.4
+Noise-normalised contrast (<code>0x5340b3ac</code>, Read)</a></li>
+<li><a href="#45-wobbling-peak-estimate-0x53412110-read"
+id="toc-45-wobbling-peak-estimate-0x53412110-read">4.5 Wobbling peak
+estimate (<code>0x53412110</code>, Read)</a></li>
+<li><a href="#45b-wobble-control-read"
+id="toc-45b-wobble-control-read">4.5b Wobble control (Read)</a></li>
+<li><a
+href="#46-iso-dependent-af-filter-strength-ppuafdftuning-read-0x536ede50"
+id="toc-46-iso-dependent-af-filter-strength-ppuafdftuning-read-0x536ede50">4.6
+ISO-dependent AF filter strength (<code>PPU/AFDFTuning</code>, Read,
+<code>0x536ede50</code>)</a></li>
+<li><a href="#47-scan-stepping-read" id="toc-47-scan-stepping-read">4.7
+Scan stepping (Read)</a></li>
+<li><a href="#48-named-debug-fields-read"
+id="toc-48-named-debug-fields-read">4.8 Named debug fields
+(Read)</a></li>
+</ul></li>
+<li><a
+href="#5-how-the-camera-decides-between-phase-and-contrast-af-read"
+id="toc-5-how-the-camera-decides-between-phase-and-contrast-af-read">5.
+How the camera decides between phase and contrast AF (Read)</a>
+<ul>
+<li><a href="#51-the-arbiter-only-routes"
+id="toc-51-the-arbiter-only-routes">5.1 The arbiter only routes</a></li>
+<li><a
+href="#52-the-phase-process-doesnt-drive-the-lens-contrast-af-jumps-to-its-target"
+id="toc-52-the-phase-process-doesnt-drive-the-lens-contrast-af-jumps-to-its-target">5.2
+The phase process doesn't drive the lens; contrast AF jumps to its
+target</a></li>
+<li><a href="#53-how-contrast-af-reads-phase-results"
+id="toc-53-how-contrast-af-reads-phase-results">5.3 How contrast AF
+reads phase results</a></li>
+<li><a href="#54-direction-hint-0x533fd7c8"
+id="toc-54-direction-hint-0x533fd7c8">5.4 Direction hint
+(<code>0x533fd7c8</code>)</a></li>
+<li><a href="#55-phase-detection-limits-the-contrast-scan"
+id="toc-55-phase-detection-limits-the-contrast-scan">5.5 Phase detection
+limits the contrast scan</a></li>
+<li><a href="#56-re-triggering-in-continuous-af-0x53405e8c"
+id="toc-56-re-triggering-in-continuous-af-0x53405e8c">5.6 Re-triggering
+in continuous AF (<code>0x53405e8c</code>)</a></li>
+<li><a href="#57-other-components-structural"
+id="toc-57-other-components-structural">5.7 Other components
+(Structural)</a></li>
+</ul></li>
+<li><a href="#6-putting-it-together-one-af-cycle"
+id="toc-6-putting-it-together-one-af-cycle">6. Putting it together: one
+AF cycle</a></li>
+<li><a href="#7-what-this-means-in-practice"
+id="toc-7-what-this-means-in-practice">7. What this means in
+practice</a></li>
+<li><a href="#8-still-open" id="toc-8-still-open">8. Still open</a></li>
+<li><a href="#9-where-the-time-goes" id="toc-9-where-the-time-goes">9.
+Where the time goes</a></li>
+<li><a href="#10-software-levers-and-practical-implications"
+id="toc-10-software-levers-and-practical-implications">10. Software
+levers and practical implications</a>
+<ul>
+<li><a href="#101-where-the-policy-lives"
+id="toc-101-where-the-policy-lives">10.1 Where the policy lives</a></li>
+<li><a href="#102-why-none-of-them-is-an-easy-win"
+id="toc-102-why-none-of-them-is-an-easy-win">10.2 Why none of them is an
+easy win</a></li>
+<li><a href="#103-what-an-owner-can-do-today"
+id="toc-103-what-an-owner-can-do-today">10.3 What an owner can do
+today</a></li>
+<li><a href="#104-is-the-arithmetic-a-bottleneck-structural-no-timings"
+id="toc-104-is-the-arithmetic-a-bottleneck-structural-no-timings">10.4
+Is the arithmetic a bottleneck? (Structural, no timings)</a></li>
+<li><a
+href="#105-which-software-changes-would-be-felt-inferred-no-timings"
+id="toc-105-which-software-changes-would-be-felt-inferred-no-timings">10.5
+Which software changes would be felt (Inferred, no timings)</a></li>
+<li><a href="#106-lever-1-and-2-in-numbers-bounds-not-measurements"
+id="toc-106-lever-1-and-2-in-numbers-bounds-not-measurements">10.6 Lever
+1 and 2 in numbers (bounds, not measurements)</a></li>
+</ul></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="gr-iiix-autofocus-how-it-works">GR IIIx autofocus: how it
+works</h1>
+<p>Firmware: GR IIIx 1.60 (<code>fwdc243b.bin</code>, version
+1.60.11.17), analysed offline with <code>tools/rtos_analysis.py</code>
+(Capstone disassembly of the RTOS image). Nothing was run on or written
+to a camera.</p>
+<p><strong>Evidence labels</strong></p>
+<ul>
+<li><strong>Read</strong>: I disassembled the function and the statement
+describes what the code does.</li>
+<li><strong>Structural</strong>: taken from class names, dependency
+assertions (<code>m_X != NULL</code>), function-name strings or log
+strings; the code itself was not read line by line.</li>
+<li><strong>Inferred</strong>: the role follows from names plus standard
+camera-AF practice.</li>
+</ul>
+<p>Addresses are virtual addresses in the RTOS image (load base
+<code>0x53000000</code>, file offset <code>0x10870</code> in the decoded
+payload). They are given so the work can be checked. They are not needed
+to understand the text.</p>
+<hr />
+<h2 id="1-where-af-runs">1. Where AF runs</h2>
+<p>The Socionext Milbeaut SC2000A runs two systems (Structural, from the
+device tree):</p>
+<table>
+<thead>
+<tr>
+<th>Domain</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RTOS</td>
+<td>Sensor readout, image pipeline, AE/AWB, <strong>all AF
+code</strong>, lens, stabilisation, UI</td>
+</tr>
+<tr>
+<td>Linux (1 × Cortex-A7, 191 MiB)</td>
+<td>Wi-Fi, Bluetooth, USB/MTP, smartphone API; relays settings such as
+AF mode or area</td>
+</tr>
+</tbody>
+</table>
+<p>The AF code is C++ (about 900 functions across 43 source files). It
+uses fixed-point integer maths for phase detection, NEON SIMD for the
+inner loops, and double-precision floating point for contrast AF and
+curve fitting (Read).</p>
+<h2 id="2-object-graph-structural">2. Object graph (Structural)</h2>
+<p>Each class's <code>Initialize()</code> asserts its dependencies are
+non-null. Those assertions give the exact wiring:</p>
+<pre><code>AfCyclic ──► AfArbitrate ──► ZafProcess ──► ZafOperation ──► ZafOperationAlgorithm ──► ZafOperationSequence
+   │             │                 │              │                                           │
+   │             ├─► CafProcess    ├─► ZafControl ├─► ZafWaveData ──► ZafShadingAlgorithm      ├─► ZafFilter
+   │             ├─► OtherafProcess├─► ZafDebug   ├─► ZafInformation(Collector)                ├─► ZafContrast
+   │             ├─► AfLensControl                                                            ├─► ZafCorrelation
+   │             └─► AfFactoryCommand                                                         ├─► ZafDefocus ─► ZafLensInfo
+   ├─► AfPanDetect                                                                            └─► ZafPredictor
+   └─► AfOtherAccess ──► HybridAfInfo, LiveViewInformation, CommonPropertyIf, CameraLog
+
+AfLensControl ──► AfLensDrive, LensFocusControl, MotorOperationManager, LensFmmCalc,
+                  LromCommunication(+Ex), LensDataBuilder, CafIndividualLensCorrect, AfAdjust
+CafWobbling   ──► AfLensControl, CafAfMacro
+AfAdjust      ──► AfLensCorrectData, ZAfShadingCorrect      (factory calibration data)
+CaptureZafInterface ──► CapturePpuPdspService               (phase-pixel data from the image processor)
+StatAfInterface     ──► StatMacroService                    (contrast statistics hardware, channels AF_CH0/AF_CH1)</code></pre>
+<ul>
+<li><code>AfCyclic</code> is the per-frame loop.</li>
+<li><code>AfArbitrate</code> owns the three algorithm families:
+<strong>Zaf</strong> (phase detection), <strong>Caf</strong> (contrast)
+and <strong>Otheraf</strong> (other modes). It routes messages to all
+three; it does not choose between them (see section 5).</li>
+<li><code>ZafProcess</code>, <code>CafProcess</code> and
+<code>OtherafProcess</code> are message-driven tasks (37-method vtables;
+they dispatch on an "execute pattern" and log
+<code>Unknown Exexute Pattern</code> for anything else) (Read).</li>
+</ul>
+<h2 id="3-phase-detection-af-zaf-step-by-step">3. Phase-detection AF
+(Zaf): step by step</h2>
+<h3 id="31-data-source">3.1 Data source</h3>
+<p>Phase-pixel values come from the image processor ("PPU PDSP") through
+<code>CaptureZafInterface</code>, not from the CPU reading the sensor
+(Structural). <code>ZafWaveData</code> stores them per
+<strong>block</strong>: <code>StoreZafData</code>,
+<code>SetZafDataBuffer</code>, <code>ConvertZAfDataAddBuffer</code>
+(pixel adding/binning), <code>IsZafDefectBlock</code> (blocks with
+defective phase pixels are skipped),
+<code>GetAreaAutoAddress</code>/<code>GetSelectAddress</code>
+(Structural).</p>
+<p>The frame is divided into Zaf blocks. <code>ZafDefine</code> maps
+block IDs to Auto-area IDs and position IDs.
+<code>ZafOperationConfig</code> sets block positions for
+<code>SELECT</code>, <code>FACE</code>, <code>LEFT_EYE</code> and
+<code>RIGHT_EYE</code> (<code>SetFaceBlockPositionX</code>,
+<code>SetZafBlockPositionInfo</code>) (Structural). So face and eye AF
+works by moving which phase-detection blocks are evaluated.</p>
+<h3 id="32-per-block-pipeline-zafoperationsequence-read-0x53425380">3.2
+Per-block pipeline (<code>ZafOperationSequence</code>, Read,
+<code>0x53425380</code>)</h3>
+<p>For each block:</p>
+<ol type="1">
+<li>Fetch the "A" (left-looking) and "B" (right-looking) signals and
+their lengths.</li>
+<li>Reject signals of <strong>fewer than 20 samples</strong>.</li>
+<li>Filter (3.4), check contrast (<code>ZafContrast</code>), correlate
+(3.5), grade (3.7), convert to defocus (3.8) and hand off to prediction
+(3.9).</li>
+<li>A configuration flag sets the correlation <strong>edge
+margin</strong> to 2 or 4 samples. That many samples are dropped at each
+end of the signal before correlating.</li>
+</ol>
+<h3 id="33-level-matching-correctwavelevelgap-read-0x5341e6a0">3.3 Level
+matching (<code>CorrectWaveLevelGap</code>, Read,
+<code>0x5341e6a0</code>)</h3>
+<p>The A and B pixels see different amounts of light (shading). With the
+two signal levels <code>La</code>, <code>Lb</code> and a gap value
+<code>g</code>, every 16-bit sample of the brighter signal is scaled:
+<code>x ← x − x·g / max(La, Lb)</code>. Negative results are clamped to
+0 and trigger an assertion. <code>ZafShadingAlgorithm</code> supplies
+the per-lens-position shading data from factory calibration
+(<code>ZAfShadingCorrect</code>) (Structural).</p>
+<h3 id="34-filtering-zaffilter-read-0x5341e8b4-0x5341e300">3.4 Filtering
+(<code>ZafFilter</code>, Read, <code>0x5341e8b4</code>,
+<code>0x5341e300</code>)</h3>
+<p>Two NEON stages, each with four variants selected by a level
+<code>k ∈ {0,1,2,3}</code> (tap spacing <code>s = 2^k</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Kernel</th>
+<th>Code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Smoothing</td>
+<td><code>y[i] = (x[i] + 2·x[i+s] + x[i+2s]) / 2</code>, i.e. <strong>[1
+2 1]</strong> (edges: <code>2·x</code>)</td>
+<td><code>0x533e89d4</code> … <code>0x533e929c</code></td>
+</tr>
+<tr>
+<td>Difference</td>
+<td><code>y[i] = x[i] − x[i+2s] + 32768</code>, i.e. <strong>[1 0
+−1]</strong> with an offset to stay unsigned (edges: 32768)</td>
+<td><code>0x533e9864</code> … <code>0x533e9ce0</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>In firmware 1.60 only variant <code>k = 0</code> ever runs
+(Read).</strong> The level is chosen by <code>0x5341c884</code>, which
+is <code>mov r0, #0; bx lr</code>: it always returns 0. The
+<code>k = 1…3</code> kernels (the <code>vld2</code>/<code>vld4</code>
+ones) are dead code. The GR IV image has no such kernels (see <a
+href="gr3x-vs-gr4.html">gr3x-vs-gr4</a> §5.3), which fits.</p>
+<p>Together these form a <strong>band-pass edge filter</strong>.
+Correlation therefore matches edges, not brightness. The wider spacings
+pick out coarser detail, which helps when the image is strongly
+defocused (Inferred for that purpose).</p>
+<h3 id="35-correlation-zafcorrelation-read-main-loop-0x5341ae00">3.5
+Correlation (<code>ZafCorrelation</code>, Read, main loop
+<code>0x5341ae00</code>)</h3>
+<ul>
+<li>Up to 256 samples per signal. The edge margin (2 or 4 samples, see
+3.2) is removed from each end.</li>
+<li>The search runs over shifts from 0 up to a maximum, which is
+<strong>capped at half the signal length</strong>. Results are stored in
+a table of up to 62 entries. Negative shifts are handled by offsetting A
+rather than B.</li>
+<li><strong>Metric</strong> (<code>0x533e81c8</code>, NEON): for each
+8-sample block <code>vabd.u16</code> computes |A−B|. The code then
+accumulates <strong>SAD</strong> (sum of absolute differences) and, in
+parallel, <strong>SSD</strong> (sum of their squares). A lane-mask table
+handles the last partial block.</li>
+<li><strong>Minimum detection</strong> (<code>0x533e836c</code>,
+<code>0x533e8390</code>): a sliding 3-value window. The middle value is
+a minimum if it is not greater than either neighbour and the three are
+not all equal.</li>
+<li><strong>Multiple minima</strong>: every minimum found increments a
+counter. More than one sets a flag, which marks repetitive patterns such
+as fences or tiles where phase detection is ambiguous.</li>
+</ul>
+<h3 id="36-verification-pass-0x5341a650-read">3.6 Verification pass
+(<code>0x5341a650</code>, Read)</h3>
+<p>If enabled for the mode, SAD is recomputed at the <strong>five shifts
+around the minimum (±2)</strong> on a second data set of the same block.
+The local-minimum test is repeated at min−1, min and min+1, so a minimum
+that doesn't reproduce is discarded.</p>
+<h3 id="37-noise-floor-h0-0x5341a8b4-read">3.7 Noise floor, "H0"
+(<code>0x5341a8b4</code>, Read)</h3>
+<p>Before grading, the code estimates how much SAD is plain sensor noise
+at perfect alignment. The firmware calls this <code>H0</code> (hence the
+<code>CalcH0</code> string):
+<code>H0 = C × h0Bias / m_OverlapContrastBase.ave</code>.</p>
+<ul>
+<li><p><code>C</code> is the overlap contrast of the signals.</p></li>
+<li><p><code>h0Bias</code> is <strong>halved when the contrast is below
+a configured threshold</strong>.</p></li>
+<li><p>If the average is 0, the code logs
+<code>m_OverlapContrastBase.ave:0 h0Bias:%d overlapContrast:%d</code>
+(names from that warning string).</p></li>
+<li><p>The graded error is <code>SADmin − H0</code>, clamped at
+0.</p></li>
+<li><p>If <code>H0</code> is at least as large as the SAD step to the
+neighbouring shift, the "clear minimum" flag is cleared.</p></li>
+</ul>
+<h3 id="38-reliability-grading-0x5341a9d0-read">3.8 Reliability grading
+(<code>0x5341a9d0</code>, Read)</h3>
+<p>Everything is in <strong>1/64 fixed point</strong>, normalised by the
+contrast <code>C</code>:</p>
+<ul>
+<li><em>Normalised error</em> <code>E = 64·(SADmin − H0) / C</code></li>
+<li><em>Valley depth</em>
+<code>D = 64·(SADneighbour − (SADmin − H0)) / C</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>E ≤ 64</code> (1.0)</td>
+<td>high reliability</td>
+</tr>
+<tr>
+<td><code>E ≤ 128</code> (2.0)</td>
+<td>usable, provided <code>D</code> is deep enough</td>
+</tr>
+<tr>
+<td><code>D ≤ 15</code></td>
+<td>flagged as a shallow valley (low confidence)</td>
+</tr>
+<tr>
+<td>relaxed modes</td>
+<td>limits 192 / 216 / 256 (3.0 / 3.375 / 4.0) apply</td>
+</tr>
+<tr>
+<td>near focus (</td>
+<td>shift</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Candidate selection</strong> (<code>0x5341ad78</code>):
+candidates are compared by cross-multiplication (<code>SAD₁·C₂</code> vs
+<code>SAD₂·C₁</code>), so the lowest <strong>contrast-normalised
+SAD</strong> wins. That makes blocks with strong texture and blocks with
+weak texture comparable.</p>
+<h3 id="38b-shift--defocus-the-conversion-factor-read-zaflensinfo">3.8b
+Shift → defocus: the conversion factor (Read,
+<code>ZafLensInfo</code>)</h3>
+<p>The phase shift is turned into defocus with a factor <code>K</code>
+(<code>0x53420a68</code>):</p>
+<pre><code>K[i] = round( TSF[i] × correctionCoefficient )
+correctionCoefficient = c0 + c1·e + c2·e²        (float polynomial)
+e = EyeRelief [µm] = 1,024,000 / v               (0x534208f0; v from lens control)</code></pre>
+<ul>
+<li><p><strong><code>TSF[i]</code></strong> (<code>m_cnTsfTable</code>)
+is a <strong>read-only table in the firmware</strong>: about 97 16-bit
+values in a geometric progression. It is <strong>not</strong> a
+per-block table, as an earlier version of this document said.</p></li>
+<li><p><strong>The index is the aperture in 1/8-stop steps (Av ×
+8).</strong> The evidence is Read, the conclusion Inferred but well
+supported:</p>
+<ul>
+<li><code>ResetLensInfo</code> (<code>0x53420b60</code>) clamps the
+index to <strong>24…96</strong>. That is Av 3.0…12, i.e. f/2.8…f/64, and
+f/2.8 is the GR IIIx's widest aperture. Above 96 it asserts.</li>
+<li>A sibling table read with the same index (<code>0x53c1848c</code>)
+<strong>halves exactly every 8 entries</strong> (682 → 341 → 170 → 85).
+That is ∝ 2^−Av = 1/N², which only works if 8 entries = 1 stop.</li>
+<li>The firmware uses 1/8-stop units elsewhere too (ISO in 4.6).</li>
+<li><code>ResetLensInfo</code> also stores <code>79954 / K</code>, plus
+two more values from per-aperture tables (<code>0x53c18374</code>,
+nearly constant at 110–112, and <code>0x53c1848c</code>).</li>
+</ul></li>
+<li><p><strong>One firmware, two cameras (Read).</strong> The "GR IIIx"
+firmware file also contains full <strong>GR III</strong> support.</p>
+<ul>
+<li>The build is project <code>KB609</code> (build paths
+<code>/mnt/d/dev/M10V/KB609/…</code>; M10V is the Milbeaut chip).</li>
+<li>At start-up <code>SystemConfig</code> reads a hardware ID. The value
+0x24C (= 588) sets project type 1 (<code>KB588</code>); anything else is
+type 0 (<code>KB609</code>) (<code>SystemConfig_GetProjectType</code>,
+<code>0x536b4140</code>).</li>
+<li><code>SystemConfig_SetupProjectProperty</code>
+(<code>0x536b41d0</code>) then selects a <strong>product record</strong>
+(filter flag, spec start year/month, name, tag). Project
+<code>KB588</code> gets the GR III or GR III HDF record;
+<code>KB609</code> gets the GR IIIx or GR IIIx HDF record. An ID from
+the adjustment data chooses the HDF variant: 0x1320E / 0x13216 for the
+III, 0x1329A / 0x1329C for the IIIx.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Record (<code>0x53d62…</code>)</th>
+<th>Filter flag</th>
+<th>Since</th>
+<th>Name</th>
+<th>Tag</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>…194</code></td>
+<td>0</td>
+<td>2019-01</td>
+<td>GR III</td>
+<td><code>GR_III</code></td>
+</tr>
+<tr>
+<td><code>…1a8</code></td>
+<td>1</td>
+<td>2024-04</td>
+<td>GR III HDF</td>
+<td><code>GR3_HDF</code></td>
+</tr>
+<tr>
+<td><code>…1fc</code></td>
+<td>0</td>
+<td>2021-01</td>
+<td>GR IIIx</td>
+<td><code>GR_IIIX</code></td>
+</tr>
+<tr>
+<td><code>…124</code></td>
+<td>1</td>
+<td>2024-04</td>
+<td>GR IIIx HDF</td>
+<td><code>GR3x_HDF</code></td>
+</tr>
+</tbody>
+</table>
+<p>So <strong><code>KB588</code> = GR III (28 mm lens)</strong> and
+<strong><code>KB609</code> = GR IIIx (40 mm lens)</strong>. The filter
+flag is the HDF (built-in diffusion filter) marker, going by the
+adjacent <code>SystemConfig_GetLensFilterType</code>. The AF tables
+follow the project type, i.e. the lens:</p>
+<table>
+<thead>
+<tr>
+<th>Camera</th>
+<th>TSF table</th>
+<th>Correction polynomial <code>c(e)</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>GR IIIx</strong> (<code>KB609</code>)</td>
+<td><code>0x53c18f88</code>: 28, 30, 32 … 12324, 13139</td>
+<td><code>−0.15122 + 3.8743·10⁻⁵·e + 7.1339·10⁻¹⁰·e²</code></td>
+</tr>
+<tr>
+<td>GR III (<code>KB588</code>)</td>
+<td><code>0x53c19058</code>: 24, 26, 28 … 17232, 18466</td>
+<td><code>−0.15295 + 3.6492·10⁻⁵·e + 1.1200·10⁻⁹·e²</code></td>
+</tr>
+</tbody>
+</table>
+<p>At the default <code>e = 22,260 µm</code>, <code>c ≈ 1.06</code> (GR
+IIIx) or <code>1.21</code> (GR III); the squared term contributes about
+0.35 and 0.55. HDF and non-HDF bodies of the same model share these AF
+tables.</p></li>
+<li><p><strong>EyeRelief</strong> is the lens's <strong>exit pupil
+distance</strong>. It is the optical quantity that sets the
+phase-detection baseline, which is why the factor must follow
+it.</p></li>
+<li><p>If the lens reports <code>v = 0</code>, <code>e</code> defaults
+to <strong>22,260 µm (22.3 mm)</strong>.</p></li>
+<li><p>A negative polynomial logs
+<code>correctionCoefficient:%f EyeRelief:%d[um]</code> and falls back to
+a constant.</p></li>
+<li><p><code>K = 0</code> logs
+<code>TSF:0 m_cnTsfTable[%d]:%d correctionCoefficient:%f</code> and is
+forced to 1.</p></li>
+</ul>
+<p><code>ZafPulse</code> then expresses the defocus in motor pulses
+(Structural).</p>
+<h3 id="39-zafpredictor-precise-shift-not-subject-motion-read">3.9
+<code>ZafPredictor</code>: precise shift, not subject motion (Read)</h3>
+<p>Despite its name, this class predicts the <strong>exact (sub-sample)
+phase shift</strong>, not where a moving subject will be.</p>
+<ul>
+<li><p><strong>Driver</strong> (<code>0x53426084</code>): runs the
+correlation. If it finds several minima and none verified, it checks for
+a left/right level mismatch (<code>0x5341e588</code>). If there is one,
+it applies <code>CorrectWaveLevelGap</code> (3.3) and <strong>correlates
+again</strong>.</p></li>
+<li><p><strong>Sub-sample shift</strong> (<code>0x53425ef4</code>): from
+the SAD values S₋, S₀, S₊ around the integer minimum <code>n</code>, in
+1/256-sample units:</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Used when</th>
+<th>Formula</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Equiangular (V-line) fit (<code>0x533e9ef0</code>)</td>
+<td>the verification pass (3.6) succeeded</td>
+<td><code>n·256 ± 128·(S₋−S₊) / (max(S₋,S₊) − S₀)</code></td>
+</tr>
+<tr>
+<td>Parabolic fit (<code>0x533e9f78</code>, 64-bit)</td>
+<td>otherwise</td>
+<td><code>n·256 + 128·(S₊−S₋) / (2S₀ − S₊ − S₋)</code></td>
+</tr>
+</tbody>
+</table>
+<p>A centre offset of <code>128 &gt;&gt; level</code> (from the filter
+level in 3.4) is removed. The result then passes a validity check
+(<code>0x53425e20</code>), which treats |shift| ≤ 11 as near
+focus.</p></li>
+<li><p><strong>Candidate list</strong> (<code>0x53425dc0</code>): for
+repetitive patterns, an interpolated shift is stored for every extra
+minimum (up to 50).</p></li>
+</ul>
+<p>No subject-motion model was found in the phase-detection code.</p>
+<h2 id="4-contrast-af-caf">4. Contrast AF (Caf)</h2>
+<p>This is where the floating-point work is: roughly 1,500 VFP
+instructions across the contrast units, compared with almost none in the
+phase-detection units (Read, counted; unit boundaries are
+approximate).</p>
+<h3
+id="41-lens-position-of-a-sample-calcintegralcenterpulse-read-0x533f979c">4.1
+Lens position of a sample (<code>CalcIntegralCenterPulse</code>, Read,
+<code>0x533f979c</code>)</h3>
+<p>The lens moves <strong>while the frame is being exposed</strong>.
+Each contrast value is therefore assigned the lens position at the
+<strong>middle of the sensor's integration (exposure) time</strong>. The
+code takes the positions at the start and end of the frame and a timing
+value (converted with an integer ÷1000), then interpolates linearly:
+<code>p = p₀ + (p₁ − p₀) · t_center / T_frame</code>. This avoids a
+systematic focus error when scanning quickly. <code>T_frame</code> is
+the sensor VSync period (<code>lVsyncTimeUs</code>); if it is 0 the code
+substitutes <strong>4997 µs (200 fps)</strong> and logs a warning.</p>
+<h3 id="42-peak-fitting-calcquadraticcurve-read-0x5340ed10">4.2 Peak
+fitting (<code>CalcQuadraticCurve</code>, Read,
+<code>0x5340ed10</code>)</h3>
+<p>Three (position, contrast) samples around the maximum are fitted with
+a parabola <code>y = ax² + bx + c</code> in double precision, and the
+vertex <code>−b / 2a</code> is returned as the in-focus pulse position.
+Safeguards:</p>
+<ul>
+<li>a zero determinant is replaced by <code>DBL_EPSILON</code>, with a
+warning;</li>
+<li><code>|a|</code> below a threshold (a flat curve) returns the middle
+sample;</li>
+<li><code>a ≥ 0</code> (no maximum) also returns the middle sample.</li>
+</ul>
+<h3 id="43-other-caf-pieces">4.3 Other Caf pieces</h3>
+<ul>
+<li><strong>Units</strong> (<code>GetLensDriveDistanceUm</code>, Read,
+<code>0x533fac3c</code>): <code>µm = 1000 · pulses / m_wLensKfp</code>.
+If the lens reports 0, it defaults to
+<strong><code>m_wLensKfp = 100</code></strong> pulses per mm (10 µm per
+pulse) and logs a warning.</li>
+<li><strong>Diagnostics</strong> (Structural): the log line
+<code>ZAF[%d] PEAK:%d LOG:%d(%d,%d,%d) AREA:%d/%d GAIN:%3.2f F:%d(AVE:%d) N:%d(AVE:%d)</code>
+shows that contrast AF evaluates every Zaf block too. For each block it
+tracks peak position, recent samples, area, gain and running averages
+(<code>F</code>, <code>N</code>; possibly far/near).</li>
+<li><strong>Multi-area edge check</strong> (Structural):
+<code>CheckCafMultiAfAreaEdgeV</code>.</li>
+<li><strong>Wobbling</strong> (<code>CafWobbling</code>, Structural plus
+log strings): small lens oscillations for continuous AF and movie. It
+uses the same <code>CalcQuadraticCurve</code>. It has modes named
+<code>Near</code>, <code>Middle</code>, <code>SuperLow</code>,
+<code>Joint Quick Return</code> and <code>Pint Shift</code>. "Pint
+Shift" (<em>pint</em> = focus in Japanese camera jargon) is a
+per-direction pulse offset:
+<code>[CAF] Set %s Dir PintShift %d[pulse]</code>. It most likely
+compensates gear backlash (Inferred).</li>
+<li><strong>Sensor mode</strong> (log strings):
+<code>[CAF] Set CIS DriveMode Fix CAF High</code> / <code>Fix LV</code>.
+Contrast AF can force a faster sensor readout so more samples arrive per
+second.</li>
+<li><strong>Per-unit correction</strong> (Structural):
+<code>CafIndividualLensCorrect</code>. <strong>Macro</strong>:
+<code>CafAfMacro</code>.</li>
+<li><strong>AF window geometry</strong> (Read, <code>0x533ff16c</code>
+with <code>0x533fd754</code>): each AF window is computed from a grid of
+cells (horizontal × vertical counts). It is then <strong>widened by 4 %
+of its size on each side</strong> (0 % or 2 % in some grid modes), and
+the left and top edges are clamped at 0. This is window geometry, not a
+contrast margin.</li>
+</ul>
+<h3 id="44-noise-normalised-contrast-0x5340b3ac-read">4.4
+Noise-normalised contrast (<code>0x5340b3ac</code>, Read)</h3>
+<p>Before contrast values are compared, they are corrected for sensor
+noise using per-readout-mode parameters. The row is chosen by the sensor
+drive mode, or row 5 when a flag is set:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Table A (slope, offset)</th>
+<th>Table B (4 values)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0, 1</td>
+<td>0.164, 0.040</td>
+<td>370, 64, 4984, 2500</td>
+</tr>
+<tr>
+<td>2</td>
+<td>0.108, 0.350</td>
+<td>386, 64, 15308, 9200</td>
+</tr>
+<tr>
+<td>3</td>
+<td>0.101, 0.380</td>
+<td>567, 64, 25632, 14500</td>
+</tr>
+<tr>
+<td>4</td>
+<td>0.151, −0.081</td>
+<td>532, 64, 15308, 7641</td>
+</tr>
+<tr>
+<td>5</td>
+<td>0.097, 0.014</td>
+<td>532, 64, 15308, 4819</td>
+</tr>
+</tbody>
+</table>
+<p>The exact formula (Read). The inputs are contrast <code>C</code>,
+brightness sum <code>Y</code>, number of pixels <code>n</code> (used as
+<code>a = n/4</code>), and gain <code>g</code> in Q13 fixed point. Table
+B's columns are <code>B0…B3</code>:</p>
+<pre><code>b      = Y / a                                   brightness per unit area
+g&#39;     = (g / 8192) / B1                         B1 = 64 → gain normaliser
+offset = A.off + A.slope · √(b · g/8192)         √ = fdlibm sqrt (0x53153ba8 → 0x53155a90)
+noise  = g&#39; · a · 4·B3/B2 · log₂( g&#39; · B0 / b )
+result = ((C − noise) / a − offset) / b</code></pre>
+<p>So the columns act as: <code>B0</code> a signal-level constant inside
+the log (370–567); <code>B1 = 64</code> a gain normaliser; and
+<code>B3/B2</code> the noise scale per readout mode. Calling
+<code>B0</code> a black level and <code>B2</code> a white level is
+Inferred.</p>
+<p>The <code>√(signal × gain)</code> term is the classic
+<strong>shot-noise</strong> form, and the <code>log₂</code> term scales
+with gain. Together they give a physically sensible noise floor that
+grows with brightness and ISO. The helper was identified as fdlibm's
+<code>__ieee754_sqrt</code> from its bit-by-bit loop: 22 iterations over
+the high word starting at <code>r = 0x00200000</code>, then 32 over the
+low word, plus the <code>x·x + x</code> inf/NaN path.</p>
+<h3 id="45-wobbling-peak-estimate-0x53412110-read">4.5 Wobbling peak
+estimate (<code>0x53412110</code>, Read)</h3>
+<p>For each AF area (a stride of 0x78 bytes per area), the wobble code
+fits a parabola through three (lens position, contrast) samples. The
+samples may be <strong>unevenly spaced</strong>, so it uses divided
+differences:</p>
+<pre><code>s₁ = (y₀ − y₋)/h₋ ,  s₂ = (y₀ − y₊)/h₊ ,  a = (s₂ − s₁)/(h₊ − h₋)
+peak = x₀ + round( −0.5 · (s₂ − h₊·a) / a )   (sign adjusted for scan direction)</code></pre>
+<ul>
+<li>Spacings with |h| below a threshold are replaced by ±1.</li>
+<li>If the curvature has the wrong sign (no maximum), the <strong>best
+of the three samples</strong> is used instead.</li>
+<li>The peak position and peak contrast are stored per area.</li>
+<li>Input is either the scan history or the latest wobble triple.</li>
+<li>Duplicate lens positions are skipped when choosing the three
+samples.</li>
+</ul>
+<h3 id="45b-wobble-control-read">4.5b Wobble control (Read)</h3>
+<p>The 920-instruction wobble driver (<code>0x53414750</code>) is mostly
+per-area array bookkeeping. The decisions sit in two helpers:</p>
+<ul>
+<li><p><strong>Step decision</strong> (<code>0x534100dc</code>), per AF
+area. It first computes a noise threshold <code>T</code> through the
+noise model in 4.4.</p>
+<ul>
+<li>If <code>|C_now − C_prev| ≤ T</code>, it returns <strong>3
+(hold)</strong>: the change is just noise.</li>
+<li>If contrast fell, it <strong>reverses</strong> direction.</li>
+<li>Otherwise it <strong>keeps</strong> the direction.</li>
+</ul></li>
+<li><p><strong>Contrast-history gate</strong> (<code>0x534110e4</code>).
+An area passes if its contrast per quarter area exceeds
+<strong>2896</strong>, or if the <strong>max/min ratio</strong> of its
+recent contrast history exceeds <strong>3.0</strong>.</p></li>
+<li><p><strong>Other tunables</strong> sit in a block at
+<code>0x53c16efc…0x53c16f58</code>. Each is classified by how it is used
+(Read); none of them has a name in the firmware:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Used in</th>
+<th>Role (from use)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10</td>
+<td><code>0x53413588</code>, <code>0x53412418</code></td>
+<td>history length: ring-buffer count and offset</td>
+</tr>
+<tr>
+<td>3, 3</td>
+<td><code>0x53414750</code></td>
+<td>confirmation counts: a state change needs ≥ 3 hits</td>
+</tr>
+<tr>
+<td>2.5</td>
+<td><code>0x53414750</code></td>
+<td>ratio test <code>value &gt; 2.5 × reference</code></td>
+</tr>
+<tr>
+<td>1.15, 2.99, 0.02, 0.008, 0.001</td>
+<td><code>0x53413588</code></td>
+<td>ratio thresholds and small tolerances in the history evaluation</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>0x534112bc</code></td>
+<td>multiplier for a count limit</td>
+</tr>
+<tr>
+<td>10 (second)</td>
+<td><code>0x534112bc</code></td>
+<td>multiplier on a per-area 16-bit value</td>
+</tr>
+<tr>
+<td>100</td>
+<td><code>0x534112bc</code></td>
+<td>constant <strong>bias added to per-area weighted sums</strong>
+(<code>Σ w·x + 100</code>), a regulariser that keeps them away from
+zero</td>
+</tr>
+<tr>
+<td>0.6, 0.2</td>
+<td><code>0x5340f7a8</code></td>
+<td>initial per-area weights set at wobble start</td>
+</tr>
+<tr>
+<td>64.0</td>
+<td><code>0x53412e44</code></td>
+<td><strong>low-contrast floor</strong>: contrast per quarter area must
+be ≥ 64 (and a counter ≤ 7) for a wobble check to proceed</td>
+</tr>
+<tr>
+<td>5 (u16 at <code>…6f40</code>)</td>
+<td><code>0x53412d18</code></td>
+<td>count threshold compared with a per-area counter</td>
+</tr>
+<tr>
+<td>6 or 3 (u16 at <code>…6f54</code> / <code>…6f1c</code>)</td>
+<td><code>0x53412b8c</code></td>
+<td>count limit, chosen by a flag</td>
+</tr>
+<tr>
+<td>0.012</td>
+<td><code>0x5340f624</code>, <code>0x53415674</code>,
+<code>0x53415858</code></td>
+<td>small threshold in wobble start and stop</td>
+</tr>
+</tbody>
+</table></li>
+</ul>
+<p>Peak estimation for the wobble is the unevenly spaced parabola in
+4.5.</p>
+<h3
+id="46-iso-dependent-af-filter-strength-ppuafdftuning-read-0x536ede50">4.6
+ISO-dependent AF filter strength (<code>PPU/AFDFTuning</code>, Read,
+<code>0x536ede50</code>)</h3>
+<p>The image processor's AF detection filter ("AFDF") is re-tuned by
+sensitivity:</p>
+<ul>
+<li>The current gain, in 1/8-stop steps with ±0.0625 rounding, indexes a
+1/3-stop ISO scale.</li>
+<li>Each ISO band reads its own tuning byte.</li>
+<li>Level 0/1/2 maps to register value 1/2/3; anything higher maps to
+5.</li>
+</ul>
+<p>So at higher ISO the hardware contrast filter is set differently,
+most likely smoother to fight noise (Inferred).</p>
+<h3 id="47-scan-stepping-read">4.7 Scan stepping (Read)</h3>
+<p>The lens moves continuously while frames are being exposed, which is
+exactly why <code>CalcIntegralCenterPulse</code> (4.1) exists. The
+spacing between contrast samples is therefore <strong>motor speed ×
+frame period</strong>, and the code also works with explicit
+<strong>step widths in motor pulses</strong>:</p>
+<ul>
+<li><strong>Base step width:</strong> <code>CafStepWidth</code> (field
+<code>+0x43e6</code>, named by the debug writer in 4.8) is set once at
+start-up and never changed. The start-up code stores the word
+<code>0x000D8000</code> at <code>+0x43e4</code>, so the half-word at
+<code>+0x43e6</code> is <strong>13 pulses</strong>. Neighbouring
+defaults: <code>+0x43e2</code> = 21, <code>+0x43da</code> =
+<code>+0x43de</code> = 3.</li>
+<li><strong>Aperture-scaled step</strong> (<code>0x533fc0c0</code>):
+<code>step = round( lensValue × √N × 0.06 × 4.8 )</code>, with
+<code>N = 2^(Av/2)</code>.
+<ul>
+<li><code>lensValue</code> comes from lens control
+(<code>0x533ec1b4</code>); in one mode it is halved.</li>
+<li>The step grows with <strong>√N</strong>: stopped down, the depth of
+focus is larger, so the scan can take bigger steps.</li>
+<li>In motor mode 2 the step is instead a fixed <strong>8
+pulses</strong>, or a global override.</li>
+<li><code>0x533fc350</code> then adds this aperture term (× 8) to
+<code>CafStepWidth</code>.</li>
+</ul></li>
+<li><strong>Focus distance, not speed:</strong> motor parameters
+<code>0x5207</code>/<code>0x5227</code> return the <strong>current and
+target focus distance</strong> (Read, units Inferred).
+<code>MotorControl</code> (<code>0x536f7bc4</code> /
+<code>0x536f7c34</code>) takes the current position (<code>+0x84</code>)
+or the target position (<code>+0x3bc</code>), converts it with per-mode
+piecewise quadratic tables (<code>0x536f7944</code>), and multiplies by
+<strong>1000</strong>.
+<ul>
+<li>The reverse conversion (<code>0x536f7b58</code>) divides by 1000,
+clamps against a near-limit table and returns pulses.</li>
+<li>Out-of-range positions return error codes in the 0xE000000x
+range.</li>
+<li>The firmware's <code>CommonFocusPosMm</code> naming suggests
+<strong>millimetres</strong>.</li>
+<li>The callers' <code>(1,000,000 + v/2) / v</code> is therefore
+<strong>1000 / distance in metres</strong>, i.e. an inverse distance
+(milli-dioptres). Focus position is close to linear in that. An earlier
+version of this document read it as a motor speed.</li>
+</ul></li>
+<li><strong>Absolute moves</strong> go through motor parameter
+<code>0x5924</code>, the <strong>target position</strong> (5.2). One
+path moves to "stored position − 8" (<code>0x53406a98</code>),
+consistent with approaching from one side to take up backlash
+(Inferred).</li>
+</ul>
+<h3 id="48-named-debug-fields-read">4.8 Named debug fields (Read)</h3>
+<p>The contrast-AF debug writer (<code>0x53409000</code>) saves each
+state field under a name string, which gives real names for many fields.
+Selection:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Name</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>+0x4390</code></td>
+<td><code>[CafFlameRate]</code> (sic): frame rate used in 5.6</td>
+</tr>
+<tr>
+<td><code>+0x4398</code></td>
+<td><code>[VsyncTimeUs]</code>: <code>T_frame</code> in 4.1</td>
+</tr>
+<tr>
+<td><code>+0x439c</code> / <code>+0x43a0</code></td>
+<td><code>[IntegTimeUs]</code>, <code>[Gain]</code></td>
+</tr>
+<tr>
+<td><code>+0x43ac</code></td>
+<td><code>[CurrentFno10]</code>: the <code>x</code> in the 5.5
+margin</td>
+</tr>
+<tr>
+<td><code>+0x14a94</code></td>
+<td><code>[CafStepWidth]</code> (copied from <code>+0x43e6</code>)</td>
+</tr>
+<tr>
+<td><code>+0x43ec</code></td>
+<td><code>[InnerLensKfpMultiple]</code> (from a lens/motor
+parameter)</td>
+</tr>
+<tr>
+<td><code>+0x438</code>, <code>+0x43c</code> (base
+<code>+0xc000</code>)</td>
+<td><code>[DetectEndFocusPulse]</code>, <code>[InFocusPulse]</code></td>
+</tr>
+</tbody>
+</table>
+<p>Other names in the same record: <code>[Search_Speed]</code>,
+<code>[SearchKvalue240conv]</code>, <code>[BackLash]</code>,
+<code>[LromBackLash]</code>, <code>[InfAround]</code>,
+<code>[NearAround]</code>, <code>[ContrastAfSearchPath]</code>,
+<code>[SearchFarDir]</code>, <code>[ElegantQuickSearch]</code>,
+<code>[DicisionGrade]</code> (sic), <code>[ZafReliability]</code>,
+<code>[ZafDirection]</code>, <code>[ZafDefocusUm]</code>,
+<code>[ZafPeakAroundFlag]</code>, the <code>FocusShiftPulse*</code>
+family, and the eye-detection fields.</p>
+<h2 id="5-how-the-camera-decides-between-phase-and-contrast-af-read">5.
+How the camera decides between phase and contrast AF (Read)</h2>
+<p><strong>Short answer:</strong> it doesn't switch between two separate
+systems. The phase-detection process never moves the lens itself. It
+measures and publishes a result, and the contrast-AF process uses that
+result to set up and steer its own move and search.</p>
+<h3 id="51-the-arbiter-only-routes">5.1 The arbiter only routes</h3>
+<p><code>AfArbitrate</code> (member layout from its
+<code>Initialize</code>: <code>+0x58</code> contrast, <code>+0x5c</code>
+other-AF, <code>+0x60</code> phase, <code>+0x50</code> lens control,
+<code>+0x48</code> loop) is a mailbox task.</p>
+<ul>
+<li>Its message handler dispatches on 32-bit message IDs.</li>
+<li>Every broadcast helper (<code>0x533e5ccc</code>,
+<code>0x533e6084</code>, <code>0x533e6980</code>,
+<code>0x533e72d0</code>, …) calls the <strong>same</strong> virtual
+method on <strong>all three</strong> processes in turn: contrast, then
+other-AF, then phase.</li>
+<li>The only selector is <code>GetAfProcessAddress</code>
+(<code>0x533e5d6c</code>): index 0/1 → contrast, 2 → phase, 3 →
+other-AF.</li>
+</ul>
+<p>No floating point and no reliability comparison happen here.</p>
+<h3
+id="52-the-phase-process-doesnt-drive-the-lens-contrast-af-jumps-to-its-target">5.2
+The phase process doesn't drive the lens; contrast AF jumps to its
+target</h3>
+<p>The dependency assertions make this explicit:</p>
+<ul>
+<li><code>ZafProcess</code> holds the arbiter, shared state,
+<code>ZafControl</code>, <code>ZafDebug</code> and
+<code>ZafOperation</code>, and <strong>no</strong> lens control.</li>
+<li><code>OtherafProcess</code>, <code>CafWobbling</code> and the
+factory/test path hold <code>m_AfLensControl</code>.</li>
+</ul>
+<p>The phase side offers two entry points to the others
+(<code>0x53426704</code>, <code>0x53426aac</code>): enable/disable phase
+detection, and request a fresh result.</p>
+<p><strong>Contrast AF does act on the phase result directly</strong>
+(Read). When it sets up an AF area (<code>0x53406914</code> →
+<code>0x534007c4</code>), it looks up the matching phase block
+(<code>0x533fed24</code>). If that block's reliability byte is <strong>≤
+128</strong>, it calls <code>0x533ecb60</code>, which:</p>
+<ul>
+<li>writes motor parameter
+<code>0x5924 = param 0x5205 + defocus × param 0x8231 / 1000</code>,</li>
+<li>then reads back <code>1,000,000 / param 0x5227</code>.</li>
+</ul>
+<p><strong><code>0x5924</code> is the focus target position</strong>
+(Read, by units and scaling):</p>
+<ul>
+<li>Parameter <code>0x8231</code> is the lens's pulses per mm. It is the
+same value contrast AF stores as <code>m_wLensKfp</code>
+(<code>0x533f68bc</code> → <code>0x533ec1ac</code> →
+<code>0x533ed100</code>), and it turns µm into pulses in
+<code>GetLensDriveDistanceUm</code>.</li>
+<li>So <code>defocus [µm] × 0x8231 / 1000</code> is a distance in
+<strong>pulses</strong>, which means <code>0x5205</code> must be a
+position too: the current focus position.</li>
+<li><code>MotorControl</code> scales both the same way internally: the
+<code>0x5205</code> getter returns field <code>+0x84 ÷ 2</code>, and the
+<code>0x5924</code> setter stores <code>value × 2</code> at
+<code>+0x3bc</code>.</li>
+</ul>
+<p>So <strong>when a phase block is reliable, contrast AF sends the lens
+straight to the phase-detection target</strong> (current position +
+defocus in pulses). The contrast search then runs around that point
+within the phase-bounded range (5.5). The read-back
+<code>1e6 / param 0x5227</code> is the <strong>new target distance as an
+inverse distance</strong> (1000 / m), recorded for the contrast state
+(4.7).</p>
+<h3 id="53-how-contrast-af-reads-phase-results">5.3 How contrast AF
+reads phase results</h3>
+<p><code>HybridAfInfo</code> is a thin facade. Its getters forward to
+<code>ZafInformation</code>, which copies a result snapshot out under a
+mutex: the full info (0xEC0 bytes) plus a per-block table (0x508 bytes).
+One getter marks the copy as consumed, another clears it
+(<code>0x5341ed58</code>, <code>0x5341ef08</code>,
+<code>0x5341efb4</code>).</p>
+<p>Contrast AF then runs <code>0x533fd688</code>:</p>
+<ul>
+<li>If the snapshot is flagged invalid, every block entry is set to 0xFF
+(unusable), and contrast AF runs without guidance.</li>
+<li>Otherwise each block's value is converted from 1/256 fixed point
+(<code>v × 1000 / 256</code>), and so is one overall value used as a
+distance tolerance (5.5).</li>
+</ul>
+<h3 id="54-direction-hint-0x533fd7c8">5.4 Direction hint
+(<code>0x533fd7c8</code>)</h3>
+<p>Depending on a mode byte (1, 2 or 3), up to three phase candidates
+are checked. A candidate counts as usable when its reliability byte is
+<strong>≤ 128</strong>.</p>
+<ul>
+<li>Only one usable candidate: it decides the direction.</li>
+<li>Two usable: their signed values are compared (<code>≥</code> →
+direction 2, else 1).</li>
+<li>Otherwise: the <strong>sign</strong> of the signed defocus values
+decides.</li>
+<li>Nothing usable: the result is 0, meaning no hint.</li>
+</ul>
+<p>The contrast scan starts in this direction.</p>
+<h3 id="55-phase-detection-limits-the-contrast-scan">5.5 Phase detection
+limits the contrast scan</h3>
+<ul>
+<li><strong>Scan range</strong> (main contrast routine
+<code>0x53404b24</code>): lens travel so far
+(<code>GetLensDriveDistanceUm</code>) is compared with
+<code>|phase defocus| + margin</code>. Once the travel exceeds that, the
+scan state is set to end or turn.</li>
+<li><strong>Margin formula</strong> (Read):
+<ul>
+<li><code>x = round(10 · 2^(Av/2))</code>, which is <strong>10 × the
+f-number</strong> when the input is the APEX aperture value
+(<code>0x533fca84</code>, stored at contrast field
+<code>+0x43ac</code>).</li>
+<li>The debug writer names this field <code>[CurrentFno10]</code> (4.8),
+which confirms <code>x = 10·N</code>.</li>
+<li>There are two margins, both in <strong>µm</strong>. They are added
+to <code>|phase defocus|</code>, which is in µm (5.3), and compared with
+<code>GetLensDriveDistanceUm</code>.
+<ul>
+<li>Path <code>0x534051c8</code>: <code>3 × 10 × x = 300·N µm</code>.
+The multiplier is state field <code>+0x14e88</code>, and this path is
+only taken when it equals 3. It is used after a phase-guided move.
+<strong>0.84 mm at f/2.8</strong>, 1.68 mm at f/5.6.</li>
+<li>Path <code>0x534052a0</code>: <code>10 × 10 × x = 1000·N µm</code>.
+<strong>2.8 mm at f/2.8.</strong></li>
+</ul></li>
+<li>Growing linearly with N matches a depth-of-focus rule (depth ∝ N);
+that reading is Inferred.</li>
+</ul></li>
+<li><strong>Direction reversals:</strong> the scan reverses when
+sharpness falls. A counter caps this at <strong>2 reversals</strong>
+(<code>0x53405504</code>–<code>0x53405544</code>).</li>
+<li><strong>Stop test</strong> (<code>0x533faffc</code>): the travel is
+compared with limits that include <strong>twice the overall
+phase-derived value</strong>, with a frame-count timeout as a
+fallback.</li>
+<li>The peak is then fitted with the parabola from 4.2.</li>
+</ul>
+<h3 id="56-re-triggering-in-continuous-af-0x53405e8c">5.6 Re-triggering
+in continuous AF (<code>0x53405e8c</code>)</h3>
+<p>Each frame, a monitored value is compared with a stored reference as
+<code>|log₂(current / reference)|</code>. For brightness that is a
+change in stops. If the change is <strong>≥ 0.1</strong>:</p>
+<ul>
+<li>the reference is updated and a re-focus counter is incremented (at
+most 10 re-triggers);</li>
+<li>a settling delay of <code>round(fps × 5 / 30 + 0.5) + 1</code>
+frames is applied, which is about 6 frames at 30 fps;</li>
+<li>in the relevant state, a fresh phase result is requested
+(<code>0x533f1ac4</code>).</li>
+</ul>
+<p>The exact quantity being monitored is a ratio of two values the
+routine receives. That brightness is the physical meaning is
+Inferred.</p>
+<h3 id="57-other-components-structural">5.7 Other components
+(Structural)</h3>
+<ul>
+<li><strong><code>AfCyclic</code></strong> runs the per-frame loop and
+shuts down with a timeout (<code>ShutdownTimeout</code>).</li>
+<li><strong><code>AfPanDetect</code></strong> tracks release,
+movie-record and interrupt states.</li>
+<li><strong>Lens chain</strong>: <code>AfLensControl</code> →
+<code>AfLensDrive</code> → <code>MotorOperationManager</code>, with
+<code>LensFmmCalc</code> and the lens ROM data
+(<code>LromCommunication</code>, <code>LensLromData</code>). Calibration
+terms include <code>FocusOffsetInfinite/Finite</code> and the
+<code>FocusShiftPulse*</code> family.</li>
+</ul>
+<h2 id="6-putting-it-together-one-af-cycle">6. Putting it together: one
+AF cycle</h2>
+<ol type="1">
+<li><code>AfCyclic</code> ticks once per live-view frame.</li>
+<li>The image processor delivers phase-pixel data per block
+(<code>CaptureZafInterface</code>) and contrast statistics
+(<code>StatAfInterface</code>).</li>
+<li>For each selected block (area mode, face or eye position):
+<ul>
+<li>equalise the A/B levels;</li>
+<li>apply the band-pass filter;</li>
+<li>run the SAD correlation;</li>
+<li>verify the minimum;</li>
+<li>subtract the noise floor;</li>
+<li>grade reliability;</li>
+<li>convert the shift to defocus with the TSF table × exit-pupil
+correction (3.8b).</li>
+</ul></li>
+<li>The best block is the one with the lowest contrast-normalised SAD.
+Repetitive-pattern and shallow-valley flags lower confidence.</li>
+<li><code>AfArbitrate</code> broadcasts the AF request to all three
+processes.</li>
+<li>Contrast AF pulls the phase snapshot:
+<ul>
+<li>For each AF area with a reliable phase block (reliability ≤ 128) it
+sets the focus target to current position + phase defocus (5.2), a
+direct jump.</li>
+<li>It takes a start direction from the reliable candidates.</li>
+<li>It limits its scan range to the phase defocus plus a margin: 300·N
+µm after a phase-guided move, 1000·N µm otherwise.</li>
+<li>It samples sharpness, pairing each sample with the lens position at
+mid-exposure.</li>
+<li>It reverses at most twice, and fits a parabola through the top three
+samples.</li>
+<li>With no usable phase data it runs as plain contrast AF.</li>
+</ul></li>
+<li>The lens drives in pulses, with direction and aperture offsets and
+per-unit calibration applied.</li>
+</ol>
+<h2 id="7-what-this-means-in-practice">7. What this means in
+practice</h2>
+<ul>
+<li>Phase detection needs <strong>edges across the phase-pixel
+direction</strong> and at least 20 samples. Low-contrast subjects fail
+the <code>E ≤ 2.0</code> test and fall back to contrast AF, which is
+slower.</li>
+<li><strong>Repetitive patterns</strong> are detected (multiple minima)
+and handled cautiously, which is why focusing on fences, blinds or
+brickwork is slower.</li>
+<li>Contrast AF accuracy relies on the parabola fit and the mid-exposure
+position correction, which is why it is precise but needs several
+frames.</li>
+<li>On the GR IIIx, phase detection <strong>guides</strong> contrast AF
+rather than replacing it. A reliable result produces a direct jump to
+the phase target, and then the direction and a tight scan range (300·N
+µm). In the contrast path, the final position still comes from the
+contrast peak fit. That is consistent with precise focus and a short
+hunt around it. <code>OtherafProcess</code> never reads phase
+results.</li>
+<li>The GR IV runs a closely related Zaf/Caf codebase (35 shared AF
+source files). The contrast-AF and wobble code is largely identical, but
+the phase side differs: reliability limits come from tables, there is
+one filter level, and new dead-zone and saturation handling exists (<a
+href="gr3x-vs-gr4.html">gr3x-vs-gr4</a> §5). Its faster AF may therefore
+come from hardware (sensor, lens, motor, a dedicated controller), from
+these phase changes, or from both. That cannot be separated
+offline.</li>
+</ul>
+<h2 id="8-still-open">8. Still open</h2>
+<p>All points listed as open in earlier versions are now resolved: the
+motor parameters (4.7, 5.2), the maths helper (4.4), the project codes
+(3.8b), the margin units (5.5), the scan steps (4.7) and the wobble
+constants (4.5b). What remains is detail rather than mechanism:</p>
+<ul>
+<li><strong>Small tolerances:</strong> 0.001–0.02 and the 1.15 / 2.99
+ratios in 4.5b are classified by use, but not traced to individual
+decisions.</li>
+<li><strong>Distance units:</strong> "focus distance in mm" (4.7) rests
+on the ×1000 scaling and the <code>…FocusPosMm</code> naming. The motor
+parameter names themselves are not in the firmware.</li>
+<li><strong>Subject motion:</strong> a search of the AF code for
+predict/motion/velocity/ tracking strings found only backups of the
+phase predictor's sub-sample data (<code>GetPredictorDataBackup</code>,
+<code>IsPredictorOkBackup</code>). <strong>No subject-motion model was
+found</strong>; continuous AF re-triggers and wobbles instead (5.6,
+4.5b).</li>
+</ul>
+<p>These can be read with the same tools
+(<code>tools/rtos_analysis.py</code>: <code>vtables_for</code>,
+<code>report</code>, <code>show</code>).</p>
+<h2 id="9-where-the-time-goes">9. Where the time goes</h2>
+<p>This section is <strong>derived from the code structure. No timings
+were measured</strong>, and none can be measured offline. It ranks where
+the design itself spends time, from most to least.</p>
+<ol type="1">
+<li><p><strong>The contrast confirmation, every time.</strong> In the
+contrast path the final position comes from a parabola fit through
+contrast samples (4.2, 4.5). A peak can only be fitted once there are
+samples on <strong>both sides</strong> of it, so the lens has to pass
+the best position and come back.</p>
+<ul>
+<li>Direction-dependent offsets ("Pint Shift", "Joint Quick Return") add
+a return move to take up backlash.</li>
+<li>The scan may reverse up to <strong>2 times</strong> (5.5).</li>
+</ul>
+<p>Even a perfect phase result doesn't let the camera skip this. With a
+reliable result the lens <strong>jumps</strong> to the phase target
+(5.2), and then still searches a window of up to <strong>300·N
+µm</strong> (0.84 mm at f/2.8) for the contrast peak. So it is the fixed
+cost of every AF cycle.</p></li>
+<li><p><strong>Falling back to a blind contrast scan.</strong> Phase
+detection gives no usable hint when:</p>
+<ul>
+<li>the signal has fewer than 20 samples (3.2);</li>
+<li>the normalised error is above 2.0, or the valley is shallow
+(3.8);</li>
+<li>there are several minima, as with repetitive patterns (3.5);</li>
+<li>the snapshot is invalid (5.3).</li>
+</ul>
+<p>Then there is no jump, no direction hint, and the wider
+<strong>1000·N µm</strong> margin (2.8 mm at f/2.8) or no bound at all.
+The scan may start the wrong way, which costs a reversal, and it
+searches until contrast rises and falls. Low light, low contrast and
+repetitive subjects all land here.</p></li>
+<li><p><strong>Sampling is bound to the frame rate.</strong> Each
+contrast sample costs one frame. Because the lens moves continuously
+(4.7), speed and frame rate together set how finely the peak is sampled.
+The base step width is <strong>13 pulses</strong> (4.7). With the
+fallback 100 pulses/mm that is 0.13 mm, so a 0.84 mm window would take
+roughly 6–7 steps per pass before the return move. The real pulses per
+mm comes from the lens, so this is an order-of-magnitude illustration,
+not a measurement. The firmware can switch the sensor to a faster
+readout for contrast AF ("CIS DriveMode Fix CAF High"). That shows the
+frame rate is a known bottleneck, and a mode switch itself costs
+time.</p></li>
+<li><p><strong>Pull-based phase data.</strong> Contrast AF requests a
+phase update and copies a snapshot guarded by a mutex (5.3). Phase
+results are therefore at least one frame old when they are
+used.</p></li>
+<li><p><strong>Continuous-AF settling and noise holds.</strong> After a
+0.1-stop change, the code waits <code>round(fps·5/30 + 0.5) + 1</code>
+frames, which is about 6 at 30 fps, and caps re-triggers at 10 (5.6).
+The wobble also <strong>holds</strong> whenever the contrast change is
+within the noise threshold (4.5b), which is more often the case in low
+light.</p></li>
+</ol>
+<p><strong>What this implies.</strong></p>
+<ul>
+<li>The largest single cost is structural: every AF cycle ends with a
+contrast confirmation, even when phase detection was reliable.</li>
+<li>The second is how often phase detection fails its reliability
+gates.</li>
+</ul>
+<p>Both are software policy. By contrast, frame rate and motor speed are
+hardware. That is consistent with the GR IV comparison: closely related
+AF code, so its improvements most likely come from hardware that makes
+both the phase data and the contrast sampling faster.</p>
+<h2 id="10-software-levers-and-practical-implications">10. Software
+levers and practical implications</h2>
+<p>This section is an assessment derived from §§3–9. Nothing in it was
+measured, and it contains no instructions for modifying the camera.</p>
+<h3 id="101-where-the-policy-lives">10.1 Where the policy lives</h3>
+<p>The time an AF cycle takes is shaped by a handful of values compiled
+into the firmware:</p>
+<table>
+<thead>
+<tr>
+<th>Lever</th>
+<th>Value</th>
+<th>Section</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Phase reliability gates</td>
+<td><code>E ≤ 1.0 / 2.0</code>, depth &gt; 15/64, ≥ 20 samples,
+reliability byte ≤ 128</td>
+<td>3.2, 3.8, 5.2</td>
+</tr>
+<tr>
+<td>Contrast window after a phase jump</td>
+<td><code>300·N µm</code> (0.84 mm at f/2.8)</td>
+<td>5.5</td>
+</tr>
+<tr>
+<td>Contrast window without a phase jump</td>
+<td><code>1000·N µm</code> (2.8 mm at f/2.8)</td>
+<td>5.5</td>
+</tr>
+<tr>
+<td>Scan step</td>
+<td>13 pulses base, plus a term scaling with √N</td>
+<td>4.7</td>
+</tr>
+<tr>
+<td>Direction reversals</td>
+<td>at most 2</td>
+<td>5.5</td>
+</tr>
+<tr>
+<td>Continuous-AF re-trigger</td>
+<td>≥ 0.1 stop change, about 6 frames of settling at 30 fps, at most 10
+re-triggers</td>
+<td>5.6</td>
+</tr>
+<tr>
+<td>Wobble noise hold</td>
+<td>noise threshold, contrast floors 2896 and 64, history ratio 3.0</td>
+<td>4.5b</td>
+</tr>
+</tbody>
+</table>
+<h3 id="102-why-none-of-them-is-an-easy-win">10.2 Why none of them is an
+easy win</h3>
+<ul>
+<li><strong>Each value is a tuned trade-off.</strong> Ricoh calibrated
+the AF per lens (TSF table per aperture, exit-pupil polynomial), per
+sensor readout mode (noise tables) and per ISO band (AFDF strength). The
+constants above sit inside that system; they are not stand-alone
+knobs.</li>
+<li><strong>Loosening the phase gates</strong> would put more scenes on
+the fast path. But the gates reject exactly the cases where phase
+detection gives wrong answers: low contrast, low light and repetitive
+patterns. The result would be "fast but sometimes wrong" instead of
+"slow but right".</li>
+<li><strong>Skipping the contrast confirmation</strong> after a reliable
+jump would save the most time (§9 item 1). But the phase result is the
+least precise stage: an integer shift, sub-sample interpolation, then a
+conversion factor that depends on the exit pupil. The contrast
+confirmation is what delivers critical sharpness at f/2.8.</li>
+<li><strong>Smaller windows or larger steps</strong> save frames, but
+risk passing the sharpness peak. A missed peak costs a reversal, which
+takes longer than the frames saved.</li>
+<li><strong>None of these values is a runtime setting.</strong> Changing
+any of them means a modified firmware image. That carries a risk of
+making the camera unusable, conflicts with Ricoh's no-downgrade policy,
+and depends on an update check that is not fully understood. It is
+outside this project's offline scope.</li>
+<li><strong>The hard limits are hardware:</strong> sensor frame rate,
+focus motor, and phase-pixel density. The GR IV runs closely related AF
+code (§7), which suggests part of its faster AF comes from there.</li>
+</ul>
+<h3 id="103-what-an-owner-can-do-today">10.3 What an owner can do
+today</h3>
+<p>These tips are derived from the code paths and have not been
+tested.</p>
+<ul>
+<li><strong>Stay on the fast path.</strong> Place the AF area on a
+clear, well-lit, textured edge. Repetitive subjects such as fences,
+blinds, brick and tiles produce several correlation minima (§3.5) and
+push AF into the slow path. Very small or featureless areas can fall
+below 20 samples or fail the normalised-error test (§3.2, §3.8).</li>
+<li><strong>Low light.</strong> Keep the AF-assist lamp enabled. In low
+light, phase detection most often fails its gates and the camera falls
+back to a scan with no direction or range (§9 item 2).</li>
+<li><strong>Stopping down.</strong> The contrast window grows with the
+f-number (<code>300·N µm</code>), but so do the step (√N) and the depth
+of focus. The net effect on speed cannot be derived from the code, so
+this is an open question rather than advice.</li>
+<li><strong>Skipping AF entirely.</strong> Snap Focus and manual focus
+bypass the AF pipeline and remain the fastest option for street
+work.</li>
+<li><strong>Firmware.</strong> Official updates are the supported way AF
+behaviour changes: 1.10 improved low-light AF, 1.41 added Zone Select
+AF, and 1.60 is current.</li>
+</ul>
+<h3 id="104-is-the-arithmetic-a-bottleneck-structural-no-timings">10.4
+Is the arithmetic a bottleneck? (Structural, no timings)</h3>
+<p>The question is whether the AF calculations themselves could be made
+faster to shorten AF. The code says the arithmetic is already cheap next
+to the things §9 lists.</p>
+<p><strong>Size of the work.</strong> Block IDs run 0…54
+(<code>0x5341c7e8</code>: <code>cmp r0, #0x36</code>), so at most 55 Zaf
+blocks. Per block, the correlation makes one kernel call per shift (up
+to 62, §3.5). Each call handles 8 samples per loop pass with about 7
+NEON instructions (<code>0x533e8234</code>), so up to 256 samples cost
+about 230 instructions. That is roughly 14,000 instructions per block
+and under one million per frame if every block were evaluated. A few
+milliseconds at most, against a frame time of about 33 ms at 30 fps. The
+clock of the core that runs the RTOS is not known, so this is an order
+of magnitude, not a measurement.</p>
+<p><strong>Already efficient:</strong></p>
+<ul>
+<li>The metric is NEON, integer, 16-bit. No floating point is
+involved.</li>
+<li>The CPU has hardware <code>udiv</code>/<code>sdiv</code>
+(<code>0x5313d850</code>), so the divisions in grading and the
+sub-sample fits are single instructions.</li>
+<li>Floating point (<code>double</code>) appears only in the contrast
+peak fit (4.2), once per fit.</li>
+<li>Scratch setup per block is small: two 512-byte buffers and about 250
+bytes of tables are cleared and copied.</li>
+</ul>
+<p><strong>Possible arithmetic savings (all Inferred, none
+measured):</strong></p>
+<ol type="1">
+<li><em>One kernel call per shift.</em> Each call reloads the lane-mask,
+and reduces its accumulators to scalars. Processing several shifts per
+pass would reuse loads of the A signal. The gain applies to a stage that
+already takes a small share of a frame.</li>
+<li><em>SSD computed alongside SAD.</em> Two of the four kernels
+accumulate the sum of squares in every call. I could not confirm where
+it is used.</li>
+<li><em>Dead filter levels.</em> Removing them saves code size, not run
+time, because they never run.</li>
+<li><em>Every selected block is evaluated in full.</em> Blocks whose
+contrast fails the early check could skip the shift loop. The code
+already rejects signals under 20 samples early.</li>
+</ol>
+<p><strong>Why this does not shorten AF.</strong> The time in §9 is lens
+travel, one frame per contrast sample, and the contrast confirmation.
+Making the phase arithmetic faster would only bring the phase result
+earlier within a frame; contrast AF still has to wait for the next frame
+and then move the lens. The phase-to-contrast handoff is also pull-based
+(5.3), so a phase result is one frame old when used. The arithmetic
+would matter only if the computation overran the frame time, and nothing
+in the code suggests that it does.</p>
+<h3
+id="105-which-software-changes-would-be-felt-inferred-no-timings">10.5
+Which software changes would be felt (Inferred, no timings)</h3>
+<p>These are ranked by how much a user would notice, if a manufacturer
+changed policy in firmware. Nothing here was measured, and no lever can
+be applied without a modified firmware image, which is outside this
+project's scope. Arithmetic speed is not on the list (§10.4).</p>
+<ol type="1">
+<li><strong>Shorten the contrast confirmation after a top-grade phase
+result.</strong> Every cycle ends with a contrast scan and parabola fit
+(§9 item 1). The firmware grades a top tier already (E ≤ 1.0, adequate
+valley depth, reliability ≤ 128; §3.8, §5.4) but treats it like any
+reliable result. A small bracket around the phase target, without the
+reversal and backlash return, would remove the largest structural cost.
+Risk: the phase result depends on the exit-pupil polynomial and per-unit
+calibration (§3.8b), and depth of focus at f/2.8 is small, so the
+failure mode is back-focus.</li>
+<li><strong>Drive continuous AF from the phase defocus.</strong> The
+re-trigger watches a ratio, which is brightness in the likely case
+(§5.6), and no subject-motion model exists (§8). Phase defocus is
+computed every frame. Re-focusing when its magnitude exceeds a threshold
+would keep the lens near focus, so a half-press would start close to the
+answer. This is probably the most noticeable change for AF-C.</li>
+<li><strong>Keep repetitive scenes on the fast path.</strong> Several
+minima currently send AF to a blind scan (§3.5), although up to 50
+interpolated candidate shifts are already stored (§3.9). Choosing the
+candidate nearest the current focus or the previous result would help
+fences, blinds and tiles.</li>
+<li><strong>Keep phase detection alive in low light.</strong>
+Phase-pixel adding exists (<code>ConvertZAfDataAddBuffer</code>,
+<code>CheckZAfDataAddDisable</code>; §3.1). When it is enabled is not
+known. Enabling it earlier would raise the signal-to-noise ratio where
+the gates currently fail (§9 item 2).</li>
+<li><strong>Cut dead time.</strong> About 6 frames of settling and a cap
+of 10 re-triggers (§5.6), phase data one frame old (§5.3), and one
+window and step for every reliable result (§5.5, §4.7). Each is a small
+saving.</li>
+<li><strong>Skip avoidable backlash returns</strong> ("Pint Shift",
+"Joint Quick Return") when the last move already came from the
+compensated side.</li>
+</ol>
+<p>Frame rate and motor speed are not software levers. Whether AF
+switches the sensor to a faster readout is not settled: the
+<code>CIS DriveMode Fix</code> code (<code>0x5341768c</code>) is a table
+lookup and does not show it.</p>
+<p><strong>Numbers for levers 1 and 2</strong> are in §10.6.</p>
+<h3 id="106-lever-1-and-2-in-numbers-bounds-not-measurements">10.6 Lever
+1 and 2 in numbers (bounds, not measurements)</h3>
+<p>The firmware does not contain what is needed to compute an AF time in
+seconds. The frame rate during AF, the focus motor speed and the lens
+pulses per millimetre all come from the sensor drive mode and from
+per-unit lens ROM data (motor parameters <code>0x8231</code>,
+<code>0x8237</code>), not from the image. What the code does fix, and
+what follows from it:</p>
+<p><strong>Read from the code</strong></p>
+<ul>
+<li><strong>The peak fit works on a window of five contrast
+samples</strong> (<code>0x5340b4f8</code>, which loads five values and
+hands them to the helper at <code>0x5340e40c</code>; it is called from
+<code>0x53406914</code> and <code>0x53409000</code>). It returns without
+a fit when it has fewer than two samples. So a contrast result needs at
+least 5 frames of sweep, and more if the peak is not centred.</li>
+<li><strong>The continuous-AF re-trigger</strong> compares
+<code>|log₂(current/reference)|</code> with 0.1
+(<code>0x53406320</code>, literal 0.1), i.e. a ratio of 1.072 (7.2 %).
+The settling count is <code>trunc(fps × 5 / 30 + 0.5) + 1</code> frames
+(<code>0x53406340</code>–<code>0x53406378</code>), which is 6, 11 and 21
+frames at 30, 60 and 120 fps.</li>
+</ul>
+<p><strong>Derived: time scales that depend only on the frame rate
+<code>F</code></strong></p>
+<table>
+<thead>
+<tr>
+<th>Quantity</th>
+<th>30 fps</th>
+<th>60 fps</th>
+<th>120 fps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>One frame</td>
+<td>33 ms</td>
+<td>17 ms</td>
+<td>8 ms</td>
+</tr>
+<tr>
+<td>Minimum contrast fit (5 samples)</td>
+<td>167 ms</td>
+<td>83 ms</td>
+<td>42 ms</td>
+</tr>
+<tr>
+<td>Settling after a re-trigger</td>
+<td>6 frames = 200 ms</td>
+<td>11 frames = 183 ms</td>
+<td>21 frames = 175 ms</td>
+</tr>
+<tr>
+<td>Age of a pulled phase result (about 1 frame)</td>
+<td>33 ms</td>
+<td>17 ms</td>
+<td>8 ms</td>
+</tr>
+</tbody>
+</table>
+<p>The settling time is almost constant in seconds (about 0.18–0.20 s),
+because the formula is 1/6 s plus one frame.</p>
+<p><strong>External anchor.</strong> Imaging Resource measured the GR
+III (28 mm; same Zaf/Caf code family) at a full AF-S shutter lag of
+0.175 s in Select AF (<a
+href="https://www.imaging-resource.com/cameras/ricoh-gr-iii-review/perform">review</a>;
+I could not fetch the page and rely on the search summary). The
+five-sample minimum alone is 167 ms at 30 fps, so a 30 fps AF sampling
+rate cannot fit that figure. Sampling at 60 fps or more is more
+consistent (Inferred; the firmware's <code>CIS DriveMode Fix</code>
+table code does not show the rate).</p>
+<p><strong>Lever 1: shorter confirmation.</strong> With a 175 ms total
+and sampling at 60 fps, the five-sample fit is about 83 ms, roughly half
+of it. A three-sample bracket around the phase target would save 2
+frames (about 33 ms at 60 fps, 17 ms at 120 fps) plus one reversal and
+one backlash return, whose motor time is unknown. Realistic range:
+<strong>tens of milliseconds, up to about half of a 0.175 s cycle if the
+reversal and return are also removed.</strong> That is the upper bound
+the firmware structure allows. It is a perceptible gain in sequences of
+shots, and near the threshold of notice for a single shot. The scan
+window is a stop condition, not a distance always travelled. Its size
+(<code>300·N</code> µm, 840 µm at f/2.8) against a depth of focus of
+roughly ±20–50 µm at f/2.8 (assuming a circle of confusion of 2 pixels
+to 1/1500 of the diagonal) means it is 15–40 times looser than the
+accuracy needed, so its size costs time only when the peak is not
+found.</p>
+<p><strong>Lever 2: phase-driven continuous AF.</strong></p>
+<ul>
+<li>Today: after a trigger the camera waits about 0.18–0.20 s, and the
+trigger is a brightness-ratio change of at least 7.2 %, not a focus
+error.</li>
+<li>Phase-driven: a fresh phase result exists every frame (8–33 ms old),
+so a focus error can be acted on within 1–2 frames, about <strong>0.15 s
+sooner per trigger</strong>, and, more usefully, it would fire on the
+quantity that matters.</li>
+<li>What cannot be computed offline is how often the lens is out of
+focus at the moment of a half-press. That determines how much a user
+would feel.</li>
+</ul>
+<p><strong>How to get the missing numbers.</strong> Film the camera
+front and the shutter button with a phone at 240 fps. For each
+condition, count frames from the button reaching half-press to the AF
+confirmation (or lens stop). Repeat 20 times each for: bright textured
+edge, low light, a repetitive pattern, AF-S versus AF-C after 2 s of
+pointing at the subject. The differences between those conditions show
+how large the contrast confirmation, the fallback scan and the pre-focus
+effect are. They give the frame rate too, from the lens stepping
+cadence.</p>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>
