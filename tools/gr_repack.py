@@ -2,18 +2,25 @@
 """Rebuild a GR IIIx firmware container from a (possibly modified) payload.
 
 Offline only. Takes the original update file and a decoded payload of the
-same length, and writes a new container:
+same length, and writes a new container that keeps the official frame layout
+(the method of Maxwooow/Ricoh-GRMod's container code; no code copied):
 
-- frames whose output does not change are copied byte for byte;
-- frames whose output changes, or that can back-reference changed bytes
-  (the decoder looks back up to 8191 bytes), become literal frames;
-- the payload's last word is rebalanced so its 32-bit word sum is 0;
+- every frame keeps its place and output size;
+- a frame whose output changes, or whose back-references (up to 8191 bytes)
+  now reach changed bytes, becomes a stored frame of exactly 0x6000 bytes
+  (prefix E0 00), the only stored form in the official file (729 frames).
+  Affected frames are found by decoding the result again, not by a window;
+- the first frame (0x8000 bytes) and the last, partial frame cannot be
+  stored that way, so edits there are refused;
+- the payload's word sum is brought back to 0 with the compensation word,
+  4 bytes inside the assert-only text "MakeParameter" (COMP_VA). The payload's
+  last word and every block's word sum stay as they were;
 - the footer keeps project, magic and type, gets the stream and payload
   lengths, and its last word balances the whole file to a word sum of 0.
 
-Every check the camera's updater makes (docs/firmware-mod-feasibility.html §1.2)
-and the rescue-path guard (tools/patch_guard.py)
-is re-run on the result, and the result is decoded again and compared.
+Every check the camera's updater makes (docs/firmware-mod-feasibility.html §1.2),
+the layout checks below and the rescue-path guard (tools/patch_guard.py)
+are re-run on the result, and the result is decoded again and compared.
 Writing the file does not install anything; this tool never talks to a camera.
 """
 
@@ -27,8 +34,18 @@ from gr_unpack import HEADER_SIZE, checksum, unpack  # noqa: E402
 
 FOOTER_SIZE = 0x18
 MAGIC = 0xA55A5AA5
-MAX_DISTANCE = 0x1FFF
-MAX_LITERAL = 0x7FFF
+FRAME_SIZE = 0x6000
+STORED_PREFIX = b"\xe0\x00"  # 0x8000 | 0x6000
+# Compensation word (Read): VA 0x53dc22e8, bytes "Para" of "MakeParameter\0" at 0x53dc22e4, the
+# function name the assert routine 0x536b93d0 gets from movw/movt 0x536e9bdc/0x536e9c08
+# (src/R2Y/ToneControlTuning.cpp). Shown only when that assert fails. No other reference: movw/movt
+# pairs searched without a distance limit, and no literal word points into 0x53dc22e0..0x53dc22f7.
+# GR Mod uses the same word on the GR IV.
+RTOS_OFFSET, RTOS_VA = 0x10870, 0x53000000
+COMP_VA = 0x53DC22E8
+COMP_OFFSET = RTOS_OFFSET + COMP_VA - RTOS_VA
+COMP_GUARD = b"MakeParameter\0"
+COMP_GUARD_OFFSET = COMP_OFFSET - 4
 
 
 def frames(source: bytes):
@@ -77,58 +94,81 @@ def balance(words_sum: int) -> int:
     return (-words_sum) & 0xFFFFFFFF
 
 
-def rebalance_payload(payload: bytearray) -> None:
-    payload[-4:] = b"\0\0\0\0"
-    payload[-4:] = struct.pack("<I", balance(checksum(bytes(payload))))
+def sections(payload: bytes):
+    """(name, data offset, size) of each block: 16-byte header of name[8], two u16, size u32.
+    The last block, RES, holds a file count in its size field; its data runs to the end."""
+    out, o = [], 0
+    while o + 16 <= len(payload):
+        name = payload[o : o + 8].rstrip(b"\0")
+        if not name or not all(32 <= c < 127 for c in name):
+            break
+        size = struct.unpack_from("<I", payload, o + 12)[0]
+        if name == b"RES":
+            out.append((name.decode(), o + 16, len(payload) - o - 16))
+            break
+        out.append((name.decode(), o + 16, size))
+        o += 16 + size
+    return out
 
 
-def literal_frames(data: bytes) -> bytes:
-    out = bytearray()
-    for i in range(0, len(data), MAX_LITERAL):
-        chunk = data[i : i + MAX_LITERAL]
-        out += struct.pack(">H", 0x8000 | len(chunk)) + chunk
-    return bytes(out)
+def compensate(original_payload: bytes, payload: bytearray) -> None:
+    """Set the compensation word so the payload's word sum is 0. The caller must not touch it."""
+    if original_payload[COMP_GUARD_OFFSET : COMP_GUARD_OFFSET + len(COMP_GUARD)] != COMP_GUARD:
+        raise SystemExit("compensation word is not inside \"MakeParameter\": wrong firmware?")
+    if payload[COMP_OFFSET : COMP_OFFSET + 4] != original_payload[COMP_OFFSET : COMP_OFFSET + 4]:
+        raise SystemExit(f"the payload changes the compensation word at 0x{COMP_OFFSET:x}; leave it to this tool")
+    payload[COMP_OFFSET : COMP_OFFSET + 4] = b"\0\0\0\0"
+    payload[COMP_OFFSET : COMP_OFFSET + 4] = struct.pack("<I", balance(checksum(bytes(payload))))
+
+
+def build_stream(original: bytes, payload: bytes, layout, keep) -> bytes:
+    stream = bytearray()
+    for (start, end, out_start, out_end), k in zip(layout, keep):
+        if k:
+            stream += original[start:end]
+        else:
+            stream += STORED_PREFIX + payload[out_start:out_end]
+    return bytes(stream + b"\0\0")  # terminator
 
 
 def repack(original: bytes, payload: bytes) -> bytes:
     old = unpack(original)
     if len(payload) != len(old):
         raise SystemExit(f"payload length {len(payload)} != original {len(old)}; resizing is not supported")
-    changed = [i for i in range(0, len(old), 4096) if old[i : i + 4096] != payload[i : i + 4096]]
-    dirty = []  # output ranges that must not be reused verbatim
-    for block in changed:
-        lo = block + next(j for j in range(4096) if old[block + j] != payload[block + j])
-        hi = block + max(j for j in range(min(4096, len(old) - block)) if old[block + j] != payload[block + j]) + 1
-        dirty.append((lo, hi + MAX_DISTANCE))
-
-    stream = bytearray()
-    run_start = None  # output offset where the current literal run began
-    for start, end, out_start, out_end in frames(original):
-        touched = any(out_start < hi and lo < out_end for lo, hi in dirty)
-        if touched:
-            if run_start is None:
-                run_start = out_start
-            continue
-        if run_start is not None:
-            stream += literal_frames(payload[run_start:out_start])
-            run_start = None
-        stream += original[start:end]
-    if run_start is not None:
-        stream += literal_frames(payload[run_start:])
-    stream += b"\0\0"  # terminator
+    layout = list(frames(original))
+    keep = [payload[a:b] == old[a:b] for _, _, a, b in layout]
+    while True:
+        for i, ((_, _, a, b), k) in enumerate(zip(layout, keep)):
+            if not k and b - a != FRAME_SIZE:
+                where = "first" if i == 0 else "last" if i == len(layout) - 1 else f"#{i}"
+                why = ("a change falls into it" if payload[a:b] != old[a:b]
+                       else "its back-references reach changed bytes in an earlier frame")
+                raise SystemExit(f"the {where} frame (payload 0x{a:x}-0x{b:x}, 0x{b - a:x} bytes) would have to be "
+                                 f"stored, because {why}; only 0x6000-byte frames can be stored")
+        stream = build_stream(original, payload, layout, keep)
+        decoded = unpack(original[:HEADER_SIZE] + stream)
+        bad = [i for i, (_, _, a, b) in enumerate(layout) if decoded[a:b] != payload[a:b]]
+        if not bad:
+            break
+        for i in bad:
+            if not keep[i]:
+                raise SystemExit(f"stored frame #{i} decoded wrong")
+            keep[i] = False  # its back-references reach changed bytes
     stream_len = len(stream)
     stream += b"\0" * (-len(stream) % 4)
 
     footer = bytearray(original[-FOOTER_SIZE:])
     struct.pack_into("<II", footer, 0x0C, stream_len, len(payload))
     struct.pack_into("<I", footer, 0x14, 0)
-    body = original[:HEADER_SIZE] + bytes(stream) + bytes(footer)
+    body = original[:HEADER_SIZE] + stream + bytes(footer)
     struct.pack_into("<I", footer, 0x14, balance(checksum(body)))
-    return original[:HEADER_SIZE] + bytes(stream) + bytes(footer)
+    return original[:HEADER_SIZE] + stream + bytes(footer)
 
 
-def check(container: bytes, expected_payload: bytes, project: int) -> list:
-    """Re-run the updater's container checks (FwDecoder 0x5362bd44, 0x5362bcc8) plus a decode."""
+def check(original: bytes, container: bytes, expected_payload: bytes) -> list:
+    """Re-run the updater's container checks (FwDecoder 0x5362bd44, 0x5362bcc8), a decode,
+    and the layout checks: the official frames, or full stored frames, at their official places."""
+    project = struct.unpack_from("<I", original, 0x30)[0]
     h, f = container[:HEADER_SIZE], container[-FOOTER_SIZE:]
     proj_pair = project | project << 16
     results = [
@@ -142,10 +182,32 @@ def check(container: bytes, expected_payload: bytes, project: int) -> list:
         ("file word sum = 0", checksum(container) == 0),
     ]
     decoded = unpack(container)
+    old = unpack(original)
     results += [
         ("footer +0x10 = payload length", struct.unpack_from("<I", f, 0x10)[0] == len(decoded)),
         ("payload word sum = 0", checksum(decoded) == 0),
         ("decodes to the expected payload", decoded == expected_payload),
+        ("header identical to the official one", h == original[:HEADER_SIZE]),
+        ("payload last word unchanged", decoded[-4:] == old[-4:]),
+    ]
+    so, sn = sections(old), sections(decoded)
+    results += [
+        ("block layout unchanged", so == sn),
+        ("every block's word sum unchanged",
+         so == sn and all(checksum(old[o : o + n]) == checksum(decoded[o : o + n]) for _, o, n in so)),
+    ]
+    fo, fn = list(frames(original)), list(frames(container))
+    same_layout = len(fo) == len(fn) and all(a[2:] == b[2:] for a, b in zip(fo, fn))
+    form = same_layout and all(
+        container[b[0] : b[1]] == original[a[0] : a[1]]
+        or (container[b[0] : b[0] + 2] == STORED_PREFIX and b[1] - b[0] == 2 + FRAME_SIZE
+            and container[b[0] + 2 : b[1]] == decoded[b[2] : b[3]])
+        for a, b in zip(fo, fn))
+    results += [
+        ("frame layout unchanged", same_layout),
+        ("each frame official or stored with 0x6000 bytes", form),
+        ("first and last frame official", same_layout and all(
+            container[fn[i][0] : fn[i][1]] == original[fo[i][0] : fo[i][1]] for i in (0, -1))),
     ]
     return results
 
@@ -158,19 +220,19 @@ def main() -> None:
     args = parser.parse_args()
 
     original = args.original.read_bytes()
+    original_payload = unpack(original)
     payload = bytearray(args.payload.read_bytes())
-    rebalance_payload(payload)
+    compensate(original_payload, payload)
     container = repack(original, bytes(payload))
-    project = struct.unpack_from("<I", original, 0x30)[0]
 
     ok = True
-    for name, passed in check(container, bytes(payload), project):
+    for name, passed in check(original, container, bytes(payload)):
         print(f"{'PASS' if passed else 'FAIL'}  {name}")
         ok &= passed
 
     from patch_guard import guard  # loads the RTOS image, so import only when needed
 
-    guard_ok, report = guard(unpack(original), bytes(payload))
+    guard_ok, report = guard(original_payload, bytes(payload), exempt=[(COMP_OFFSET, COMP_OFFSET + 4)])
     print("\n".join("guard " + line for line in report))
     print(f"{'PASS' if guard_ok else 'FAIL'}  rescue path untouched (tools/patch_guard.py)")
     ok &= guard_ok

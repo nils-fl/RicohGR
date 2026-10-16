@@ -76,7 +76,7 @@ vtables_for("ZafCorrelation")        # find a class's virtual methods
 ```
 
 The first cross-reference build takes a few minutes and is cached in
-`work/xrefs.pkl`.
+`work/xrefs-w16.pkl` (GR IIIx only; `build_xrefs()` refuses other firmware).
 
 Verified reference values for GR IIIx 1.60:
 - model `GR IIIx`, version `1.60.11.17`;

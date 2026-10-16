@@ -18,14 +18,16 @@ def cstr(v,n=120):
     o=fo(v); e=d.find(b"\0",o,o+n); return d[o:e if e>0 else o+n].decode("latin1")
 def arm_imm(x): return ((x>>4)&0xf000)|(x&0xfff)
 def build_xrefs():
-    cache="work/xrefs.pkl"
+    # movw/movt pairs up to 16 instructions apart (8 missed e.g. 0x536e9bdc/0x536e9c08).
+    cache="work/xrefs-w16.pkl" if FW.endswith("fwdc243b-v160.decoded.bin") else None
+    if cache is None: raise SystemExit("build_xrefs: no cache path for this firmware; set one first")
     if os.path.exists(cache): return pickle.load(open(cache,"rb"))
     w=array.array("I",d[OFF:CODE_END&~3]); last={}; xr={}
     for i,x in enumerate(w):
         if (x&0x0ff00000)==0x03000000: last[(x>>12)&0xf]=(i,arm_imm(x))
         elif (x&0x0ff00000)==0x03400000:
             rd=(x>>12)&0xf
-            if rd in last and i-last[rd][0]<=8:
+            if rd in last and i-last[rd][0]<=16:
                 val=(arm_imm(x)<<16)|last[rd][1]
                 xr.setdefault(val,[]).append(BASE+4*i)
     pickle.dump(xr,open(cache,"wb")); return xr

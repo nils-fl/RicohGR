@@ -50,12 +50,22 @@ comparison</a>
 <ul>
 <li><a href="#1-container-format-identical-read"
 id="toc-1-container-format-identical-read">1. Container format:
-identical (Read)</a></li>
+identical (Read)</a>
+<ul>
+<li><a href="#11-gr-mods-container-code-on-the-gr-iiix-file"
+id="toc-11-gr-mods-container-code-on-the-gr-iiix-file">1.1 GR Mod's
+container code on the GR IIIx file (Read)</a></li>
+</ul></li>
 <li><a href="#2-platform-read-from-each-firmwares-device-tree"
 id="toc-2-platform-read-from-each-firmwares-device-tree">2. Platform
 (Read, from each firmware's device tree)</a></li>
 <li><a href="#3-rtos-image-read" id="toc-3-rtos-image-read">3. RTOS
-image (Read)</a></li>
+image (Read)</a>
+<ul>
+<li><a href="#31-gr-mod-profile-values-for-the-gr-iiix"
+id="toc-31-gr-mod-profile-values-for-the-gr-iiix">3.1 GR Mod profile
+values for the GR IIIx (Read unless marked)</a></li>
+</ul></li>
 <li><a href="#4-where-the-two-firmwares-differ-by-subsystem-structural"
 id="toc-4-where-the-two-firmwares-differ-by-subsystem-structural">4.
 Where the two firmwares differ by subsystem (Structural)</a></li>
@@ -146,6 +156,57 @@ the GR III.</li>
 <li>Both carry a whole-file additive checksum.</li>
 <li>One decoder handles both unchanged.</li>
 </ul>
+<h3 id="11-gr-mods-container-code-on-the-gr-iiix-file">1.1 GR Mod's
+container code on the GR IIIx file (Read)</h3>
+<p><a href="https://github.com/Maxwooow/Ricoh-GRMod">Maxwooow/Ricoh-GRMod</a>
+(GR IV 1.11 only) has a TypeScript container codec and a self-check.
+Its three base files (<code>core/src/fw/container.ts</code>,
+<code>selfcheck.ts</code>, <code>types.ts</code>, commit
+<code>675ba64</code>) were run unchanged on both official files. The test
+ran on 2026-10-15, offline. The test files were deleted afterwards and
+nothing was flashed. The test edit was +1 / −1 on two adjacent RTOS words at
+<code>0x53188900</code>, so the payload and section sums stay zero.</p>
+<table>
+<thead>
+<tr><th>Check</th><th>GR IV 1.11</th><th>GR IIIx 1.60</th></tr>
+</thead>
+<tbody>
+<tr><td>Parse (<code>Firmware</code>: footer, lengths, both word sums)</td><td>pass</td><td>pass</td></tr>
+<tr><td>Decoded payload equals <code>tools/gr_unpack.py</code>'s</td><td>pass</td><td>pass</td></tr>
+<tr><td>Updater checks (<code>verifyContainer</code>)</td><td>pass</td><td>pass</td></tr>
+<tr><td>Section list (<code>sectionsOf</code>)</td><td>13 sections</td><td>14 sections: also <code>FDRVPARA</code> (0x24 bytes, before <code>RES</code>)</td></tr>
+<tr><td>Repack without change is byte-identical</td><td>pass</td><td>pass</td></tr>
+<tr><td><code>selfCheck</code>, no change and with the test edit</td><td>pass</td><td><strong>fails one check</strong>: <code>model_records_identical</code></td></tr>
+</tbody>
+</table>
+<ul>
+<li><strong>The one difference:</strong> the GR IV file has 3 model
+records of 0x80 bytes between the stream and the footer (one per
+variant). The GR IIIx file has none: the footer follows directly after the
+padding. <code>selfCheck</code> requires at least one record. If zero
+records are allowed when the official file has zero, every check passes
+on the GR IIIx. That change was made only in a scratch copy.</li>
+<li>Frame layout: GR IV has one 0x8000 frame, 2,763 × 0x6000 and a last
+partial frame, with 308 stored. GR IIIx has one 0x8000 frame,
+2,428 × 0x6000 and a last partial frame, with 729 stored. All stored frames
+in both files are full 0x6000 frames (prefix <code>E0 00</code>), the only
+form GR Mod writes.</li>
+<li>For the test edit, GR Mod stored 1 frame (it re-decodes to find
+frames whose back-references reach the change). <code>tools/gr_repack.py</code>
+(the earlier version, before 2026-10-15) stored 2 frames, of 0x7FFF and 0x4001 bytes, because it marks the whole
+8 KB back-reference window. Both outputs pass both tools' updater checks
+and decode to the same payload. GR Mod's self-check rejected ours
+(<code>frame_layout_unchanged</code>,
+<code>frames_identical_or_stored_full</code>): frame sizes that do not
+occur in any official file. That layout is not known to be unsafe, but
+GR Mod's is the more conservative one. <code>gr_repack.py</code> now
+keeps the official layout the same way and gives a byte-identical file
+(<a href="firmware-mod-feasibility.html#42-re-packer-toolsgr_repackpy">firmware-mod-feasibility
+§4.2</a>).</li>
+<li>For a port, the container layer carries over with the one-line
+model-record change. <code>profile.ts</code> (section offsets, GR IV
+addresses, hashes) and every feature module do not carry over.</li>
+</ul>
 <h2 id="2-platform-read-from-each-firmwares-device-tree">2. Platform
 (Read, from each firmware's device tree)</h2>
 <table>
@@ -232,6 +293,108 @@ split between the domains.</p>
 <code>work/index-gr3x.json</code> and <code>work/index-gr4.json</code>).
 Name counts are <strong>Structural</strong>: they show which code exists
 in the image, not what it does.</p>
+<h3 id="31-gr-mod-profile-values-for-the-gr-iiix">3.1 GR Mod profile
+values for the GR IIIx (Read unless marked)</h3>
+<p>These are the GR IIIx counterparts of what GR Mod's
+<code>core/src/fw/profile.ts</code> holds for the GR IV: hashes, section
+places and the image-control tables its slot editor uses. They were found
+offline on 2026-10-15. A draft profile with these values passes its own
+asserts on the official 1.60 file. It is kept outside this repository,
+because GR Mod is GPL-2.0-only.</p>
+<table>
+<thead>
+<tr><th>Item</th><th>GR IV 1.11 (GR Mod)</th><th>GR IIIx 1.60</th></tr>
+</thead>
+<tbody>
+<tr><td>File / payload SHA-256</td><td><code>a2f664df…</code> / <code>c4e597c7…</code></td><td><code>708e79f3…31c7</code> / <code>c4bfc09d…e630</code></td></tr>
+<tr><td>RTOS data offset, length</td><td><code>0x17d10</code>, <code>0x13d2ac0</code></td><td><code>0x10870</code>, <code>0x10b55c0</code></td></tr>
+<tr><td>Initialised RAM: image → <code>0x55000000</code>, length</td><td><code>0x5437b640</code>, <code>0x57480</code></td><td><code>0x5407b540</code>, <code>0x3a080</code> (RTOS entry literal pool at <code>0x53000450</code>; ends at the RTOS end in both)</td></tr>
+<tr><td>ICONBIN offset, length</td><td><code>0x2e93af0</code>, <code>0xdcf460</code></td><td><code>0x21284d0</code>, <code>0x1181314</code></td></tr>
+<tr><td>Style record table <code>T_REC</code></td><td><code>0x55053780</code>, 34 × 3 variants</td><td><code>0x55018d94</code>, 26 × 1</td></tr>
+<tr><td>Multi-axis table <code>T_MA</code></td><td><code>0x55053504</code>, own record per style</td><td><code>0x55018cf0</code>; all 26 entries point to one record (<code>0x53dc2ba0</code>, block <code>0x53dc31d0</code>)</td></tr>
+<tr><td>Gamma table <code>T_GAM</code> (R/G/B curves)</td><td><code>0x55053138</code></td><td><strong>not found</strong> (see below)</td></tr>
+<tr><td>Shared post-curve matrix array</td><td><code>0x5501ad98</code></td><td><code>0x55018fe8</code> (20 of 26 styles; <code>0x0a</code>, <code>0x0d</code>–<code>0x10</code>, <code>0x18</code> use others, probably the monochrome looks, Inferred)</td></tr>
+<tr><td>Checksum compensation word</td><td><code>0x54049394</code> in "MakeParameter"</td><td><code>0x53dc22e8</code> in "MakeParameter" (payload <code>0xdd2b58</code>)</td></tr>
+<tr><td>Editable slots</td><td>Cinema (Yellow) <code>0x12</code>, Cinema (Green) <code>0x13</code></td><td>none: the GR IIIx has no Cinema looks</td></tr>
+</tbody>
+</table>
+<ul>
+<li><strong>How the tables were found.</strong> The GR IIIx parameter builder
+<code>0x536dc0f4</code> is the counterpart of the GR IV's
+<code>0x53912c40</code>. Both store the style record at
+<code>[r4+8]</code>, the multi-axis record at <code>[r4+0xc]</code> and a
+third table at <code>[r4+0x18]</code> (GR IIIx <code>0x55018e4c</code>, GR IV
+<code>0x55052cf4</code>). The GR IV fetches each through a getter that
+computes <code>table[variant × 34 + style]</code> after a style remap table.
+The GR IIIx indexes the tables with the image-control byte
+<code>[r7+0x77c]</code> directly, reading 0x16 as 0x19.</li>
+<li><strong>Same record layout.</strong> Words 0–11 of every style
+record have the same roles on both cameras. Word 1 is the 3×3 Q13
+colour matrix, and word 2 is the 9-pointer post-curve array whose entry 4
+is the identity.</li>
+<li><strong>Style numbers (Inferred).</strong> <code>0x0b</code> is
+Standard: its record also sits at <code>0x14</code> and <code>0x15</code>,
+just as the GR IV's Standard record sits at <code>0x0b</code>,
+<code>0x16</code> and <code>0x17</code>. The enum that maps the 12 image
+controls to the 26 entries has not been read.</li>
+<li><strong>Tone curves (Read, except where marked).</strong> Where the
+GR IV stores <code>T_GAM[style]</code> (<code>[r4+0x14]</code>; descriptor
+layout: parameter block, flags, then R/G/B curves at <code>+8/+0xc/+0x10</code>),
+the GR IIIx builder stores one constant for every style:
+<code>0x53dd9d84</code>, the only value it ever stores there. Its first word,
+<code>0x53dd1b78</code>, is a parameter block of the same kind as the GR IV
+descriptors' first word (it starts with the same <code>01 00 01 01 01</code>
+header). The words after that differ: <code>0x550204b0</code>,
+<code>0x550204b0</code>, <code>0x550204fc</code>, 0, 0. They are RAM arrays of
+pointers to a bank of about 21 curves, each 256 × u16 rising to about 16,290
+(<code>0x53dcf5f0</code>–<code>0x53ddd65c</code>). Code in
+<code>src/R2Y/ToneControlTuning.cpp</code> (<code>0x536e82d0</code>, using the
+7-entry array at <code>0x550204e0</code>) picks two neighbouring bank curves
+and interpolates between them, so the GR IIIx builds its tone curve at
+run time instead of reading a fixed per-style curve. 15 of the bank curves
+also exist in the GR IV, in the region its own descriptor curves use. The GR
+IV's per-style R/G/B curves (Standard, Cinema (Green), the monochrome one)
+do not occur in the GR IIIx. The GR IV is not far from this either: its 34
+styles share only 4 descriptors.
+<br><strong>The reader (Read).</strong> The per-channel tone step is the
+same function on both cameras, found through identical callers (GR IV
+<code>0x5391ec98</code>, GR IIIx <code>0x536e8fc0</code>, both 0x40 bytes,
+which call it second): GR IV <code>0x5391e340</code>, GR IIIx
+<code>0x536e8660</code>. Both first test byte <code>[r1+0x9b]</code>. That
+flag is set by GR IV <code>0x53910d34</code> / GR IIIx <code>0x536db130</code>
+when a settings byte (<code>[[+0x2d0]+0x38ad0]</code> on the GR IV,
+<code>+0x38a98</code> on the GR IIIx) is non-zero. Values 1–11 map through
+<code>[8, 0, 1, …, 10]</code> (GR IIIx <code>0x53dbd19c</code>).
+<ul>
+<li><strong>Flag set (both cameras):</strong> a getter (GR IV
+<code>0x53925000</code>, GR IIIx <code>0x536eedf0</code>) takes three index
+bytes (<code>+0xe/+0xf/+0x10</code> of a state object) into a 12-curve
+table: GR IV <code>0x55052c64</code>, GR IIIx <code>0x55037604</code>. The two
+tables are the same curves, entry for entry (same ranges and the same number
+of dips per curve). The step then maps the base curve through the R, G and
+B curves; the blend weights are 77/150/29.</li>
+<li><strong>Flag clear, GR IV only:</strong> the reader loads the per-style
+descriptor from <code>[r1+0x14]</code>. If its byte <code>+4</code> is set
+(Cinema (Yellow): flags <code>0x101</code>), it uses the descriptor's R/G/B
+curves at <code>+8/+0xc/+0x10</code>. Otherwise (Standard: 0) it takes the
+default path.</li>
+<li><strong>Flag clear, GR IIIx:</strong> there is no descriptor branch.
+The function never reads <code>[r1+0x14]</code>, and the default path copies
+the same curve into all channels.</li>
+</ul>
+What the settings byte is has not been identified (open). It is not the
+image control (that byte is at <code>+0x77c</code>). <code>R2yService</code>
+checks it together with other settings at <code>+0x950</code>,
+<code>+0x9d0</code>, <code>+0x9f0</code>, <code>+0xa58</code> and
+<code>+0xad8</code>.
+<br><strong>For a port:</strong> the GR IIIx lacks the GR IV's per-style
+curve branch, not just its data. Per-slot curves would need a code change in
+<code>0x536e8660</code> (<code>ToneControlTuning.cpp</code>, outside the
+guard's allow-list) that adds that branch and reads a per-style curve
+pointer (from a new table, or from the descriptor slot that builder
+<code>0x536dc394</code> fills). The R/G/B blend code that follows can be
+reused as it is.</li>
+</ul>
 <h2 id="4-where-the-two-firmwares-differ-by-subsystem-structural">4.
 Where the two firmwares differ by subsystem (Structural)</h2>
 <p>Source files (<code>src/*.cpp</code>) present in only one image:</p>
@@ -559,6 +722,9 @@ where they are set.</li>
 <li>The GR IV shift → defocus calibration tables against the GR IIIx
 ones.</li>
 <li>The remaining items in 5.4.</li>
+<li>What the settings byte at <code>+0x38a98</code> (GR IV <code>+0x38ad0</code>)
+is: it switches on the shared 12-curve per-channel tone (§3.1). Also the
+image-control enum behind the 26 GR IIIx style entries.</li>
 <li>What the <code>SricM343</code> command set does beyond its
 names.</li>
 </ul>

@@ -2,8 +2,8 @@
 """Check that a modified GR IIIx payload only touches RAW-development code.
 
 Offline only. Compares a modified decoded payload with the original and
-refuses the change unless every changed byte (except the payload's last,
-balancing word):
+refuses the change unless every changed byte (except the exempt ranges the
+caller names: gr_repack.py's checksum compensation word):
 
 1. lies in the RTOS block;
 2. is outside the protected ranges (RTOS entry, firmware updater, start-up control);
@@ -120,7 +120,7 @@ def data_users(xrefs, starts, vlo, vhi, lookback=0x100):
     return users - {None}
 
 
-def guard(old: bytes, new: bytes):
+def guard(old: bytes, new: bytes, exempt=()):
     """Return (ok, report lines)."""
     if len(old) != len(new):
         return False, ["payload length changed"]
@@ -132,7 +132,7 @@ def guard(old: bytes, new: bytes):
         return next((name for lo, hi, name in allowed if lo <= addr < hi), None)
 
     lines, ok = [f"allowed: {len(allowed)} RAW-development source files"], True
-    diffs = [r for r in changed_ranges(old, new) if r[0] < len(old) - 4]
+    diffs = [r for r in changed_ranges(old, new) if not any(lo <= r[0] and r[1] <= hi for lo, hi in exempt)]
     for lo, hi in diffs:
         if not (RTOS_BLOCK_DATA <= lo and hi <= RTOS_BLOCK_DATA + RTOS_BLOCK_SIZE):
             ok = False
@@ -159,7 +159,7 @@ def guard(old: bytes, new: bytes):
         else:
             lines.append(f"ok     0x{vlo:08x}-0x{vhi:08x} ({where}, {in_allowed(vlo) or 'RAW-development data'})")
     if not diffs:
-        lines.append("no changes besides the balancing word")
+        lines.append("no changes besides the exempt ranges")
     return ok, lines
 
 
@@ -168,7 +168,9 @@ def main() -> None:
     parser.add_argument("original", type=Path, help="original decoded payload")
     parser.add_argument("modified", type=Path, help="modified decoded payload")
     args = parser.parse_args()
-    ok, lines = guard(args.original.read_bytes(), args.modified.read_bytes())
+    from gr_repack import COMP_OFFSET
+
+    ok, lines = guard(args.original.read_bytes(), args.modified.read_bytes(), exempt=[(COMP_OFFSET, COMP_OFFSET + 4)])
     print("\n".join(lines))
     print("PASS" if ok else "FAIL")
     raise SystemExit(0 if ok else 1)

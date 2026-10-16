@@ -290,8 +290,9 @@ stay inside the camera's own limits.</li>
 <p><code>gr_repack.py</code> runs this check and refuses to write a file
 that fails it. It is an allow-list. A change passes only if:</p>
 <ol type="1">
-<li>it lies in the <code>RTOS</code> block (the payload's balancing word
-is the only exception);</li>
+<li>it lies in the <code>RTOS</code> block (the checksum compensation
+word of §4.2, itself in the RTOS, is the only exemption; the payload's
+last word may not change);</li>
 <li>it is not in a protected range: the RTOS entry, the updater
 (<code>0x53627800</code>–<code>0x5362d800</code>) or start-up control
 (<code>0x53228800</code>–<code>0x53229800</code>);</li>
@@ -526,19 +527,43 @@ adjustment data, Linux</td>
 </tbody>
 </table>
 <p>The blocks carry no checksums of their own. The only payload rule is
-that its 32-bit words sum to 0, and the last word balances it
-(Read).</p>
+that its 32-bit words sum to 0; in the official file the last word
+balances it (Read).</p>
 <p>The boot loader's strings only report load failures ("RTOS FIRMWARE
 CODE load error!!", "RTOS START!"). It has no verify step and no
 recovery path, which confirms §2 (Structural).</p>
 <h3 id="42-re-packer-toolsgr_repackpy">4.2 Re-packer
 (<code>tools/gr_repack.py</code>)</h3>
-<p>The tool rebuilds a container from a payload of the same length.
-Original frames are copied byte for byte. Frames that produce changed
-bytes, or that can reference them (up to 8191 bytes back), become
-literal frames; the official 1.60 file already uses 729 literal frames.
-The tool rebalances the payload and the footer, re-runs every check from
-§1.2 and decodes the result again.</p>
+<p>The tool rebuilds a container from a payload of the same length and
+keeps the official frame layout: every frame stays at its place with its
+output size. Unchanged frames are copied byte for byte. A frame that
+produces changed bytes, or whose back-references now reach them, becomes
+a stored frame of exactly 0x6000 bytes (prefix <code>E0 00</code>). This
+is the only stored form in the official 1.60 file, which has 729 of them.
+Affected frames are found by decoding the result again. The first frame
+(0x8000 bytes) and the last, partial frame cannot be stored that way, so
+edits there are refused. This follows the method of <a
+href="https://github.com/Maxwooow/Ricoh-GRMod">GR Mod</a>'s container code
+(no code copied); see <a href="gr3x-vs-gr4.html#11-gr-mods-container-code-on-the-gr-iiix-file">gr3x-vs-gr4 §1.1</a>.
+Until 2026-10-15 the tool wrote merged literal frames of up to 0x7FFF bytes
+instead; no such file was ever flashed.</p>
+<p>The payload's word sum is restored with a <strong>compensation
+word</strong>, not the last word, so the last word and every block's word
+sum stay official. The word is VA <code>0x53dc22e8</code> (payload
+<code>0xdd2b58</code>): the bytes "Para" of the text
+<code>MakeParameter</code> at <code>0x53dc22e4</code>. Its only reference
+is the movw/movt pair <code>0x536e9bdc</code>/<code>0x536e9c08</code>
+(11 instructions apart; searched without a distance limit, and no
+literal word points into the string), which passes it as the function name to the
+assert routine <code>0x536b93d0</code> (7,633 callers; arguments:
+condition, expression, file, line, function) for
+<code>src/R2Y/ToneControlTuning.cpp</code>. The text is shown only when
+that assert fails (Read). GR Mod uses the same text's word on the GR IV.
+A payload that changes this word itself is refused.</p>
+<p>The tool then fixes the footer, re-runs every check from §1.2 plus
+layout checks (header, frame layout, each frame official or a full stored
+frame, first and last frame official, payload last word and block sums
+unchanged), runs the guard and decodes the result again.</p>
 <table>
 <thead>
 <tr>
@@ -553,8 +578,24 @@ The tool rebalances the payload and the footer, re-runs every check from
 Ricoh's file</td>
 </tr>
 <tr>
+<td>Balanced +1/−1 edit of two code words at <code>0x53188900</code>
+(test only, deleted afterwards)</td>
+<td>All checks pass; one frame stored; output is
+<strong>byte-identical</strong> to GR Mod's build of the same payload</td>
+</tr>
+<tr>
+<td>Unbalanced +1 edit at <code>0x53188900</code> (test only)</td>
+<td>All checks pass; decoded payload differs in that word and the
+compensation word only; GR Mod's 34 container and self-checks pass
+(with its model-record check allowing zero records)</td>
+</tr>
+<tr>
+<td>Edit in the first or last frame, or of the compensation word</td>
+<td>Refused</td>
+</tr>
+<tr>
 <td>One log string changed in the RTOS (test only, deleted
-afterwards)</td>
+afterwards; earlier literal-frame version)</td>
 <td>All checks pass; decoded payload differs only in that string and the
 balancing word; file 41 KB larger</td>
 </tr>
