@@ -56,6 +56,7 @@ strong{font-weight:650}
 <li><a href="#8-if-something-goes-wrong" id="toc-8-if-something-goes-wrong">8. If something goes wrong</a></li>
 <li><a href="#9-what-each-step-rests-on" id="toc-9-what-each-step-rests-on">9. What each step rests on</a></li>
 <li><a href="#results-across-sessions" id="toc-results-across-sessions">Results across the sessions</a></li>
+<li><a href="#session-selector" id="toc-session-selector">Session: drive-mode selector</a></li>
 </ul></li>
 </ul>
 </nav>
@@ -319,6 +320,35 @@ rate alone:</p>
 <p>These are sampling times of the contrast sweep (samples × frame time).
 The time before the sweep starts and after it ends (lens travel to the
 start point, return to the peak, settling) is not in the logs.</p>
+<h3 id="session-selector">Session: drive-mode selector (2026-10-29)</h3>
+<p>One start: some AF-C presses (discarded), 12 AF-S runs, then 11 AF-C runs,
+with 13 snapshots of the selector inputs, one every 10 s
+(<code>work/af-logs/selector/</code>). The 80 CSVs of an earlier unlabelled
+start are kept apart in <code>work/af-logs/unlabelled-1/</code>.</p>
+<ul>
+<li><strong><code>+0xc44e</code> is 1 exactly in the AF-C periods</strong>
+(snapshots M002–M005 and M009–M012) and 0 in AF-S (M006–M008). AF-C
+searches therefore start in the selector branch that ignores
+<code>CisDriveModeFix</code>.</li>
+<li>In that branch <code>+0xc484</code> decides. It was 2 in two AF-C
+snapshots, and <strong>the AF-C runs alternated strictly</strong>: all 6
+moves to near at 200 fps (80–90 ms), all 5 moves to far at 59 fps
+(267–333 ms), at similar defocus (780–1,110 µm).</li>
+<li>Code (Read): the search end <code>0x533f48d8</code> turns
+<code>+0xc484</code> 1 into 2 (<code>0x533f49d8</code>), so the following
+search runs in the live-view mode. <code>0x533f7390</code> sets it to 1 on a
+path with a 1,000 ms timer check; <code>0x533fb860</code> resets it to 0. The
+alternation in this session and the mostly-slow AF-C session (long holds)
+both fit this state machine (Inferred).</li>
+<li>Two AF-S runs right after the warm-up AF-C ran at 100 fps on path 2
+(32–35 samples); the other ten were normal 200 fps runs.</li>
+</ul>
+<p>A patch candidate for a faster AF-C is therefore narrow: ignore
+<code>+0xc484</code> = 2 in the selector's AF-C branch, or skip the 1 → 2
+step at <code>0x533f49d8</code>. Why the firmware switches some AF-C
+searches to the live-view mode (most likely to keep the display running) is
+not known, and only a camera test of a patched build could show the
+effect.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),

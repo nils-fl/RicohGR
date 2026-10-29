@@ -1686,8 +1686,11 @@ and <code>0x533f928c</code>) is the next offline target.</p>
 drive mode, not the 200 fps mode (decoded,
 <a href="gr-mod-landscape.html#52-caf_debug">gr-mod-landscape §5.2</a>). The
 decision is the selector <code>0x533f70a4</code>; making AF-C fast needs a
-change there. Open: which of its inputs makes AF-C slow, and whether AF-C
-uses the live-view mode on purpose (to keep the display running).</p>
+change there. Measured (<a href="af-debug-log.html#session-selector">af-debug-log</a>): AF-C
+searches run in the selector branch where <code>+0xc484</code> = 2 forces the
+live-view mode, and the search end sets it to 2 when it was 1, so AF-C
+alternates between 200 and 59 fps sweeps. Open: why the firmware does that
+(probably to keep the display running).</p>
 </main>
 </div>
 <script>
