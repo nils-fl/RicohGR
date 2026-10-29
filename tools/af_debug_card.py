@@ -88,14 +88,109 @@ def mark_sh(flags):
 
 
 def mem_sh():
+    # dd cannot read this range: read() on /dev/mem fails with "Bad address"
+    # (check 2, 2026-10-29). MEMRD.BIN maps it instead, as GRKit's dump does.
     return (
         "d=/media/storage1/SCRIPT/AFDBG\n"
-        f"dd if=/dev/mem of=$d/MEM.TMP bs=4096 skip={PROBE_PAGE // 4096} count={PROBE_PAGES} 2>$d/MEM.ERR"
-        " && mv $d/MEM.TMP $d/MEM.BIN\n"
+        "$d/MEMRD.BIN\n"
+        "s=$?\n"
+        'echo "$s" >$d/MEM.ERR\n'
+        '[ "$s" = 0 ] && mv $d/MEM.TMP $d/MEM.BIN\n'
         "read t _ </proc/uptime\n"
         'echo "$t" >$d/MEM.TIME\n'
         "exit 0\n"
     ).encode("ascii")
+
+
+# MEMRD.BIN: open /dev/mem with O_SYNC, map the probe pages read-only, write
+# them to MEM.TMP. Exit status 1 open, 2 mmap, 3 create, 4 write, 0 done.
+# Only PC-relative references, so the assembled .text runs as is and needs no
+# linker (Apple clang assembles ARM ELF objects but ships no ELF linker).
+MEMRD_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    adr     r0, dev
+    ldr     r1, =0x101000           @ O_RDONLY | O_SYNC
+    mov     r7, #5                  @ open
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0                  @ fd of /dev/mem
+    mov     r0, #0
+    ldr     r1, ={size}
+    mov     r2, #1                  @ PROT_READ
+    mov     r3, #1                  @ MAP_SHARED
+    ldr     r5, ={page:#x}            @ page number of 0x5506b000
+    mov     r7, #192                @ mmap2
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    mov     r6, r0                  @ mapped pages
+    adr     r0, out
+    ldr     r1, =0x241              @ O_WRONLY | O_CREAT | O_TRUNC
+    ldr     r2, =0x1a4              @ 0644
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #3
+    bhi     quit
+    mov     r8, r0
+    mov     r1, r6
+    ldr     r2, ={size}
+    mov     r7, #4                  @ write
+    svc     #0
+    ldr     r1, ={size}
+    cmp     r0, r1
+    movne   r0, #4
+    bne     quit
+    mov     r0, r8
+    mov     r7, #118                @ fsync
+    svc     #0
+    mov     r0, r8
+    mov     r7, #6                  @ close
+    svc     #0
+    mov     r0, #0
+quit:
+    mov     r7, #1                  @ exit
+    svc     #0
+dev:
+    .asciz  "/dev/mem"
+out:
+    .asciz  "/media/storage1/SCRIPT/AFDBG/MEM.TMP"
+    .balign 4
+    .ltorg
+"""
+
+
+def memrd_bin():
+    import struct, subprocess, tempfile
+    source = MEMRD_S.replace("{page:#x}", f"{PROBE_PAGE // 4096:#x}").replace("{size}", str(PROBE_PAGES * 4096))
+    with tempfile.TemporaryDirectory() as tmp:
+        src, obj = Path(tmp, "memrd.S"), Path(tmp, "memrd.o")
+        src.write_text(source)
+        subprocess.run(["clang", "--target=armv7-linux-gnueabi", "-march=armv7-a", "-marm",
+                        "-c", str(src), "-o", str(obj)], check=True)
+        o = obj.read_bytes()
+    shoff, = struct.unpack_from("<I", o, 0x20)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", o, 0x2e)
+    secs = [struct.unpack_from("<10I", o, shoff + i * shentsize) for i in range(shnum)]
+    names = secs[shstrndx][4]
+    name = lambda sec: o[names + sec[0]:].split(b"\0")[0]
+    if any(name(sec).startswith(b".rel") for sec in secs):
+        sys.exit("MEMRD: the object has relocations; it must use PC-relative references only")
+    text = next(sec for sec in secs if name(sec) == b".text")
+    code = o[text[4]:text[4] + text[5]]
+    # One PT_LOAD segment (read + execute) at 0x10000; the code follows the headers.
+    base, headers = 0x10000, 52 + 32
+    size = headers + len(code)
+    ehdr = b"\x7fELF" + bytes([1, 1, 1, 0]) + bytes(8) + struct.pack(
+        "<HHIIIIIHHHHHH", 2, 40, 1, base + headers, 52, 0, 0x05000200, 52, 32, 1, 0, 0, 0)
+    phdr = struct.pack("<8I", 1, 0, base, base, size, size, 5, 0x1000)
+    return ehdr + phdr + code
 
 
 def read_mem(path):
@@ -129,6 +224,7 @@ def card_roots(flags):
             "SCRIPT/STARTUP.TTL": startup_ttl(flags),
             "SCRIPT/AFDBG/MARK.SH": mark_sh(flags),
             "SCRIPT/AFDBG/MEM.SH": mem_sh(),
+            "SCRIPT/AFDBG/MEMRD.BIN": memrd_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
     }

@@ -135,9 +135,13 @@ next normal power-on runs the script.</p>
 script ran past the AF command. It does not prove the command was
 accepted; only the CSV files prove that.</li>
 <li>The script then runs <code>SCRIPT/AFDBG/MEM.SH</code> every 5 s for
-10 minutes. It copies RTOS RAM <code>0x5506b000</code>–<code>0x5506cfff</code>
-read-only from <code>/dev/mem</code> to <code>SCRIPT/AFDBG/MEM.BIN</code>
-(GRKit's dump tool reads RTOS memory the same way). That region holds the
+10 minutes. It runs <code>MEMRD.BIN</code>, a 320-byte static ARM program
+that the generator assembles. The program maps RTOS RAM
+<code>0x5506b000</code>–<code>0x5506cfff</code> read-only from
+<code>/dev/mem</code> (with <code>O_SYNC</code>, as GRKit's dump tool
+does) and writes it to <code>SCRIPT/AFDBG/MEM.BIN</code>.
+<code>MEM.ERR</code> holds its exit status (0 done; 1 open, 2 map,
+3 create, 4 write). That region holds the
 AF debug flags, the CSV counter and the log slots.
 <code>python3 tools/af_debug_card.py --read-mem MEM.BIN</code> decodes
 it. It shows whether the command set the C flag, whether a log was
@@ -148,6 +152,12 @@ After one normal power-on and about six half-presses,
 <code>MARK.OK</code> read <code>6.59 EnableAfDebugDataSave 1 C sent</code>,
 so SD scripts work and the script ran 6.6 s after Linux started. No CSV
 was written. The memory probe above was added to find out why.</p>
+<p><strong>Check 2 (2026-10-29).</strong> The script ran again
+(<code>BOOT.OK</code> 6.51 s) and the probe kept polling until power-off
+(last at 38 s). But <code>dd</code> failed with
+<code>dd: /dev/mem: Bad address</code>: this kernel refuses
+<code>read()</code> on the RTOS range. Still no CSV. The probe now maps the
+memory instead (<code>MEMRD.BIN</code>).</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
