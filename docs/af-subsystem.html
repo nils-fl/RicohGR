@@ -1689,8 +1689,12 @@ decision is the selector <code>0x533f70a4</code>; making AF-C fast needs a
 change there. Measured (<a href="af-debug-log.html#session-selector">af-debug-log</a>): AF-C
 searches run in the selector branch where <code>+0xc484</code> = 2 forces the
 live-view mode, and the search end sets it to 2 when it was 1, so AF-C
-alternates between 200 and 59 fps sweeps. Open: why the firmware does that
-(probably to keep the display running).</p>
+alternates between 200 and 59 fps sweeps. <strong>Patched on the camera
+(2026-10-29):</strong> a one-word RAM patch at <code>0x533f7118</code> makes
+AF-C use the 200 fps drive; a typical AF-C refocus sweep went from 267 ms to
+70 ms (median, same targets), with no visible display problem
+(<a href="af-debug-log.html#afc-fast-patch">af-debug-log</a>). Why Ricoh uses
+the live-view drive in AF-C is still unknown.</p>
 </main>
 </div>
 <script>

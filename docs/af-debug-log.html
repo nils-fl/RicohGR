@@ -389,8 +389,19 @@ off; without <code>AFCFAST.ON</code> or without the card it is stock.</li>
 200 fps and 2 at 100 fps, none at 59 fps, also while <code>+0xc484</code> was
 2 (snapshot M003). At 700–1,000 µm defocus the sweeps took 65–90 ms (stock
 AF-C: median 267 ms). Median over all patched AF-C sweeps 100 ms (stock AF-C
-session: 283 ms). The live view looked and AF felt normal to the owner. A
-stock run with the same targets follows for the comparison.</p>
+session: 283 ms). The live view looked and AF felt normal to the owner.</p>
+<p><strong>Stock comparison (same targets, <code>work/af-logs/afc-stock/</code>,
+<code>PATCH.ERR</code> <code>off</code>).</strong> The owner found it slower.</p>
+<table>
+<thead><tr><th>AF-C</th><th>Sweeps at 200 / 59 fps</th><th>Samples, median</th><th>Sweep, median (all)</th><th>Sweep, median at 500–1,100 µm</th></tr></thead>
+<tbody>
+<tr><td>Stock</td><td>5 / 15 (of 20)</td><td>17</td><td>267 ms</td><td>267 ms (16 runs)</td></tr>
+<tr><td>Patched</td><td>13 / 0 (of 15; 2 at 100 fps)</td><td>18</td><td>100 ms</td><td>70 ms (5 runs)</td></tr>
+</tbody>
+</table>
+<p>The patch leaves the number of samples alone and cuts the time per sample,
+so a typical AF-C refocus sweep is about 200 ms (3.8×) shorter. Not measured:
+power use and heat of the 200 fps drive in long AF-C use.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
