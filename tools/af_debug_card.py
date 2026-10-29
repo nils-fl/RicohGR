@@ -801,6 +801,173 @@ def multipatch_bin(sites):
                    .replace("{entries}", entries))
 
 
+# AF state tracer. TRACE.BIN maps the static contrast AF object read-only and
+# every TRACE_PERIOD_NS records a timestamp plus the 32-bit words at
+# TRACE_OFFSETS (object-relative), TRACE_RECORDS times, appending to TRACE.BIN's
+# output TRACE.DAT every TRACE_CHUNK records (so a power-off keeps what was
+# written). Record: tv_sec, tv_nsec (CLOCK_MONOTONIC), then one word per offset.
+CAF_OBJECT = 0x5506C938
+TRACE_OFFSETS = (
+    0xC44C,   # action code (u16) | +0xc44e AF-C search flag
+    0xC4C8,   # +0xc4ca search path
+    0xC4DC,   # +0xc4df pass countdown
+    0xC470,   # +0xc470 result-accepted flag
+    0x14EA4,  # +0x14ea5 peak-check gate | +0x14ea6 success flag
+    0x0F7C,   # current area index (-2 = travel exceeded)
+    0xC434,   # sweep start pulse
+    0xC438,   # scan window end
+    0xC43C,   # in-focus pulse
+    0x14BD4,  # +0x14bd6 reversal count
+    0x1020,   # +0x1022 drive level
+    0x0FEC,   # drive-change state
+    0x10E8,   # area 0 detector: rising / falling counts (+0x102c +0xbc/+0xbe)
+    0x103C,   # area 0 detector: rising-side index (+0x102c +0x10)
+    0x1040,   # area 0 detector: falling-side index (+0x102c +0x14)
+    0xC450,   # FarEndPointState
+)
+TRACE_PERIOD_NS, TRACE_RECORDS, TRACE_CHUNK = 2_000_000, 30_000, 500
+TRACE_MAP = 0x16000                      # 0x5506c000..0x55081fff covers all offsets
+
+TRACE_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    adr     r0, dev
+    ldr     r1, =0x101000           @ O_RDONLY | O_SYNC
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0
+    mov     r0, #0                  @ map the object pages
+    ldr     r1, ={map_len}
+    mov     r2, #1
+    mov     r3, #1
+    ldr     r5, ={map_page}
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, ={obj_offset}
+    add     r6, r0, r1              @ r6 = the object in the mapping
+    mov     r0, #0                  @ anonymous buffer for one chunk
+    ldr     r1, ={chunk_bytes}
+    mov     r2, #3
+    mov     r3, #0x22               @ MAP_PRIVATE | MAP_ANONYMOUS
+    mvn     r4, #0
+    mov     r5, #0
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    mov     r10, r0                 @ r10 = buffer
+    adr     r0, out
+    ldr     r1, =0x441              @ O_WRONLY | O_CREAT | O_APPEND
+    ldr     r2, =0x1a4
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #3
+    bhi     quit
+    mov     r8, r0                  @ r8 = TRACE.DAT
+    ldr     r11, ={records}         @ records left
+chunk:
+    mov     r9, r10                 @ write pointer
+    mov     r12, #0                 @ records in this chunk
+record:
+    mov     r0, #1                  @ CLOCK_MONOTONIC
+    mov     r1, r9
+    ldr     r7, =263                @ clock_gettime
+    svc     #0
+    add     r9, r9, #8
+    adr     r2, offsets
+    mov     r3, #0
+field:
+    ldr     r1, [r2, r3, lsl #2]
+    ldr     r0, [r6, r1]
+    str     r0, [r9], #4
+    add     r3, r3, #1
+    cmp     r3, #{nfields}
+    bne     field
+    adr     r0, period              @ nanosleep(&period, NULL)
+    mov     r1, #0
+    mov     r7, #162
+    svc     #0
+    add     r12, r12, #1
+    subs    r11, r11, #1
+    beq     flush
+    cmp     r12, #{chunk}
+    bne     record
+flush:
+    mov     r0, r8
+    mov     r1, r10
+    sub     r2, r9, r10
+    mov     r7, #4                  @ write
+    svc     #0
+    mov     r0, r8
+    mov     r7, #118                @ fsync
+    svc     #0
+    cmp     r11, #0
+    bne     chunk
+    mov     r0, r8
+    mov     r7, #6
+    svc     #0
+    mov     r0, #0
+quit:
+    mov     r7, #1
+    svc     #0
+dev:
+    .asciz  "/dev/mem"
+out:
+    .asciz  "/media/storage1/SCRIPT/AFDBG/TRACE.DAT"
+    .balign 4
+period:
+    .word   0, {period_ns}
+offsets:
+{offsets}
+    .ltorg
+"""
+
+
+def trace_bin():
+    offsets = "\n".join(f"    .word   {o:#x}" for o in TRACE_OFFSETS)
+    rec = 8 + 4 * len(TRACE_OFFSETS)
+    return arm_elf(TRACE_S.replace("{map_len}", f"{TRACE_MAP:#x}")
+                   .replace("{map_page}", f"{(CAF_OBJECT & ~0xfff) >> 12:#x}")
+                   .replace("{obj_offset}", f"{CAF_OBJECT & 0xfff:#x}")
+                   .replace("{chunk_bytes}", f"{rec * TRACE_CHUNK:#x}")
+                   .replace("{records}", str(TRACE_RECORDS))
+                   .replace("{nfields}", str(len(TRACE_OFFSETS)))
+                   .replace("{chunk}", str(TRACE_CHUNK))
+                   .replace("{period_ns}", str(TRACE_PERIOD_NS))
+                   .replace("{offsets}", offsets))
+
+
+def read_trace(path):
+    """Print the changes in a TRACE.DAT: one line whenever a traced field changes."""
+    import struct
+    data = Path(path).read_bytes()
+    rec = 8 + 4 * len(TRACE_OFFSETS)
+    prev, t0 = None, None
+    for k in range(len(data) // rec):
+        sec, nsec, *w = struct.unpack_from(f"<II{len(TRACE_OFFSETS)}I", data, k * rec)
+        t = sec + nsec / 1e9
+        t0 = t if t0 is None else t0
+        v = (w[0] & 0xffff, (w[0] >> 16) & 0xff, (w[1] >> 16) & 0xff, w[2] >> 24, w[3] & 0xff,
+             (w[4] >> 8) & 0xff, (w[4] >> 16) & 0xff, w[5] - (1 << 32) if w[5] >> 31 else w[5],
+             w[6], w[7], w[8], (w[9] >> 16) & 0xffff, (w[10] >> 16) & 0xff, w[11],
+             w[12] & 0xffff, w[12] >> 16, w[13], w[14], w[15] & 0xffff)
+        if v != prev:
+            labels = ("act", "afc", "path", "count", "acc", "gate", "ok", "area", "start", "wend",
+                      "infoc", "rev", "level", "drive", "rising", "falling", "rise_i", "fall_i", "farend")
+            print(f"{t - t0:9.3f} " + " ".join(f"{a}={b}" for a, b in zip(labels, v)))
+            prev = v
+
+
 def patch_sh():
     # Applied once per power-on, only when AFCFAST.ON is on the card. The patch
     # lives in RAM; switching off (or starting without the file) gives stock.
@@ -809,6 +976,8 @@ def patch_sh():
         "exec 2>>$d/MEM.LOG\n"
         'if [ -f $d/AFCFAST.ON ]; then $d/AFCFAST.BIN; echo "on $?" >$d/PATCH.ERR; else echo off >$d/PATCH.ERR; fi\n'
         'if [ -f $d/FORCE100.ON ]; then $d/FORCE100.BIN; echo "on $?" >$d/FORCE.ERR; else echo off >$d/FORCE.ERR; fi\n'
+        # The tracer runs in the background for TRACE_RECORDS x TRACE_PERIOD_NS.
+        'if [ -f $d/TRACE.ON ]; then rm -f $d/TRACE.DAT; ($d/TRACE.BIN; echo "$?" >$d/TRACE.ERR) </dev/null >/dev/null 2>&1 & fi\n'
         "exit 0\n"
     ).encode("ascii")
 
@@ -867,6 +1036,7 @@ def card_roots(flags):
             "SCRIPT/AFDBG/AFCFAST.BIN": afcfast_bin(),
             "SCRIPT/AFDBG/GAINCAP.BIN": gaincap_bin(),
             "SCRIPT/AFDBG/FORCE100.BIN": multipatch_bin(FORCE100_SITES),
+            "SCRIPT/AFDBG/TRACE.BIN": trace_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
     }
@@ -878,12 +1048,16 @@ def main():
     parser.add_argument("--flags", default="C", help="subset of PCZO (default C: contrast AF CSV only)")
     parser.add_argument("--read-mem", metavar="MEM.BIN", help="decode a probe dump instead of writing files")
     parser.add_argument("--read-tab", metavar="TAB.BIN", help="decode a pointer dump instead of writing files")
+    parser.add_argument("--read-trace", metavar="TRACE.DAT", help="decode an AF state trace instead of writing files")
     args = parser.parse_args()
     if args.read_mem:
         read_mem(args.read_mem)
         return
     if args.read_tab:
         read_tab(args.read_tab)
+        return
+    if args.read_trace:
+        read_trace(args.read_trace)
         return
     flags = args.flags.upper()
     if not flags or any(c not in FLAGS for c in flags) or len(set(flags)) != len(flags):

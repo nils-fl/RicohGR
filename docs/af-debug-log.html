@@ -618,9 +618,23 @@ The 12 dim sweeps that accepted the peak on the first pass took 7.5 samples,
 about 250 ms. The pass-turn-return pattern roughly triples dim-light AF time,
 and the light was enough to pass the peak the first time.</li>
 </ul>
-<p>Next: decode why the first pass does not accept the peak in dim light (the
-peak check during the pass, and <code>0x53403808</code>), then test a change that
-accepts it on the first pass or turns as soon as the peak is passed.</p>
+<p><strong>Static decode so far (Read):</strong> the main peak check
+(<code>0x53404f50</code>, calling <code>0x5340bc4c</code>) is reached only from
+<code>0x53404bd8</code>, which requires the byte <code>+0x14ea5</code> to be
+non-zero. Nothing in the AF code sets it; only the constructor and vtable slot
+13 (<code>0x533f5024</code>, a reset) clear it. So peaks are apparently accepted
+at the end of a pass, in <code>0x53403808</code>. The pass ends when the
+countdown <code>+0xc4df</code> reaches 0 (<code>0x53404ba0</code>), and its
+writer is not found by direct addressing either.</p>
+<p><strong>AF state tracer:</strong> <code>TRACE.BIN</code> (540 bytes) maps the
+static contrast AF object read-only and records 16 state words (action code,
+path, countdown, accepted and success flags, the gate byte, area index, sweep
+start, window end, in-focus pulse, reversal count, drive level, drive state,
+area-0 detector counts, far-end state) every 2 ms for 60 s, with a monotonic
+timestamp, appending to <code>TRACE.DAT</code> in chunks. Switch
+<code>TRACE.ON</code>; started in the background by <code>PATCH.SH</code>;
+decoded with <code>tools/af_debug_card.py --read-trace</code>. Checked in the
+emulator over a real snapshot.</p>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>
