@@ -210,6 +210,34 @@ writes <code>MEM.BIN</code> directly. The runs (<code>tools/af_csv.py</code>):</
 </table>
 <p>Decision grade 1/1 and search path 0 in every run. Not yet controlled:
 the subjects, light and distances of this quick check.</p>
+<h3 id="session-bright-edge">Session: bright edge (2026-10-29)</h3>
+<p>24 CSVs, 9 unique runs (<code>work/af-logs/bright-edge/</code>). The
+presses came about 3 s apart (last snapshot at 85 s), as fast as the 3 s
+re-arm, so about half of the runs were not captured. The script now
+re-arms every second and snapshots memory every 10 s.</p>
+<table>
+<thead><tr><th>Run</th><th>Phase result</th><th>Samples</th><th>Sampling</th><th>Peak (area 0 / area 1)</th><th>After peak</th><th>Window end</th></tr></thead>
+<tbody>
+<tr><td>0010</td><td>near, −817 µm</td><td>13</td><td>65 ms</td><td>56 / 56</td><td>3</td><td>91</td></tr>
+<tr><td>0011</td><td>far, 288 µm</td><td>7</td><td>35 ms</td><td>9 / 9</td><td>3</td><td>39</td></tr>
+<tr><td>0012</td><td>near, −886 µm</td><td>16</td><td>80 ms</td><td>78 / 78</td><td>4</td><td>121</td></tr>
+<tr><td>0014</td><td>far, 479 µm</td><td>9</td><td>45 ms</td><td>25 / 25</td><td>3</td><td>54</td></tr>
+<tr><td>0017</td><td>near, −332 µm</td><td>7</td><td>35 ms</td><td>16 / 16</td><td>3</td><td>51</td></tr>
+<tr><td>0018</td><td>far, 1 µm</td><td>10</td><td>50 ms</td><td>32 / 32</td><td>3</td><td>62</td></tr>
+<tr><td>0020</td><td>near, −858 µm</td><td>24</td><td>120 ms</td><td><strong>none</strong> / 40</td><td><strong>16</strong></td><td>177</td></tr>
+<tr><td>0021</td><td>far, 518 µm</td><td>12</td><td>60 ms</td><td>48 / 48</td><td>3</td><td>78</td></tr>
+<tr><td>0022</td><td>near, −288 µm</td><td>8</td><td>40 ms</td><td>23 / 23</td><td>3</td><td>58</td></tr>
+</tbody>
+</table>
+<p><strong>Finding (16 runs over check 5 and this session):</strong> 14 runs
+stop 3 samples (once 4) after the confirmed peak. Both long runs (check 5
+<code>0006</code>, here <code>0020</code>) are the same case: AF area 0
+confirmed no peak (its contrast curve is flat, <code>DownRatio</code> 0 in
+the Algorithm block), while area 1 had a confirmed peak early. The sweep
+then ran 16 samples (80 ms) past that peak towards the end of the scan
+window. The reverse case (check 5 <code>0009</code>: area 0 confirmed,
+area 1 not) stopped normally after 3. So <strong>area 0 must confirm to
+stop the search</strong>; a peak in another area alone does not.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
@@ -226,8 +254,8 @@ folder named after the condition before the next one.</p>
 <li>Switch on and wait 15 s.</li>
 <li>For each run: point at the far target (or infinity), then at the
 subject, and half-press until focus is confirmed. Release.
-<strong>20 runs, at least 4–5 s apart</strong>, so that the script has
-re-armed the save (every 3 s) before the next run.</li>
+<strong>20 runs, at least 2 s apart</strong>, so that the script has
+re-armed the save (every second) before the next run.</li>
 <li>Then <strong>one extra half-press</strong>. The data of a run is
 probably written when the next AF starts, so this flushes run 20.</li>
 <li>Switch off. Copy every <code>*.csv</code> from the card root to

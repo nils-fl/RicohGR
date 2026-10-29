@@ -8,7 +8,7 @@ card directly. Copy the contents of one folder to the card root:
   enable/   turns SD scripts on  (once; hold MENU while switching on)
   log/      SCRIPT/STARTUP.TTL: at each power-on, sends
             "EnableAfDebugDataSave 1 <flags>" to the engineering shell,
-            then re-arms "CAF_Debug SaveDebugFile on" every 3 s
+            then re-arms "CAF_Debug SaveDebugFile on" every second
   disable/  turns SD scripts off again (hold MENU while switching on)
 
 The procedure, what the camera writes and how to recover are in
@@ -37,12 +37,14 @@ FLAGS = "PCZO"
 
 # The probe copies RTOS RAM 0x5506b000-0x5506cfff (RTOS addresses are physical
 # addresses; GRKit's dump tool maps /dev/mem the same way, read-only) to
-# SCRIPT/AFDBG/MEM.BIN every 3 s for 10 minutes. It holds the AF debug object
+# SCRIPT/AFDBG/MEM.BIN every 10 s for 10 minutes. It holds the AF debug object
 # 0x5506b56c (vtable 0x53c15308, flags +0x27..+0x2a, log slots +0x112c), its
 # guard 0x5506b564, the CSV counter 0x5506b568 and the busy bytes 0x5506b56a,
 # 0x5506c765. tools/af_debug_card.py --read-mem decodes it.
 PROBE_PAGE, PROBE_PAGES = 0x5506b000, 2
-PROBE_POLL_MS, PROBE_POLLS = 3000, 200
+# Re-arm every second (bright-edge session: presses about 3 s apart lost runs
+# with a 3 s re-arm); snapshot memory every 10th tick. 600 ticks = 10 minutes.
+TICK_MS, TICKS, PROBE_EVERY = 1000, 600, 10
 # The contrast CSV needs a second command (check 3, 2026-10-29): the logger
 # 0x53407c5c is called from 0x53408870 only while CAF byte +0x16d8c is set,
 # and only "CAF_Debug SaveDebugFile on [N] [name]" sets it (0x5341716c ->
@@ -77,16 +79,21 @@ def startup_ttl(flags):
         "if attempts < 60 goto mark",
         "goto done",
         ":probe",
-        "polls = 0",
-        ":poll",
-        "filesearch 'C:\\SCRIPT\\AFDBG\\CAF.OK'",
-        "if result = 0 goto read",
-        ARM_CSV,
-        ":read",
+        "ticks = 0",
+        "countdown = 0",
+        ":tick",
+        "if countdown > 0 goto arm",
         "sendln 'lcmd sh /media/storage1/SCRIPT/AFDBG/MEM.SH'",
-        f"mpause {PROBE_POLL_MS}",
-        "polls = polls + 1",
-        f"if polls < {PROBE_POLLS} goto poll",
+        f"countdown = {PROBE_EVERY}",
+        ":arm",
+        "countdown = countdown - 1",
+        "filesearch 'C:\\SCRIPT\\AFDBG\\CAF.OK'",
+        "if result = 0 goto sleep",
+        ARM_CSV,
+        ":sleep",
+        f"mpause {TICK_MS}",
+        "ticks = ticks + 1",
+        f"if ticks < {TICKS} goto tick",
         ":done",
         "end",
     ]

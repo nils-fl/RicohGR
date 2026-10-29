@@ -338,7 +338,12 @@ data (2026-10-29, <a href="af-debug-log.html">af-debug-log</a> check 5,
 run) with 8-pulse steps. Six runs ended exactly 3 samples after the
 contrast peak, after 8–11 samples in all. One run went on 16 samples past
 its peak (21 in all). So the confirmation past the peak costs 3 frames,
-15 ms at 200 fps; a controlled session should confirm this.</li>
+15 ms at 200 fps; a controlled session should confirm this.
+<strong>Bright-edge session (9 more runs):</strong> the same, 3 samples (once
+4) after the peak. The two long runs in 16 had no confirmed peak in AF
+area 0 but one in area 1, and swept 16 samples past it. So the stop test
+waits for area 0. Where that rule sits in this function or its callers is
+open.</li>
 </ul>
 </main>
 </div>

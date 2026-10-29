@@ -1647,6 +1647,14 @@ take 8–11 samples (40–55 ms of sampling) and end exactly
 (a shorter confirmation) could save at most the 15 ms of those 3 samples
 plus their lens travel. Not yet measured: the time before the sweep starts
 and after it ends, which the 240 fps video still has to give.</p>
+<p><strong>A better lever than lever 1 (measured, 16 runs).</strong> The two
+long runs (21 and 24 samples) both had a flat AF area 0 and a confirmed
+peak in area 1, and swept on 16 samples (80 ms) past that peak towards the
+end of the scan window, because only area 0's confirmation stops the
+search (<a href="af-debug-log.html#session-bright-edge">af-debug-log</a>).
+Stopping when another area has confirmed and area 0 is flat would save
+those 80 ms in about 1 of 8 runs, five times what lever 1 can save per
+run. The code that combines the areas is not yet located.</p>
 </main>
 </div>
 <script>

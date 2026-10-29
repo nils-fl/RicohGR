@@ -6,9 +6,10 @@ Reads every *.csv in each DIR (files the camera wrote with
 "CAF_Debug SaveDebugFile on", see docs/af-debug-log.html) and prints one row
 per AF run: phase result (direction, defocus, decision grade), sample rate,
 step width, number of contrast samples, the lens pulse of the contrast peak,
-and the samples taken after the peak. Repeats (the camera dumps the last run
-again when an AF start has no new search; only the live first table row
-differs) and header-only files (no search yet) are counted but not listed.
+and the samples taken after the peak, from the camera's own per-area result
+(the Algorithm block), with the end of the scan window. Repeats (the camera dumps the last run
+again when an AF start has no new search; only the live lens position and
+the live first table row differ) and header-only files (no search yet) are counted but not listed.
 Offline; reads your own files.
 """
 import hashlib, re, sys
@@ -31,9 +32,11 @@ def samples(text):
 
 
 def key(text):
-    """The file without the first row of the sample table, which holds the
-    live contrast at dump time rather than search data."""
-    return re.sub(r"(\[LensPulsePosition\][^\n]*\n)[^\n]*\n", r"\1", text, count=1)
+    """The file without the values that are live at dump time rather than
+    search data: the first row of the sample table and the leading
+    [LensPosition[mm]] / [LensPosition[pulse]] lines."""
+    text = re.sub(r"(\[LensPulsePosition\][^\n]*\n)[^\n]*\n", r"\1", text, count=1)
+    return re.sub(r"\A(?:\[LensPosition\[(?:mm|pulse)\]\][^\n]*\n)+", "", text)
 
 
 def run(path):
@@ -41,8 +44,19 @@ def run(path):
     defocus = re.findall(r"^\[ZafDefocusUm\]\t\s*(-?\d+)\s*$", text, re.M)
     grade = re.search(r"^\[DicisionGrade\]\t(\d+)\t(\d+)", text, re.M)
     rows = samples(text)
-    h = [r[1] for r in rows]
-    peak = max(range(len(h)), key=h.__getitem__) if h else None
+    # The camera's own verdict per AF area: the [-Horizontal-] rows of the
+    # [-----Algorithm-----] block are [Point] [MaxCounter] [Pulse] ...
+    # [DownRatio] ...; MaxCounter is the 1-based sample of the maximum, Pulse
+    # its lens pulse, and DownRatio is 0 when the area confirmed no peak.
+    areas = []
+    m = re.search(r"\[-Horizontal-\]\n(.*?)\n \[-Vertical-\]", text, re.S)
+    for line in (m.group(1).splitlines() if m else []):
+        v = [int(x) for x in line.split()]
+        areas.append({"max_counter": v[1], "pulse": v[2], "confirmed": v[9] > 0})
+    confirmed = [a for a in areas if a["confirmed"]]
+    # The search ends a few samples after the confirming area's maximum, or
+    # runs on to the end of the scan window when the deciding area is flat.
+    decider = max(confirmed, key=lambda a: a["max_counter"]) if confirmed else None
     return {
         "file": path.name,
         "fps": first(text, "CafFlameRate"),
@@ -53,8 +67,10 @@ def run(path):
         "defocus_um": int(defocus[-1]) if defocus else None,
         "path": first(text, "ContrastAfSearchPath"),
         "n": len(rows),
-        "peak_pulse": rows[peak][0] if peak is not None else None,
-        "after_peak": len(rows) - 1 - peak if peak is not None else None,
+        "areas": " ".join(f"{a['pulse']}{'*' if a['confirmed'] else '-'}" for a in areas),
+        "peak_pulse": decider["pulse"] if decider else None,
+        "after_peak": len(rows) - decider["max_counter"] if decider else None,
+        "end_pulse": first(text, "DetectEndFocusPulse"),
         "pulses": [r[0] for r in rows],
     }
 
@@ -74,14 +90,16 @@ def main(dirs):
             else:
                 runs.append(r)
     print(f"{'file':14s} {'fps':>4s} {'step':>4s} {'grade':>5s} {'dir':>4s} {'defocus':>7s} {'path':>4s} "
-          f"{'n':>3s} {'ms':>4s} {'peak':>5s} {'after':>5s}  pulses")
+          f"{'n':>3s} {'ms':>4s} {'areas':>12s} {'peak':>5s} {'after':>5s} {'end':>4s}  pulses")
     for r in runs:
         ms = r["n"] * r["frame_us"] / 1000 if r["frame_us"] else 0
         print(f"{r['file']:14s} {r['fps']!s:>4s} {r['step']!s:>4s} {r['grade']:>5s} {r['direction']:>4s} "
-              f"{r['defocus_um']!s:>7s} {r['path']!s:>4s} {r['n']:3d} {ms:4.0f} {r['peak_pulse']!s:>5s} "
-              f"{r['after_peak']!s:>5s}  {r['pulses']}")
+              f"{r['defocus_um']!s:>7s} {r['path']!s:>4s} {r['n']:3d} {ms:4.0f} {r['areas']:>12s} {r['peak_pulse']!s:>5s} "
+              f"{r['after_peak']!s:>5s} {r['end_pulse']!s:>4s}  {r['pulses']}")
     print(f"\n{len(runs)} runs; {repeats} identical repeats and {empty} files without a search left out.")
     print("ms = samples x frame time (VsyncTimeUs): sampling time of the sweep, not the whole AF lag.")
+    print("areas = peak pulse per AF area from the camera's Algorithm block, * confirmed, - no peak;")
+    print("peak/after = the confirmed area with the latest maximum; end = scan window end (DetectEndFocusPulse).")
 
 
 if __name__ == "__main__":
