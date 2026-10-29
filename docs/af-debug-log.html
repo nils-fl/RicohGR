@@ -780,8 +780,23 @@ failure. The user saw soft photos on presses that had failed before; one
 patched scale also enters the normalisation through
 <code>0x5340c620</code>, not only the margin.</li>
 </ul>
-<p>So the full square root trades silent misses for failures. Next: a milder
-margin, and refusing a peak that sits at the scan end without a fall.</p>
+<p>So the full square root trades silent misses for failures. The false
+locks were all at the end of the scan: in the third pass (or a full-range
+second pass) starting from the lens stop at about −15,900, a peak 11–16
+samples in. The maker notes of the photos carry no focus position, so the
+photos can't be tied to presses.</p>
+<p><strong>Patch <code>SCALE75</code> (prototype):</strong> a milder margin,
+x<sup>0.75</sup> for x = b/y &gt; 1 (stock x, <code>SQRTNS</code>
+x<sup>0.5</sup>), unchanged above b. It rewrites
+<code>0x5340c5f0</code>–<code>0x5340c614</code> (10 words) with VFP
+<code>vsqrt</code>: two conditional square roots and a multiply for the dim
+branch, and the stock clamp-and-sqrt for the bright one (which called the
+double sqrt at <code>0x53153ba8</code>). Emulated on the image: scale 6.1 →
+3.9, 13 → 6.8, 27 → 11.8, 59 → 21; bright values identical to stock; patcher
+states as expected. Switch <code>SCALE75.ON</code>, not together with
+<code>SQRTNS.ON</code>. Refusing end-of-scan peaks is not built yet: it
+needs the end-of-pass decision decoded, and this test shows first whether the
+milder margin alone removes the false locks.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than

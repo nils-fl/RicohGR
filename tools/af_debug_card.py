@@ -684,6 +684,20 @@ SQRTNS_SITES = (
     (0x5340C5F0, 0x8A000008, 0xE1A00000),   # bhi 0x5340c618 -> nop
 )
 
+# Milder variant: x^0.75 instead of x (x = b/y > 1), sqrt as stock above b.
+# SQRTNS (x^0.5) locked 11 of 12 dim presses but some on wrong, end-of-scan
+# peaks. Rewrites 0x5340c5f0..0x5340c614 with VFP vsqrt (the stock bright-light
+# path called the double sqrt at 0x53153ba8; same result):
+#   vsqrthi s14, s0; vsqrthi s13, s14; vmulhi s0, s14, s13; bhi 0x5340c618
+#   vmov s15, #0.25; vcmpe s0, s15; vmrs; vmovmi s0, s15; vsqrt s0, s0; nop
+# Scale 6.1 -> 3.9, 13 -> 6.8, 27 -> 11.8 (sqrt: 2.5, 3.6, 5.2). Not together
+# with SQRTNS (the patcher then finds an unknown word and writes nothing).
+SCALE75_SITES = tuple(zip(range(0x5340C5F0, 0x5340C618, 4), (
+    0x8A000008, 0xE3063BD4, 0xE34533C1, 0xEDD37A00, 0xEEB40AE7,
+    0xEEF1FA10, 0x5EF07A40, 0xEEB70AE7, 0xEBF51D64, 0xEEB70BC0), (
+    0x8EB17AC0, 0x8EF16AC7, 0x8E270A26, 0x8A000005, 0xEEF57A00,
+    0xEEB40AE7, 0xEEF1FA10, 0x4EB00A67, 0xEEB10AC0, 0xE1A00000)))
+
 # MULTIPATCH: check the build identity, map every site read-write, require all
 # sites stock (apply) or all patched (exit 6, nothing to do); a mixture or an
 # unknown word exits 5 before anything is written. Then write each site, dsb,
@@ -1187,6 +1201,7 @@ def patch_sh():
         'if [ -f $d/AFCFAST.ON ]; then $d/AFCFAST.BIN; echo "on $?" >$d/PATCH.ERR; else echo off >$d/PATCH.ERR; fi\n'
         'if [ -f $d/FORCE100.ON ]; then $d/FORCE100.BIN; echo "on $?" >$d/FORCE.ERR; else echo off >$d/FORCE.ERR; fi\n'
         'if [ -f $d/SQRTNS.ON ]; then $d/SQRTNS.BIN; echo "on $?" >$d/SQRTNS.ERR; else echo off >$d/SQRTNS.ERR; fi\n'
+        'if [ -f $d/SCALE75.ON ]; then $d/SCALE75.BIN; echo "on $?" >$d/SCALE75.ERR; else echo off >$d/SCALE75.ERR; fi\n'
         # The tracer runs in the background for TRACE_RECORDS x TRACE_PERIOD_NS.
         'if [ -f $d/TRACE.ON ]; then rm -f $d/TRACE.DAT; ($d/TRACE.BIN; echo "$?" >$d/TRACE.ERR) </dev/null >/dev/null 2>&1 & fi\n'
         "exit 0\n"
@@ -1248,6 +1263,7 @@ def card_roots(flags):
             "SCRIPT/AFDBG/GAINCAP.BIN": gaincap_bin(),
             "SCRIPT/AFDBG/FORCE100.BIN": multipatch_bin(FORCE100_SITES),
             "SCRIPT/AFDBG/SQRTNS.BIN": multipatch_bin(SQRTNS_SITES),
+            "SCRIPT/AFDBG/SCALE75.BIN": multipatch_bin(SCALE75_SITES),
             "SCRIPT/AFDBG/TRACE.BIN": trace_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
