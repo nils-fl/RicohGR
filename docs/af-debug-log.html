@@ -445,6 +445,14 @@ table may not exist yet at boot or may be rebuilt.</li>
 <li><strong>Checked offline:</strong> in the emulator with the camera's real
 snapshot and table: apply, already applied, restore, restore when stock,
 unexpected table (exit 5), other build (exit 3).</li>
+<li><strong>First camera run (<code>work/af-logs/gaincap-24x/</code>):</strong>
+<code>GAIN.ERR</code> <code>on 0</code>, but no effect. The last table dump
+(taken before each patch run) showed the stock caps, no AF frame exceeded gain
+525,312, and 10 of 17 sweeps still ran at 29 fps; the owner could not tell a
+difference. Either the camera rewrites the table between runs, or the write
+does not reach what the camera uses. The patcher now exits 6 for "already
+patched" and 0 only for "written now", and <code>MEM.SH</code> logs every run
+to <code>GAIN.LOG</code> to tell the two apart.</li>
 <li><strong>Not known:</strong> whether the level choice reads this cap (if
 not, the patch only allows more gain without changing the frame rate),
 whether 24× is within what the sensor drive accepts, and whether contrast AF

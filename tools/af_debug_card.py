@@ -134,7 +134,10 @@ def mem_sh():
         "$d/PTRRD.BIN; echo $? >$d/TAB.ERR\n"
         # The gain-cap patch is idempotent, so it runs with every snapshot: the
         # drive table may not exist yet at boot, or may be rebuilt later.
-        'if [ -f $d/GAINCAP.ON ]; then $d/GAINCAP.BIN; echo "on $?" >$d/GAIN.ERR; else echo off >$d/GAIN.ERR; fi\n'
+        # GAIN.LOG: uptime and exit per run (0 written, 6 already patched), to
+        # see whether the camera puts the table back between runs.
+        'if [ -f $d/GAINCAP.ON ]; then $d/GAINCAP.BIN; g=$?; echo "on $g" >$d/GAIN.ERR; '
+        'read t _ </proc/uptime; echo "$t $g" >>$d/GAIN.LOG; else echo off >$d/GAIN.ERR; fi\n'
         # Keep every snapshot: M000.BIN, M001.BIN ... (counter in MEM.N).
         'n=$(cat $d/MEM.N 2>/dev/null || echo 0)\n'
         '[ "$s" = 0 ] && cp $d/MEM.BIN $d/M$(printf %03d "$n").BIN && echo $((n + 1)) >$d/MEM.N\n'
@@ -498,8 +501,9 @@ INTEG_ROW = (4986, 9970, 19967, 29964)
 # GAINCAP.BIN: check the build identity, follow +0xfcc, check the integration
 # row, then write the gain row (no argument: GAIN_FAST in all four levels; any
 # argument: the stock row) through /dev/mem with dsb + cacheflush and read
-# back. Exit: 0 done or already so, 1 open, 2 map, 3 other build or no table,
-# 5 unexpected table (nothing written), 7 read-back differs.
+# back. Exit: 0 written now, 6 already in the wanted state, 1 open, 2 map,
+# 3 other build or no table, 5 unexpected table (nothing written), 7 read-back
+# differs.
 GAINCAP_S = r"""    .syntax unified
     .arm
     .text
@@ -585,7 +589,7 @@ same:
     add     r3, r3, #1
     cmp     r3, #4
     bne     same
-    mov     r0, #0
+    mov     r0, #6                  @ already in the wanted state
     b       quit
 expect:
     mov     r3, #0
