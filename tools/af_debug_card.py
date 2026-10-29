@@ -50,7 +50,7 @@ PROBE_POLL_MS, PROBE_POLLS = 3000, 200
 # script re-arms it at every poll. SaveDebugFile writes through the contrast AF
 # object [CafFactory 0x5506c870 + 4] (getter 0x533f1d94), which is 0 until the
 # factory builds it, so the script arms only after MEM.SH has seen the pointer
-# set (CAF.OK). Check 3 saw 0x5506c938 there.
+# set (CAF.OK, written by MEMRD.BIN). Checks 3 and 4 saw 0x5506c938 there.
 ARM_CSV = "sendln 'CAF_Debug SaveDebugFile on'"
 CAF_POINTER = 0x5506c874
 
@@ -108,13 +108,13 @@ def mem_sh():
     # (check 2, 2026-10-29). MEMRD.BIN maps it instead, as GRKit's dump does.
     return (
         "d=/media/storage1/SCRIPT/AFDBG\n"
+        # Errors of this script, for the next check (check 4: a dd/tr/wc
+        # pointer test here never wrote CAF.OK; MEMRD.BIN now does it).
+        "exec 2>>$d/MEM.LOG\n"
         "$d/MEMRD.BIN\n"
         "s=$?\n"
         'echo "$s" >$d/MEM.ERR\n'
         '[ "$s" = 0 ] && mv $d/MEM.TMP $d/MEM.BIN\n'
-        # CAF.OK once the contrast AF object pointer is non-zero (any non-zero byte).
-        f"n=$(dd if=$d/MEM.BIN bs=1 skip={CAF_POINTER - PROBE_PAGE} count=4 2>/dev/null | tr -d '\\000' | wc -c)\n"
-        '[ "$s" = 0 ] && [ "$n" -gt 0 ] && echo "$n" >$d/CAF.OK\n'
         "read t _ </proc/uptime\n"
         'echo "$t" >$d/MEM.TIME\n'
         "exit 0\n"
@@ -122,7 +122,8 @@ def mem_sh():
 
 
 # MEMRD.BIN: open /dev/mem with O_SYNC, map the probe pages read-only, write
-# them to MEM.TMP. Exit status 1 open, 2 mmap, 3 create, 4 write, 0 done.
+# them to MEM.TMP, and create CAF.OK when the contrast AF object pointer is
+# non-zero. Exit status 1 open, 2 mmap, 3 create, 4 write, 0 done.
 # Only PC-relative references, so the assembled .text runs as is and needs no
 # linker (Apple clang assembles ARM ELF objects but ships no ELF linker).
 MEMRD_S = r"""    .syntax unified
@@ -172,6 +173,20 @@ _start:
     mov     r0, r8
     mov     r7, #6                  @ close
     svc     #0
+    ldr     r1, ={caf_offset}
+    ldr     r0, [r6, r1]            @ contrast AF object pointer
+    cmp     r0, #0
+    beq     done
+    adr     r0, caf_ok
+    ldr     r1, =0x241
+    ldr     r2, =0x1a4
+    mov     r7, #5                  @ create CAF.OK
+    svc     #0
+    cmn     r0, #4096
+    bhi     done
+    mov     r7, #6
+    svc     #0
+done:
     mov     r0, #0
 quit:
     mov     r7, #1                  @ exit
@@ -180,6 +195,8 @@ dev:
     .asciz  "/dev/mem"
 out:
     .asciz  "/media/storage1/SCRIPT/AFDBG/MEM.TMP"
+caf_ok:
+    .asciz  "/media/storage1/SCRIPT/AFDBG/CAF.OK"
     .balign 4
     .ltorg
 """
@@ -187,7 +204,9 @@ out:
 
 def memrd_bin():
     import struct, subprocess, tempfile
-    source = MEMRD_S.replace("{page:#x}", f"{PROBE_PAGE // 4096:#x}").replace("{size}", str(PROBE_PAGES * 4096))
+    source = (MEMRD_S.replace("{page:#x}", f"{PROBE_PAGE // 4096:#x}")
+              .replace("{size}", str(PROBE_PAGES * 4096))
+              .replace("{caf_offset}", f"{CAF_POINTER - PROBE_PAGE:#x}"))
     with tempfile.TemporaryDirectory() as tmp:
         src, obj = Path(tmp, "memrd.S"), Path(tmp, "memrd.o")
         src.write_text(source)

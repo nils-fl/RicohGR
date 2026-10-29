@@ -178,6 +178,14 @@ which held <code>0x5506c938</code> in the snapshot. Because that pointer is
 0 until the factory builds the object, <code>MEM.SH</code> writes
 <code>CAF.OK</code> once it sees it non-zero, and only then does the
 script arm the save.</p>
+<p><strong>Check 4 (2026-10-29).</strong> The snapshot (69 s) held the
+pointer <code>0x5506c938</code>, but <code>CAF.OK</code> was never
+written, so the save was never armed and no CSV appeared. The shell test
+(<code>dd</code> | <code>tr -d '\000'</code> | <code>wc -c</code>) did not
+work on the camera's BusyBox; its error was not captured.
+<code>MEMRD.BIN</code> now reads the pointer from the mapped page and
+creates <code>CAF.OK</code> itself, and <code>MEM.SH</code> appends its
+errors to <code>MEM.LOG</code>.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
