@@ -59,6 +59,8 @@ strong{font-weight:650}
 <li><a href="#session-selector" id="toc-session-selector">Session: drive-mode selector</a></li>
 <li><a href="#session-low-light-eye" id="toc-session-low-light-eye">Session: low light, eye detection on/off</a></li>
 <li><a href="#session-low-light-face" id="toc-session-low-light-face">Session: low light, AF-S, face on/off</a></li>
+<li><a href="#session-drive-table" id="toc-session-drive-table">Session: drive table</a></li>
+<li><a href="#gain-cap-patch" id="toc-gain-cap-patch">Dim-light gain-cap patch (prototype)</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -404,6 +406,49 @@ median) through more reversals (paths 1 and 2). That, together with the
 29 fps sampling, is the low-light cost.</li>
 <li>Face on/off: the switch time is not in the data. Splitting the session
 in halves gives 367 vs 383 ms median, no clear difference.</li>
+</ul>
+<h3 id="session-drive-table">Session: drive table (2026-10-29)</h3>
+<p>AF-S, dim then brighter (<code>work/af-logs/drive-table/</code>; an unexplained
+earlier start is kept in <code>work/af-logs/unlabelled-2/</code>). The level byte
+<code>+0x1022</code> went 0 → 3 in the dim part and 1/2/0 when pointed brighter;
+the sweeps ran at 29, 49, 100 and 200 fps accordingly. <code>PTRRD.BIN</code>
+dumped the per-level drive table behind <code>+0xfcc</code>:</p>
+<table>
+<thead><tr><th>Offset</th><th>Level 0 (200 fps)</th><th>1 (100)</th><th>2 (49)</th><th>3 (29)</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>+0x00</code></td><td>525,312</td><td>525,312</td><td>524,800</td><td>524,288</td><td>maximum AF gain, about 8× (<code>0x80400</code>, <code>0x80400</code>, <code>0x80200</code>, <code>0x80000</code>)</td></tr>
+<tr><td><code>+0x10</code></td><td>4,986</td><td>9,970</td><td>19,967</td><td>29,964</td><td>integration time, µs</td></tr>
+<tr><td><code>+0x30</code></td><td>4</td><td>4</td><td>4</td><td>240</td><td>unknown</td></tr>
+<tr><td><code>+0x40</code></td><td colspan="4">3.0 (float) in all four</td><td>unknown; the AE info has the same 3.0</td></tr>
+</tbody>
+</table>
+<p>The table is built at run time (on the heap, and its values are not in the
+firmware image), so the gain caps are computed, not stored. This matches the
+ceiling inferred from the CSVs.</p>
+<h2 id="gain-cap-patch">Dim-light gain-cap patch (prototype, 2026-10-29)</h2>
+<ul>
+<li><strong>Change:</strong> the four gain caps in the drive table, about 8× →
+24× (<code>0x180000</code>). Data in RAM, no code change. At 24× the 100 fps
+level reaches the exposure that the 29 fps level reaches today, so dim scenes
+should stay at 100 fps, with a third of the light per sample (a noisier
+contrast signal).</li>
+<li><strong>Patcher:</strong> <code>GAINCAP.BIN</code> (616 bytes). It checks
+the build identity, follows <code>+0xfcc</code>, requires the integration row
+4,986 / 9,970 / 19,967 / 29,964 and a stock (or already patched) gain row,
+writes the row through <code>/dev/mem</code> with <code>dsb</code> and
+<code>cacheflush</code>, and reads it back. With an argument it restores the
+stock row. Exit in <code>GAIN.ERR</code>: <code>on 0</code> done or already, 3
+other build or no table yet, 5 unexpected table (nothing written).</li>
+<li><strong>Switch:</strong> <code>SCRIPT/AFDBG/GAINCAP.ON</code>.
+<code>MEM.SH</code> runs the patcher with every snapshot (2 s), because the
+table may not exist yet at boot or may be rebuilt.</li>
+<li><strong>Checked offline:</strong> in the emulator with the camera's real
+snapshot and table: apply, already applied, restore, restore when stock,
+unexpected table (exit 5), other build (exit 3).</li>
+<li><strong>Not known:</strong> whether the level choice reads this cap (if
+not, the patch only allows more gain without changing the frame rate),
+whether 24× is within what the sensor drive accepts, and whether contrast AF
+still finds the peak in the noisier signal.</li>
 </ul>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no

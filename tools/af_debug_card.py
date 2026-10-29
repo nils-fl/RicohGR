@@ -132,6 +132,9 @@ def mem_sh():
         "s=$?\n"
         'echo "$s" >$d/MEM.ERR\n'
         "$d/PTRRD.BIN; echo $? >$d/TAB.ERR\n"
+        # The gain-cap patch is idempotent, so it runs with every snapshot: the
+        # drive table may not exist yet at boot, or may be rebuilt later.
+        'if [ -f $d/GAINCAP.ON ]; then $d/GAINCAP.BIN; echo "on $?" >$d/GAIN.ERR; else echo off >$d/GAIN.ERR; fi\n'
         # Keep every snapshot: M000.BIN, M001.BIN ... (counter in MEM.N).
         'n=$(cat $d/MEM.N 2>/dev/null || echo 0)\n'
         '[ "$s" = 0 ] && cp $d/MEM.BIN $d/M$(printf %03d "$n").BIN && echo $((n + 1)) >$d/MEM.N\n'
@@ -481,6 +484,172 @@ def read_tab(path):
             print(f"  +{row * 4:#04x}: " + " ".join(f"{w:10d}" for w in words[row:row + 4]))
 
 
+# Dim-light gain-cap patch (prototype). The drive table behind +0xfcc holds per
+# level (200/100/49/29 fps) the maximum AF gain at +0x00 (about 8x: 0x80400,
+# 0x80400, 0x80200, 0x80000) and the integration time in us at +0x10 (4986,
+# 9970, 19967, 29964); measured with PTRRD.BIN (session drive-table). Contrast AF
+# drops to a slower level when its gain reaches that cap (all sessions), so a
+# higher cap should keep dim scenes at a faster level, with a noisier signal.
+# 24x lets level 1 (100 fps) reach the exposure that level 3 reaches today.
+GAIN_STOCK = (0x80400, 0x80400, 0x80200, 0x80000)
+GAIN_FAST = 0x180000                    # 24x if 0x10000 is 1x
+INTEG_ROW = (4986, 9970, 19967, 29964)
+
+# GAINCAP.BIN: check the build identity, follow +0xfcc, check the integration
+# row, then write the gain row (no argument: GAIN_FAST in all four levels; any
+# argument: the stock row) through /dev/mem with dsb + cacheflush and read
+# back. Exit: 0 done or already so, 1 open, 2 map, 3 other build or no table,
+# 5 unexpected table (nothing written), 7 read-back differs.
+GAINCAP_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    ldr     r9, [sp]                @ argc
+    adr     r0, dev
+    ldr     r1, =0x101002           @ O_RDWR | O_SYNC
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0
+    mov     r0, #0                  @ identity page
+    mov     r1, #4096
+    mov     r2, #1
+    mov     r3, #1
+    ldr     r5, ={id_page}
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, ={id_offset}
+    ldr     r0, [r0, r1]
+    ldr     r1, ={identity}
+    cmp     r0, r1
+    movne   r0, #3
+    bne     quit
+    mov     r0, #0                  @ contrast AF object page
+    mov     r1, #4096
+    mov     r2, #1
+    mov     r3, #1
+    ldr     r5, ={obj_page}
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, ={ptr_offset}
+    ldr     r10, [r0, r1]           @ table address
+    cmp     r10, #0
+    moveq   r0, #3
+    beq     quit
+    mov     r0, #0                  @ table pages, read-write
+    mov     r1, #8192
+    mov     r2, #3
+    mov     r3, #1
+    lsr     r5, r10, #12
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, =0xfff
+    and     r1, r10, r1
+    add     r6, r0, r1              @ the table in the mapping
+    adr     r8, integ               @ check the integration row
+    mov     r3, #0
+check:
+    add     r2, r6, #0x10
+    ldr     r0, [r2, r3, lsl #2]
+    ldr     r1, [r8, r3, lsl #2]
+    cmp     r0, r1
+    movne   r0, #5
+    bne     quit
+    add     r3, r3, #1
+    cmp     r3, #4
+    bne     check
+    adr     r8, stock               @ r8 = expected now, r10 = to write
+    adr     r10, fast
+    cmp     r9, #1
+    movne   r1, r8
+    movne   r8, r10
+    movne   r10, r1
+    mov     r3, #0                  @ already in the wanted state?
+same:
+    ldr     r0, [r6, r3, lsl #2]
+    ldr     r1, [r10, r3, lsl #2]
+    cmp     r0, r1
+    bne     expect
+    add     r3, r3, #1
+    cmp     r3, #4
+    bne     same
+    mov     r0, #0
+    b       quit
+expect:
+    mov     r3, #0
+expect1:
+    ldr     r0, [r6, r3, lsl #2]
+    ldr     r1, [r8, r3, lsl #2]
+    cmp     r0, r1
+    movne   r0, #5
+    bne     quit
+    add     r3, r3, #1
+    cmp     r3, #4
+    bne     expect1
+    mov     r3, #0
+write:
+    ldr     r1, [r10, r3, lsl #2]
+    str     r1, [r6, r3, lsl #2]
+    add     r3, r3, #1
+    cmp     r3, #4
+    bne     write
+    dsb     sy
+    mov     r0, r6
+    add     r1, r6, #16
+    mov     r2, #0
+    ldr     r7, =0xf0002            @ cacheflush
+    svc     #0
+    mov     r3, #0
+verify:
+    ldr     r0, [r6, r3, lsl #2]
+    ldr     r1, [r10, r3, lsl #2]
+    cmp     r0, r1
+    movne   r0, #7
+    bne     quit
+    add     r3, r3, #1
+    cmp     r3, #4
+    bne     verify
+    mov     r0, #0
+quit:
+    mov     r7, #1
+    svc     #0
+dev:
+    .asciz  "/dev/mem"
+    .balign 4
+integ:
+    .word   {i0}, {i1}, {i2}, {i3}
+stock:
+    .word   {s0}, {s1}, {s2}, {s3}
+fast:
+    .word   {f}, {f}, {f}, {f}
+    .ltorg
+"""
+
+
+def gaincap_bin():
+    src = (GAINCAP_S.replace("{id_page}", f"{RTOS_IDENTITY >> 12:#x}")
+           .replace("{id_offset}", f"{RTOS_IDENTITY & 0xfff:#x}")
+           .replace("{identity}", f"{GR3X_160:#x}")
+           .replace("{obj_page}", f"{PTR_PAGE >> 12:#x}")
+           .replace("{ptr_offset}", f"{PTR_OFFSETS[0]:#x}")
+           .replace("{f}", f"{GAIN_FAST:#x}"))
+    for k in range(4):
+        src = src.replace(f"{{i{k}}}", str(INTEG_ROW[k])).replace(f"{{s{k}}}", f"{GAIN_STOCK[k]:#x}")
+    return arm_elf(src)
+
+
 def patch_sh():
     # Applied once per power-on, only when AFCFAST.ON is on the card. The patch
     # lives in RAM; switching off (or starting without the file) gives stock.
@@ -544,6 +713,7 @@ def card_roots(flags):
             "SCRIPT/AFDBG/PTRRD.BIN": ptrrd_bin(),
             "SCRIPT/AFDBG/PATCH.SH": patch_sh(),
             "SCRIPT/AFDBG/AFCFAST.BIN": afcfast_bin(),
+            "SCRIPT/AFDBG/GAINCAP.BIN": gaincap_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
     }
