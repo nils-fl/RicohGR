@@ -868,6 +868,21 @@ light levels traced so far (no truly bright session yet).</p>
 (49 fps, <code>mov rX, #2</code>), emulated in all states. Card: SCALE75.ON on
 every power-on, <code>AB.ON</code> = FORCE49 on odd ones, to see whether
 faster sampling locks in dim light now that the margin is milder.</p>
+<h3 id="force49-ab">FORCE49 A/B with the milder margin (2026-10-29)</h3>
+<p><code>work/af-logs/f49-ab</code>: SCALE75 on in both power-ons; FORCE49
+on power-on 1 only (<code>AB.LOG</code>), same dark room and spots. The drive
+level field <code>+0x1022</code> still read 3, but the contrast frames came
+every 17.6 ms against 33.5 ms, so the sampling was faster.</p>
+<ul>
+<li><strong>Power-on 1, 49 fps:</strong> 13 presses, 6 locked, 5 failed,
+2 aborted; median 1.5 s.</li>
+<li><strong>Power-on 2, 29 fps:</strong> 10 presses, 9 locked (one at the near
+stop), 1 failed; median 1.5 s. The user, without knowing, leaned towards
+this session.</li>
+</ul>
+<p>Even with the milder margin, the shorter frames are too noisy in this light:
+faster sampling loses more presses than it saves time. The 29 fps drop in dim
+light stays necessary; the frame-rate lever is closed.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than
