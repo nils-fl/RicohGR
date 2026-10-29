@@ -683,10 +683,37 @@ update counts a rise when (b4 + 3 b8)/4 &gt; (b0 + 2 b4 + b8)/4, otherwise a
 fall. Records are 124 bytes. <code>--trace-contrast</code> prints one line per
 frame and area during searches; the decoders still read first-version
 traces.</p>
+<h3 id="dim-contrast">Contrast trace, dim AF-S with low-contrast targets (2026-10-29)</h3>
+<p><code>work/af-logs/dim-contrast</code>: tracer v2, 10 presses, several on
+dark low-contrast surfaces as asked. 5 accepted on the first pass (616–1,172
+ms), 2 after a turn (about 1.8 s), 3 failed after three passes (2.8–3.9 s,
+action 64).</p>
+<ul>
+<li><strong>The failed passes are not lost in noise.</strong> In the rejected
+first and second passes of the failed presses (22.1 s, 22.8 s, 43.9 s,
+44.7 s) the smoothed area-0 value ((b0 + 2 b4 + b8)/4) shows one clean peak:
+4–6 rising frames, then 5–8 falling ones, a swing of 0.021–0.035, about 2–3
+times the area-0 peak margin (<code>+0x4c</code> × <code>+0x80</code>) and
+well above the frame-to-frame jitter after the peak (about 0.001). The rise and
+fall counts reached the values that clean presses accept at.</li>
+<li><strong>Accepted peaks can be smaller:</strong> 0.010 (area 1, 50.6 s) and
+0.021 (area 0, 11.8 s). So neither the size of the peak nor the noise decides;
+another test rejects these passes.</li>
+<li><strong>Candidate (static, not confirmed):</strong> after a pass,
+<code>0x5340467c</code> sets the area index to −1 (no peak) when
+peak − minimum &gt; 2 × (value at a given sample − minimum), with the values
+from the detector helpers <code>0x5340bbe0</code> (peak),
+<code>0x5340bc18</code> (value at the falling-side index) and
+<code>0x5340bc2c</code> (value at a sample). Reconstructed from the trace, this
+ratio does not cleanly separate accepted from rejected passes, possibly because
+the trace sees the smoothing only every 2 ms and not the detector's own
+per-sample array.</li>
+</ul>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
-on the first pass) is wrong. Two levers remain. (1) Noise: add a margin to the
-rise/fall comparison, or compare less smoothed differences, so noise doesn't
-reset the counts; this targets the slowest presses (1.5–2.7 s, 3 of 10).
+on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
+contrast trace above shows that clear peaks are rejected by a test other than
+noise, so a noise margin alone would not help; that test has to be found
+first.
 (2) Wrong side: turn after fewer falling samples, or jump back to the first
 pass's start instead of retracing it; at most about 300 ms on about 4 of 10
 presses. A wider start margin would cost about 100 ms on every press and save
