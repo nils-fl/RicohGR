@@ -580,11 +580,19 @@ after a failed narrow sweep. The logged size is a per-area table at CAF
 <code>+0x4200</code> indexed by the main-area index <code>+0xf7c</code>
 (printed by <code>0x534091d4</code>).</li>
 </ul>
-<p><strong>What this suggests:</strong> the margin of a peak over the noise grows
-with light per pixel × pixels, so more pixels can stand in for light. Using
-the wide area from the first sweep should cut failures and reversals in dim
-light, and might allow a faster drive level with the same reliability. Not yet
-tested; the code that sets <code>+0xf7c</code> is the next read.</p>
+<p><strong>Correction, same day: the wide area is only a small lever.</strong> In
+the standard AF-S layout area 0 is narrow (90) and area 1 wide (178), both
+measured in every sweep (snapshots of the width table at CAF
+<code>+0x4200</code>; a retry widens area 0 too). Comparing the two areas
+within the same 168 sweeps (same light, same lens path), the wide area's
+peak-to-noise ratio is only 1.12× the narrow one (median; better in 102 of
+168), not the √2 that twice the pixels would give, because its peak is flatter
+(e.g. rise 0.64 against 0.73 at 29 fps): the extra pixels are mostly
+background. In the failed forced-100 sweeps the wide area 1 found no peak
+either. So the 21 successful wide-area retries owe most of their success to
+being a second pass over a narrowed lens range, not to the width. Starting
+with the wide area would gain roughly the equivalent of 25% more light; not
+worth a patch.</p>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>

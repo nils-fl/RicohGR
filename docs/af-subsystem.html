@@ -1732,8 +1732,9 @@ a higher gain ceiling is a lever.</p>
 <p><strong>Why it needs that light (measured, 2026-10-29):</strong> the contrast
 measure has a sensor-noise floor that grows with √(brightness × gain), so dark
 frames flatten the focus peak; fast modes also read fewer lines. More pixels
-can stand in for light: every sweep with the wide AF area (178 instead of 90)
-found its peak (<a href="af-debug-log.html#why-af-needs-light">af-debug-log</a>).</p>
+could in principle stand in for light, but a wider AF area mostly adds
+background: within the same sweeps it improved peak-to-noise by only 1.12×
+(<a href="af-debug-log.html#why-af-needs-light">af-debug-log</a>).</p>
 <p><strong>Dim light: phase confidence.</strong> In the AF-S dim session, sweeps
 with a low phase grade (0/0) took 467 ms median against 240 ms with grade 1/1,
 through more reversals. In the dim AF-C session, with one larger AF area
