@@ -797,6 +797,24 @@ states as expected. Switch <code>SCALE75.ON</code>, not together with
 <code>SQRTNS.ON</code>. Refusing end-of-scan peaks is not built yet: it
 needs the end-of-pass decision decoded, and this test shows first whether the
 milder margin alone removes the false locks.</p>
+<h3 id="scale75-test">SCALE75 camera test (2026-10-29)</h3>
+<p><code>work/af-logs/dim-scale75</code>: <code>SCALE75.ERR</code>
+<code>on 0</code>, tracer on (switched off before 60 s, so no
+<code>TRACE.ERR</code>), 11 presses, no photos. All 11 locked, at lens
+positions −16,224 to −16,322, all within the range of the scene's other
+presses; none at the near stop (about −15,900), where the three
+<code>SQRTNS</code> false locks ended. The user found it better. But the light
+was brighter than in the earlier sessions: the patched scale stayed at
+1.0–1.4 in 8 presses (stock would give the same), and only two presses reached
+dim levels (scale 4.0 and 7.9, stock 6.3 and 15.7); both locked at plausible
+positions. A stock and a patched session in the same light are still needed
+for a fair comparison.</p>
+<table>
+<tr><th>Session</th><th>Margin</th><th>Presses</th><th>Locked</th><th>Locked at the near stop</th><th>Stock-equivalent scale</th></tr>
+<tr><td>dim-arrays</td><td>stock</td><td>13</td><td>7</td><td>0 (one failure ended there)</td><td>1–30</td></tr>
+<tr><td>dim-sqrtns</td><td>x<sup>0.5</sup></td><td>12</td><td>11</td><td>3</td><td>about 2–70</td></tr>
+<tr><td>dim-scale75</td><td>x<sup>0.75</sup></td><td>11</td><td>11</td><td>0</td><td>1–16</td></tr>
+</table>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than
