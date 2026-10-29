@@ -824,7 +824,26 @@ TRACE_OFFSETS = (
     0x103C,   # area 0 detector: rising-side index (+0x102c +0x10)
     0x1040,   # area 0 detector: falling-side index (+0x102c +0x14)
     0xC450,   # FarEndPointState
+    # Horizontal rise/fall detectors, one per AF area: +0x102c + 0xc4 x area
+    # (vertical ones at +0x2724). Update 0x5340bf78: b = noise-normalised
+    # contrast of the last three frames (0x5340b3ac); a rise when
+    # (b4 + 3 b8)/4 > (b0 + 2 b4 + b8)/4, otherwise a fall.
+    0x10D0,   # area 0: raw contrast, newest frame (+0xa4)
+    0x10B8,   # area 0: brightness, newest frame (+0x8c)
+    0x10DC,   # area 0: b0 (float, +0xb0)
+    0x10E0,   # area 0: b4 (float, +0xb4)
+    0x10E4,   # area 0: b8 (float, +0xb8)
+    0x1078,   # area 0: peak margin factor (float, +0x4c)
+    0x10AC,   # area 0: peak margin scale (float, +0x80)
+    0x1194,   # area 1: raw contrast (+0xa4)
+    0x117C,   # area 1: brightness (+0x8c)
+    0x11A0,   # area 1: b0
+    0x11A4,   # area 1: b4
+    0x11A8,   # area 1: b8
+    0x11AC,   # area 1: rising / falling counts
 )
+# Earlier traces recorded only the first 16 words.
+TRACE_FIELDS_V1 = 16
 TRACE_PERIOD_NS, TRACE_RECORDS, TRACE_CHUNK = 2_000_000, 30_000, 500
 TRACE_MAP = 0x16000                      # 0x5506c000..0x55081fff covers all offsets
 
@@ -947,15 +966,29 @@ def trace_bin():
                    .replace("{offsets}", offsets))
 
 
-def read_trace(path):
-    """Print the changes in a TRACE.DAT: one line whenever a traced field changes."""
+def trace_records(path):
+    """The records of a TRACE.DAT as (seconds, words). Traces made before the
+    contrast fields were added have TRACE_FIELDS_V1 words per record; the
+    record size is picked by the 2 ms step between the first timestamps."""
     import struct
     data = Path(path).read_bytes()
-    rec = 8 + 4 * len(TRACE_OFFSETS)
+    for n in (len(TRACE_OFFSETS), TRACE_FIELDS_V1):
+        rec = 8 + 4 * n
+        if len(data) % rec or len(data) < 3 * rec:
+            continue
+        ts = [struct.unpack_from("<II", data, k * rec) for k in range(3)]
+        steps = [(b[0] - a[0]) * 1e9 + b[1] - a[1] for a, b in zip(ts, ts[1:])]
+        if all(nsec < 1_000_000_000 for _, nsec in ts) and all(0 < d < 50 * TRACE_PERIOD_NS for d in steps):
+            return [(sec + nsec / 1e9, w) for sec, nsec, *w in
+                    (struct.unpack_from(f"<II{n}I", data, k * rec) for k in range(len(data) // rec))]
+    sys.exit(f"{path}: not a TRACE.DAT of a known layout")
+
+
+def read_trace(path):
+    """Print the changes in a TRACE.DAT: one line whenever a traced state field
+    changes (the contrast fields change every frame; see --trace-contrast)."""
     prev, t0 = None, None
-    for k in range(len(data) // rec):
-        sec, nsec, *w = struct.unpack_from(f"<II{len(TRACE_OFFSETS)}I", data, k * rec)
-        t = sec + nsec / 1e9
+    for t, w in trace_records(path):
         t0 = t if t0 is None else t0
         v = (w[0] & 0xffff, (w[0] >> 16) & 0xff, (w[1] >> 16) & 0xff, w[2] >> 24, w[3] & 0xff,
              (w[4] >> 8) & 0xff, (w[4] >> 16) & 0xff, w[5] - (1 << 32) if w[5] >> 31 else w[5],
@@ -968,17 +1001,41 @@ def read_trace(path):
             prev = v
 
 
+def trace_contrast(path):
+    """Print one line per contrast frame of each AF area (a new raw contrast or
+    b8 value) during searches (action 4): the raw contrast, brightness, the
+    normalised value b8, the detector's step (b4 + 3 b8)/4 - (b0 + 2 b4 + b8)/4
+    that it compares with 0, and its rise/fall counts."""
+    import struct
+    records = trace_records(path)
+    if len(records[0][1]) < len(TRACE_OFFSETS):
+        sys.exit(f"{path}: recorded without the contrast fields")
+    f32 = lambda x: struct.unpack("<f", struct.pack("<I", x))[0]
+    t0, prev = records[0][0], {}
+    for t, w in records:
+        if w[0] & 0xffff != 4:
+            prev.clear()
+            continue
+        path_ = (w[1] >> 16) & 0xff
+        for area, (raw, y, b0, b4, b8, counts) in enumerate(((w[16], w[17], w[18], w[19], w[20], w[12]),
+                                                              (w[23], w[24], w[25], w[26], w[27], w[28]))):
+            key = (raw, b8)
+            if prev.get(area) == key:
+                continue
+            prev[area] = key
+            b0, b4, b8 = f32(b0), f32(b4), f32(b8)
+            step = (b4 + 3 * b8) / 4 - (b0 + 2 * b4 + b8) / 4
+            print(f"{t - t0:9.3f} path {path_} area {area}  raw {raw:9d}  Y {y:8d}  b8 {b8:10.4f}  "
+                  f"step {step:+9.4f}  rise/fall {counts & 0xffff}/{counts >> 16}"
+                  + (f"  margin {f32(w[21]):.4g} x {f32(w[22]):.4g}" if area == 0 else ""))
+
+
 def trace_runs(path):
     """Summarise a TRACE.DAT per AF run (action 2 ... back to 1): duration,
     action codes, accepted flag, and per pass (path 0/1/2) the area-0
     detector's rising/falling counts as they change."""
-    import struct
-    data = Path(path).read_bytes()
-    rec = 8 + 4 * len(TRACE_OFFSETS)
     runs, cur, t0 = [], None, None
-    for k in range(len(data) // rec):
-        sec, nsec, *w = struct.unpack_from(f"<II{len(TRACE_OFFSETS)}I", data, k * rec)
-        t = sec + nsec / 1e9
+    for t, w in trace_records(path):
         t0 = t if t0 is None else t0
         act, path, counts = w[0] & 0xffff, (w[1] >> 16) & 0xff, (w[12] & 0xffff, w[12] >> 16)
         if act == 2 and (cur is None or "end" in cur):
@@ -1086,6 +1143,7 @@ def main():
     parser.add_argument("--read-tab", metavar="TAB.BIN", help="decode a pointer dump instead of writing files")
     parser.add_argument("--read-trace", metavar="TRACE.DAT", help="decode an AF state trace instead of writing files")
     parser.add_argument("--trace-runs", metavar="TRACE.DAT", help="summarise an AF state trace per AF run")
+    parser.add_argument("--trace-contrast", metavar="TRACE.DAT", help="print the per-frame contrast of an AF state trace")
     args = parser.parse_args()
     if args.read_mem:
         read_mem(args.read_mem)
@@ -1098,6 +1156,9 @@ def main():
         return
     if args.trace_runs:
         trace_runs(args.trace_runs)
+        return
+    if args.trace_contrast:
+        trace_contrast(args.trace_contrast)
         return
     flags = args.flags.upper()
     if not flags or any(c not in FLAGS for c in flags) or len(set(flags)) != len(flags):

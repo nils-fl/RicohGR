@@ -673,6 +673,16 @@ have to record them.</li>
 <li>The gate byte <code>+0x14ea5</code> stayed 0 throughout, as the static
 read predicted.</li>
 </ul>
+<p><strong>Tracer, second version:</strong> 13 more words for the rise/fall
+detectors of AF areas 0 and 1 (horizontal, at <code>+0x102c + 0xc4 × area</code>;
+the vertical ones are at <code>+0x2724</code>): raw contrast, brightness, the
+noise-normalised values b0, b4, b8 of the last three frames (computed by
+<code>0x5340b3ac</code> from the per-mode noise model), the counts, and the
+area-0 peak margin factors (<code>+0x4c</code>, <code>+0x80</code>). The
+update counts a rise when (b4 + 3 b8)/4 &gt; (b0 + 2 b4 + b8)/4, otherwise a
+fall. Records are 124 bytes. <code>--trace-contrast</code> prints one line per
+frame and area during searches; the decoders still read first-version
+traces.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) Noise: add a margin to the
 rise/fall comparison, or compare less smoothed differences, so noise doesn't
