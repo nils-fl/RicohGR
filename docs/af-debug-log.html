@@ -114,6 +114,15 @@ the card.</li>
 </ol>
 <p>If the camera instead offers a firmware update, or shows nothing and
 starts normally, stop: the file name does not match this camera.</p>
+<p><strong>On a Mac:</strong> Finder and <code>cp</code> leave
+<code>._name</code> AppleDouble files next to each copied file on an
+exFAT card, even with <code>cp -X</code>. Delete them before ejecting
+(<code>dot_clean -m /Volumes/&lt;card&gt;</code>, or remove the
+<code>._*</code> files). GRKit had load failures with cards that macOS
+had copied to.</p>
+<p>The enable files and the <code>SCRIPT</code> folder of §4 can go on
+the card together, as GRKit's own install does: after "Complete", the
+next normal power-on runs the script.</p>
 
 <h2 id="4-install-the-log-script">4. Install the log script</h2>
 <ol>
