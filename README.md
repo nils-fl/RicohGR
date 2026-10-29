@@ -6,8 +6,11 @@ A personal, read-only study of how the Ricoh GR IIIx autofocus works, built
 from the official firmware package.
 
 **Scope**
-- Everything here is **offline analysis**. No tool in this repository talks to
-  a camera or writes to an SD card.
+- Everything here is **offline analysis**, with one exception:
+  `tools/af_debug_card.py` writes card files that turn on the camera's own AF
+  debug log ([`docs/af-debug-log.html`](docs/af-debug-log.html)). They change a
+  camera setting (SD scripts) and nothing in flash. No tool talks to a camera
+  or writes to a card directly.
 - `tools/gr_repack.py` can write a firmware file that would pass the camera's
   update checks. Nothing in this repository has been flashed. A modified
   firmware that fails to boot is likely unrecoverable; read
@@ -29,6 +32,7 @@ Open [`docs/index.html`](docs/index.html) in a browser to read them.
 | [`docs/firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) | Whether a modified firmware would be accepted (checksum and version rule, no signature) and what happens if it fails (no recovery found) |
 | [`docs/recipe-format.html`](docs/recipe-format.html) | The plain-text `RECIPES.TXT` format for a recipe library and the offline checker; needs no firmware change |
 | [`docs/gr3x-vs-gr4.html`](docs/gr3x-vs-gr4.html) | GR IIIx vs GR IV firmware comparison: container, platform, subsystem diff, and an address-level comparison of the AF code (§5) |
+| [`docs/af-debug-log.html`](docs/af-debug-log.html) | Camera procedure (untested): turn on SD scripts and the built-in AF debug log, shooting sessions, recovery |
 | [`docs/gr-mod-landscape.html`](docs/gr-mod-landscape.html) | Community mods for the GR IIIx (GRKit, GR Mod, others) and how our AF work could build on GRKit; built-in AF debug logging; recipes via `UserData Set` |
 
 Statements in the documents are labelled **Read** (taken from the code or
@@ -60,6 +64,7 @@ python3 tools/strings_index.py work/fwdc243b-v160.decoded.bin
 | `tools/gr_unpack.py` | Decodes the firmware container for analysis |
 | `tools/segments.py` | Lists payload regions and device-tree properties; `--split` writes them to `work/segments/` |
 | `tools/strings_index.py` | Writes `work/index.json`, grouping names by subsystem (AF, lens, AE, stabilisation, …) |
+| `tools/af_debug_card.py` | Writes the SD-card files that turn SD scripts on and off and enable the camera's AF debug log (into `work/af-debug-card/`; see `docs/af-debug-log.html`) |
 | `tools/af_timing_tally.py` | Summarises AF timings you measured from high-speed video (offline arithmetic on your own CSV; see `docs/af-subsystem.html` §10.6) |
 | `tools/initramfs.py` | Lists or extracts files from the Linux initramfs (e.g. `webapid`, `mtpd`) into `work/initramfs/` |
 | `tools/gr_repack.py` | Rebuilds a container from a decoded payload and re-runs the camera's update checks (offline; writes a file, installs nothing) |
@@ -126,5 +131,7 @@ Verified reference values for GR IIIx 1.60:
 - Ricoh, GR and related marks belong to their owners.
 - The findings come from static analysis of one firmware version and may be
   incomplete or wrong.
-- This project gives no instructions for modifying a camera.
+- This project gives no instructions for flashing modified firmware. The one
+  camera procedure ([`docs/af-debug-log.html`](docs/af-debug-log.html)) is
+  untested on a camera and is at your own risk.
 - No licence has been chosen for this repository yet.

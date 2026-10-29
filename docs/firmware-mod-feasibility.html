@@ -1013,9 +1013,12 @@ reference in the RTOS).</li>
 <li>The field layout of <code>RawDevelopmentModel</code> and the setter
 the detail screen calls when a parameter changes. This is the hook for
 loading a recipe.</li>
-<li>Header fields <code>+0x34</code> (<code>0x1329a</code>) and
-<code>+0x54</code> (<code>0x438ff331</code>): not read by
-<code>FwDecoder</code>, kept unchanged by the re-packer.</li>
+<li>Header field <code>+0x54</code> (<code>0x438ff331</code>): not read by
+<code>FwDecoder</code>, kept unchanged by the re-packer. Field
+<code>+0x34</code> (<code>0x1329a</code> = 78490) is the RTOS number that
+<code>0x5381fe9c</code> returns. It names the ModeSet file
+<code>00078490.609</code> (Read, 2026-10-29;
+<a href="af-debug-log.html">af-debug-log</a>).</li>
 </ul>
 </main>
 </div>

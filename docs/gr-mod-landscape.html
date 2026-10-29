@@ -186,8 +186,10 @@ and GR Mod does not support it.</p>
 <h3 id="31-loading">3.1 Loading</h3>
 <ul>
 <li><strong>Enabling SD scripts</strong> is a one-time, persistent camera
-setting. Put <code>DEVELOP.MOD</code> and <code>00078350.588</code> on the
-card, hold MENU while powering on, and the camera shows "Mode Set
+setting. Put <code>DEVELOP.MOD</code> and the camera's ModeSet file on
+the card (GR IIIx: <code>00078490.609</code>, GR III:
+<code>00078350.588</code>; corrected 2026-10-29, the GR III name was
+given here before), hold MENU while powering on, and the camera shows "Mode Set
 Command", then "Complete", and turns off. Our start-up dispatcher
 <code>0x53229134</code> logs "ModeSet" as its own start-up reason, next
 to "Update" (<a href="firmware-mod-feasibility.html#21-update-start-up-mode-the-built-in-rescue-path-read">firmware-mod-feasibility
@@ -558,11 +560,9 @@ useful as a reference for the container and the image pipeline.</p>
 
 <h2 id="9-next-steps">9. Next steps</h2>
 <ol>
-<li>Outside this repository's offline scope: a camera test would need
-SD scripts on and a card script that sends
-<code>EnableAfDebugDataSave 1 C</code>, followed by the shooting
-conditions of af-subsystem §10.6. This repository does not provide that
-script.</li>
+<li>Camera test: <a href="af-debug-log.html">af-debug-log</a> has the
+procedure, and <code>tools/af_debug_card.py</code> writes the card
+files (added 2026-10-29 at the owner's request).</li>
 <li>Done offline on 2026-10-29: CSV file names, counter, memory
 condition and write timing (§5.1); <code>InfocusTimeMeasure</code> is
 passive logging (§5.2). Still open offline: whether the RTOS log has

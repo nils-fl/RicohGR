@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AF debug log on the camera</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#af-debug-log" id="toc-af-debug-log">AF debug log on the camera</a>
+<ul>
+<li><a href="#1-what-this-does" id="toc-1-what-this-does">1. What this does</a></li>
+<li><a href="#2-before-you-start" id="toc-2-before-you-start">2. Before you start</a></li>
+<li><a href="#3-turn-sd-scripts-on-once" id="toc-3-turn-sd-scripts-on-once">3. Turn SD scripts on (once)</a></li>
+<li><a href="#4-install-the-log-script" id="toc-4-install-the-log-script">4. Install the log script</a></li>
+<li><a href="#5-shooting-sessions" id="toc-5-shooting-sessions">5. Shooting sessions</a></li>
+<li><a href="#6-what-to-bring-back" id="toc-6-what-to-bring-back">6. What to bring back</a></li>
+<li><a href="#7-turning-it-off" id="toc-7-turning-it-off">7. Turning it off</a></li>
+<li><a href="#8-if-something-goes-wrong" id="toc-8-if-something-goes-wrong">8. If something goes wrong</a></li>
+<li><a href="#9-what-each-step-rests-on" id="toc-9-what-each-step-rests-on">9. What each step rests on</a></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="af-debug-log">AF debug log on the camera</h1>
+<p>Goal: get the per-run contrast-AF data that the firmware can write to
+the card (<a href="gr-mod-landscape.html#51-enableafdebugdatasave">gr-mod-landscape
+§5.1</a>), for the measurements in
+<a href="af-subsystem.html">af-subsystem §10.6</a>. GR IIIx
+<strong>1.60</strong> only. This procedure has <strong>not been run on a
+camera yet</strong>. The SD-script switch is tested by GRKit users; the AF
+command is not.</p>
+
+<h2 id="1-what-this-does">1. What this does</h2>
+<ul>
+<li>A one-time ModeSet command turns on the camera's SD-script setting.
+It stays on until a second ModeSet command turns it off (§7).</li>
+<li>At each power-on, the camera runs <code>SCRIPT/STARTUP.TTL</code>
+from the card. Ours waits 3 s, then sends
+<code>EnableAfDebugDataSave 1 C</code> to the engineering shell, then asks
+Linux to write a marker file.</li>
+<li>With the C flag set, contrast AF writes
+<code>Caf_DebugTmpNNNN.csv</code> files to the card root.</li>
+<li><strong>Nothing is written to flash.</strong> The flag lives in RAM
+and is gone after power-off. Without the <code>SCRIPT</code> folder on
+the card, the camera behaves as stock (SD scripts on, but nothing to
+run).</li>
+</ul>
+
+<h2 id="2-before-you-start">2. Before you start</h2>
+<ol>
+<li>Check the firmware version in the Setup menu: it must say
+<strong>1.60</strong>. The ModeSet file name is per camera and firmware
+family; the one here is for the GR IIIx.</li>
+<li>Use a <strong>separate, empty card</strong>, formatted in the camera.
+Not the GRKit card (ours replaces <code>SCRIPT/STARTUP.TTL</code>), and
+no <code>FWDC*.BIN</code> on it (MENU at power-on is also the firmware
+update start).</li>
+<li>Charge the battery fully.</li>
+<li>Generate the files on the computer:
+<pre><code>python3 tools/af_debug_card.py            # writes work/af-debug-card/{enable,log,disable}</code></pre>
+<code>--flags CZ</code> also turns on the phase-AF log. Start with
+<code>C</code> alone: each log needs about 10 MB of free camera memory,
+and with too little the camera skips the log without telling you.</li>
+</ol>
+
+<h2 id="3-turn-sd-scripts-on-once">3. Turn SD scripts on (once)</h2>
+<ol>
+<li>Camera off. Copy the contents of <code>work/af-debug-card/enable/</code>
+(<code>00078490.609</code> and <code>DEVELOP.MOD</code>) to the card
+root.</li>
+<li>Insert the card. <strong>Hold MENU</strong> and switch on. The
+camera should show "Mode Set Command", then "Complete", and switch
+itself off.</li>
+<li>Delete <code>00078490.609</code> and <code>DEVELOP.MOD</code> from
+the card.</li>
+</ol>
+<p>If the camera instead offers a firmware update, or shows nothing and
+starts normally, stop: the file name does not match this camera.</p>
+
+<h2 id="4-install-the-log-script">4. Install the log script</h2>
+<ol>
+<li>Copy the <code>SCRIPT</code> folder from
+<code>work/af-debug-card/log/</code> to the card root.</li>
+<li>Switch on normally (no MENU). Wait 15 s in shooting mode.</li>
+<li>Switch off and look at the card on the computer.
+<code>SCRIPT/AFDBG/MARK.OK</code> should exist, with a line like
+<code>12.34 EnableAfDebugDataSave 1 C sent</code>. That proves the
+script ran past the AF command. It does not prove the command was
+accepted; only the CSV files prove that.</li>
+</ol>
+
+<h2 id="5-shooting-sessions">5. Shooting sessions</h2>
+<p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
+<strong>Select AF</strong> or <strong>Spot AF</strong> with the area in
+the centre, face/eye detection off, Full Press Snap off, a fixed focal
+length (no crop mode). Half-press only; you do not need to take
+pictures.</p>
+<p><strong>One power-on per condition.</strong> The file counter restarts
+at 0000 at every power-on, so a new session probably overwrites the last
+one's files. After each session, switch off and copy the CSVs into a
+folder named after the condition before the next one.</p>
+<p>Each session:</p>
+<ol>
+<li>Switch on and wait 15 s.</li>
+<li>For each run: point at the far target (or infinity), then at the
+subject, and half-press until focus is confirmed. Release.
+<strong>20 runs.</strong></li>
+<li>Then <strong>one extra half-press</strong>. The data of a run is
+probably written when the next AF starts, so this flushes run 20.</li>
+<li>Switch off. Copy every <code>Caf_DebugTmp*.csv</code> from the card
+root to <code>work/af-logs/&lt;condition&gt;/</code>. Delete them from
+the card.</li>
+</ol>
+<table>
+<thead><tr><th>Condition</th><th>Setup</th></tr></thead>
+<tbody>
+<tr><td><code>bright-edge</code></td><td>Daylight or bright room, a high-contrast edge (text, a door frame) at 1–2 m</td></tr>
+<tr><td><code>low-light</code></td><td>Dim room, same target (the camera shows a slower shutter speed than 1/30)</td></tr>
+<tr><td><code>repetitive</code></td><td>Blinds, a grid or brick wall filling the AF area</td></tr>
+<tr><td><code>afc</code></td><td>Bright edge, AF-C, half-press held 2 s per run</td></tr>
+</tbody>
+</table>
+<p>If the camera feels slow, freezes in a session, or no CSV appears,
+stop and note what happened (§8).</p>
+
+<h2 id="6-what-to-bring-back">6. What to bring back</h2>
+<ul>
+<li>The <code>work/af-logs/</code> folders, plus
+<code>SCRIPT/AFDBG/MARK.OK</code>.</li>
+<li>A note per session: number of runs, anything unusual (a hunt, a
+failed AF).</li>
+<li>Expected content of each CSV (from the label strings, not seen yet):
+lens position in mm and pulses, the phase search direction, phase
+defocus in µm, the loose-decision grade flag, an algorithm block, then
+per AF area the lens pulse and the horizontal, vertical and Y contrast
+of each sample. A parser comes after we see real files.</li>
+</ul>
+
+<h2 id="7-turning-it-off">7. Turning it off</h2>
+<ul>
+<li><strong>Stop logging:</strong> delete the <code>SCRIPT</code> folder
+from the card, or use another card.</li>
+<li><strong>Turn SD scripts off:</strong> copy the contents of
+<code>work/af-debug-card/disable/</code> to the card root, hold MENU and
+switch on, wait for the camera to switch off, delete the two files.</li>
+</ul>
+
+<h2 id="8-if-something-goes-wrong">8. If something goes wrong</h2>
+<p>From GRKit's recovery guide, which covers the same script mechanism:</p>
+<ol>
+<li>Camera hangs at start-up: try switching off. If it does not respond,
+take the battery out.</li>
+<li>Take the card out. Insert a charged battery and switch on without the
+card.</li>
+<li>Still no start: hold the playback button to start in playback; if the
+menu opens, reset the settings (this deletes your personal settings).
+Then switch on again without the card.</li>
+<li>Still nothing: stop and contact service. Do not push or pull the lens
+barrel.</li>
+</ol>
+<p>A start-up hang caused by our script is unlikely: it only sends shell
+lines after a 3 s wait and writes one small file. The other risk is that
+writing a 10 MB CSV during shooting makes the camera slow or unstable;
+that is why the sessions are short and only the C flag is set.</p>
+
+<h2 id="9-what-each-step-rests-on">9. What each step rests on</h2>
+<table>
+<thead><tr><th>Step</th><th>Basis</th></tr></thead>
+<tbody>
+<tr><td>File name <code>00078490.609</code></td>
+<td>Read: <code>ModeSetOperation.cpp</code> reads <code>C:\%08ld.%03ld</code>
+(<code>0x536bdc80</code>) with <code>0x1329a</code> and <code>0x261</code>
+from <code>0x5381fe9c</code>/<code>0x5381fe4c</code>. GRKit uses the same
+name for the GR IIIx.</td></tr>
+<tr><td><code>[SCRIPT_EN_MODE EN]</code> / <code>DIS</code></td>
+<td>Read: strings at <code>0x538f2e14</code>, <code>0x538f2e34</code>. Format
+with brackets and CRLF from GRKit.</td></tr>
+<tr><td><code>DEVELOP.MOD</code> bytes</td><td>From GRKit
+(<code>crates/grkit-core/src/runtime/files.rs</code>), used on cameras; not
+decoded here</td></tr>
+<tr><td>3 s wait before <code>lcmd_resp on</code></td>
+<td>GRKit: earlier, the handler faults and stops the camera; GRKit waits
+2 s</td></tr>
+<tr><td><code>sendln</code> reaches <code>EnableAfDebugDataSave</code></td>
+<td>Structural (gr-mod-landscape §5.1)</td></tr>
+<tr><td>CSV name, counter reset, 10 MB, write at next AF start</td>
+<td>Read, except the write moment and the overwrite (Inferred); gr-mod-landscape
+§5.1</td></tr>
+</tbody>
+</table>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>
