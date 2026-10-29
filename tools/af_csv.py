@@ -43,7 +43,8 @@ def key(text):
 def run(path):
     text = path.read_text(encoding="latin-1")
     defocus = re.findall(r"^\[ZafDefocusUm\]\t\s*(-?\d+)\s*$", text, re.M)
-    grade = re.search(r"^\[DicisionGrade\]\t(\d+)\t(\d+)", text, re.M)
+    # One value per AF area: two in Select/Spot with two areas, one otherwise.
+    grade = re.search(r"^\[DicisionGrade\]\t(\d+)(?:\t(\d+))?", text, re.M)
     rows = samples(text)
     # The camera's own verdict per AF area: the [-Horizontal-] rows of the
     # [-----Algorithm-----] block are [Point] [MaxCounter] [Pulse] ...
@@ -63,7 +64,7 @@ def run(path):
         "fps": first(text, "CafFlameRate"),
         "frame_us": first(text, "VsyncTimeUs"),
         "step": first(text, "CafStepWidth"),
-        "grade": "/".join(grade.groups()) if grade else "-",
+        "grade": "/".join(g for g in grade.groups() if g is not None) if grade else "-",
         "direction": {0: "none", 1: "far", 2: "near"}.get(first(text, "ZafSearchDirection/NOP:0/Far:1/Near:2"), "?"),
         "defocus_um": int(defocus[-1]) if defocus else None,
         "path": first(text, "ContrastAfSearchPath"),

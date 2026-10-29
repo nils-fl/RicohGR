@@ -57,6 +57,7 @@ strong{font-weight:650}
 <li><a href="#9-what-each-step-rests-on" id="toc-9-what-each-step-rests-on">9. What each step rests on</a></li>
 <li><a href="#results-across-sessions" id="toc-results-across-sessions">Results across the sessions</a></li>
 <li><a href="#session-selector" id="toc-session-selector">Session: drive-mode selector</a></li>
+<li><a href="#session-low-light-eye" id="toc-session-low-light-eye">Session: low light, eye detection on/off</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -350,6 +351,25 @@ step at <code>0x533f49d8</code>. Why the firmware switches some AF-C
 searches to the live-view mode (most likely to keep the display running) is
 not known, and only a camera test of a patched build could show the
 effect.</p>
+<h3 id="session-low-light-eye">Session: low light, eye detection on/off (2026-10-29)</h3>
+<p>Stock, AF-S, dim room, a few runs with face/eye detection on and a few with
+it off; 18 unique sweeps and 36 snapshots every 2 s
+(<code>work/af-logs/low-light-eye/</code>). The owner felt no speed
+difference.</p>
+<ul>
+<li><strong>No path-2 sweep</strong> (path 0: 8, path 1: 10), so the earlier
+case was not reproduced. Both peak-check skip flags, <code>+0xc53d</code>
+(<code>EyeDetectStatus</code>) and <code>+0x150c9</code>, were 0 in every
+snapshot.</li>
+<li>The AF area differed from the first low-light session: one area of
+178 × 144 here, two areas of 90 × 54 there. The phase decision grade was 1 in
+17 of 18 sweeps here; there it was 0/0 in 11 of 20, and all four path-2 sweeps
+were among those. So path 2 goes with a low-confidence phase result, and the
+larger area gave the phase detection enough signal in this light
+(Inferred).</li>
+<li>29 fps in 14 sweeps, 100 fps in 4; median sweep 367 ms, the same as the
+first low-light session.</li>
+</ul>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>
