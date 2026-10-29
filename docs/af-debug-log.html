@@ -829,6 +829,24 @@ files are left alone). The user isn't told which session had the patch.
 <code>--trace-summary</code> prints one line per press (time, pre-move,
 passes, outcome, final lens position, scale, brightness) and the totals,
 including locks at the near stop.</p>
+<h3 id="ab1">A/B, first half: SCALE75 in darker light (2026-10-29)</h3>
+<p><code>work/af-logs/dim-ab1</code> (power-on 1, SCALE75 on; the user did only
+this session so far): 11 presses, 7 locked, 4 failed, one lock at the near
+stop; median 2.5 s. Darker than the earlier SCALE75 session (brightness down
+to 36,000). Pooled over all traced sessions by brightness (area 0, median
+during the search):</p>
+<table>
+<tr><th>Brightness</th><th>stock</th><th>x<sup>0.5</sup> (SQRTNS)</th><th>x<sup>0.75</sup> (SCALE75)</th></tr>
+<tr><td>&lt; 60,000</td><td>0 of 4</td><td>5 of 6, 3 at the near stop</td><td>1 of 3, at the near stop</td></tr>
+<tr><td>60,000–150,000</td><td>3 of 6</td><td>4 of 4</td><td>3 of 4</td></tr>
+<tr><td>150,000–400,000</td><td>7 of 9</td><td>1 of 1</td><td>6 of 6</td></tr>
+<tr><td>&gt; 400,000</td><td>5 of 5</td><td>1 of 1</td><td>8 of 9</td></tr>
+</table>
+<p>Locks at the near stop occur only in the darkest group, with either patch.
+There even stock finds nothing, so in that light failing may be the honest
+answer; the guard against end-of-scan peaks matters there. Between 60,000 and
+400,000 both patches lock more often than stock without false locks. The
+samples are small; the stock half of the A/B in the same light is next.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than
