@@ -759,6 +759,29 @@ Bright light (y ≥ b) is unchanged. It affects all three callers of
 that other contrast code (AF-C among it) calls. Same multi-site patcher,
 switch <code>SQRTNS.ON</code>, status in <code>SQRTNS.ERR</code>; emulated in
 all states (stock → 0, patched → 6, unknown → 5, restore).</p>
+<h3 id="sqrtns-test">SQRTNS camera test (2026-10-29)</h3>
+<p><code>work/af-logs/dim-sqrtns</code>: <code>SQRTNS.ERR</code> <code>on 0</code>,
+tracer on, same dim room, 12 presses, 5 photos (ISO 6400, 0.3–1 s,
+handheld; in <code>photos/</code>).</p>
+<ul>
+<li><strong>More presses lock:</strong> 11 of 12 accepted, against 7 of 13 and
+7 of 10 in the two stock sessions. The scale <code>+0x80</code> fell to
+1.4–8.2 (stock 7–30 in the same room), as emulated.</li>
+<li><strong>Not faster:</strong> 4 presses still took 2.3–4.2 s over two or
+three passes.</li>
+<li><strong>Some locks are wrong:</strong> three of the long presses ended at
+lens position −15,900 to −15,920, about 300–400 pulses from where the other
+presses on the same scene ended (−16,200 to −16,330), on a peak at the end of
+the scan (pulse 450 and more) with no fall after it. Stock failures end at the
+same spot (fallback, action 64, e.g. −15,896), but the camera then reports a
+failure. The user saw soft photos on presses that had failed before; one
+(R0006321, 1 s) is uniformly defocused at 100%, not shaken.</li>
+<li>The normalised values themselves moved down (to −0.2 … −0.9), so the
+patched scale also enters the normalisation through
+<code>0x5340c620</code>, not only the margin.</li>
+</ul>
+<p>So the full square root trades silent misses for failures. Next: a milder
+margin, and refusing a peak that sits at the scan end without a fall.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than
