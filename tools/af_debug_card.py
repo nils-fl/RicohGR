@@ -131,6 +131,7 @@ def mem_sh():
         "$d/MEMRD.BIN\n"
         "s=$?\n"
         'echo "$s" >$d/MEM.ERR\n'
+        "$d/PTRRD.BIN; echo $? >$d/TAB.ERR\n"
         # Keep every snapshot: M000.BIN, M001.BIN ... (counter in MEM.N).
         'n=$(cat $d/MEM.N 2>/dev/null || echo 0)\n'
         '[ "$s" = 0 ] && cp $d/MEM.BIN $d/M$(printf %03d "$n").BIN && echo $((n + 1)) >$d/MEM.N\n'
@@ -354,6 +355,132 @@ def afcfast_bin():
                    .replace("{fast}", f"{AFC_FAST:#x}"))
 
 
+# PTRRD.BIN: follow two pointers of the static contrast AF object and dump
+# what they point to, to TAB.BIN: for each pointer its value (4 bytes) and, when
+# non-zero, 8 KB from the start of its page (mapped read-only via /dev/mem like
+# MEMRD.BIN; RTOS heap addresses are assumed to be physical as well). Pointers:
+# +0xfcc, the per-level CAF drive table that SwitchLiveView (0x53436184) reads
+# for the levels 0..3 at +0x1022 (200/100/49/29 fps), and +0xfe8, the AE
+# exposure info (integration, gain, float) that 0x533fd410 copies each frame.
+# Exit: 0 done, 1 open, 2 map object page, 3 create, 5 map target, 4 write.
+PTR_PAGE = 0x5506D000
+PTR_OFFSETS = (0x5506C938 + 0xFCC - PTR_PAGE, 0x5506C938 + 0xFE8 - PTR_PAGE)
+PTRRD_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    adr     r0, dev
+    ldr     r1, =0x101000           @ O_RDONLY | O_SYNC
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0                  @ /dev/mem
+    mov     r0, #0
+    mov     r1, #4096
+    mov     r2, #1
+    mov     r3, #1
+    ldr     r5, ={obj_page}
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    mov     r6, r0                  @ object page
+    adr     r0, out
+    ldr     r1, =0x241
+    ldr     r2, =0x1a4
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #3
+    bhi     quit
+    mov     r8, r0                  @ TAB.BIN
+    adr     r10, offsets
+    mov     r11, #2
+next:
+    ldr     r1, [r10], #4
+    ldr     r9, [r6, r1]            @ the pointer
+    sub     sp, sp, #8
+    str     r9, [sp]
+    mov     r0, r8
+    mov     r1, sp
+    mov     r2, #4
+    mov     r7, #4
+    svc     #0
+    add     sp, sp, #8
+    cmp     r0, #4
+    movne   r0, #4
+    bne     quit
+    cmp     r9, #0
+    beq     skip
+    mov     r0, #0
+    mov     r1, #8192
+    mov     r2, #1
+    mov     r3, #1
+    lsr     r5, r9, #12
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #5
+    bhi     quit
+    mov     r1, r0
+    mov     r0, r8
+    mov     r2, #8192
+    mov     r7, #4
+    svc     #0
+    cmp     r0, #8192
+    movne   r0, #4
+    bne     quit
+skip:
+    subs    r11, r11, #1
+    bne     next
+    mov     r0, r8
+    mov     r7, #118                @ fsync
+    svc     #0
+    mov     r0, r8
+    mov     r7, #6
+    svc     #0
+    mov     r0, #0
+quit:
+    mov     r7, #1
+    svc     #0
+dev:
+    .asciz  "/dev/mem"
+out:
+    .asciz  "/media/storage1/SCRIPT/AFDBG/TAB.BIN"
+    .balign 4
+offsets:
+    .word   {off0}
+    .word   {off1}
+    .ltorg
+"""
+
+
+def ptrrd_bin():
+    return arm_elf(PTRRD_S.replace("{obj_page}", f"{PTR_PAGE >> 12:#x}")
+                   .replace("{off0}", f"{PTR_OFFSETS[0]:#x}")
+                   .replace("{off1}", f"{PTR_OFFSETS[1]:#x}"))
+
+
+def read_tab(path):
+    """Decode a TAB.BIN that PTRRD.BIN wrote."""
+    import struct
+    data, at = Path(path).read_bytes(), 0
+    for name in ("drive table (+0xfcc)", "AE exposure info (+0xfe8)"):
+        ptr = struct.unpack_from("<I", data, at)[0]; at += 4
+        print(f"{name}: pointer {ptr:#010x}")
+        if not ptr:
+            continue
+        # The 8 KB start at the page of the pointer (mmap is page-aligned).
+        block = data[at:at + 8192]; at += 8192
+        words = struct.unpack_from("<32I", block, ptr & 0xFFF)
+        for row in range(0, 32, 4):
+            print(f"  +{row * 4:#04x}: " + " ".join(f"{w:10d}" for w in words[row:row + 4]))
+
+
 def patch_sh():
     # Applied once per power-on, only when AFCFAST.ON is on the card. The patch
     # lives in RAM; switching off (or starting without the file) gives stock.
@@ -414,6 +541,7 @@ def card_roots(flags):
             "SCRIPT/AFDBG/MARK.SH": mark_sh(flags),
             "SCRIPT/AFDBG/MEM.SH": mem_sh(),
             "SCRIPT/AFDBG/MEMRD.BIN": memrd_bin(),
+            "SCRIPT/AFDBG/PTRRD.BIN": ptrrd_bin(),
             "SCRIPT/AFDBG/PATCH.SH": patch_sh(),
             "SCRIPT/AFDBG/AFCFAST.BIN": afcfast_bin(),
         },
@@ -426,9 +554,13 @@ def main():
     parser.add_argument("--out", type=Path, default=Path("work/af-debug-card"))
     parser.add_argument("--flags", default="C", help="subset of PCZO (default C: contrast AF CSV only)")
     parser.add_argument("--read-mem", metavar="MEM.BIN", help="decode a probe dump instead of writing files")
+    parser.add_argument("--read-tab", metavar="TAB.BIN", help="decode a pointer dump instead of writing files")
     args = parser.parse_args()
     if args.read_mem:
         read_mem(args.read_mem)
+        return
+    if args.read_tab:
+        read_tab(args.read_tab)
         return
     flags = args.flags.upper()
     if not flags or any(c not in FLAGS for c in flags) or len(set(flags)) != len(flags):

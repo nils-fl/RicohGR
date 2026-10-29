@@ -1710,7 +1710,18 @@ shell command (<code>AE_Mode</code>, <code>AE_Store</code> do other things;
 the <code>AeCommandListener</code> handlers <code>SetContrastAfIso</code> and
 <code>SetContrastAfExposureManual</code>, <code>0x53496250</code> and
 <code>0x53496178</code>, have no shell route), and not a plain constant or a
-table of these frame times or line counts.</p>
+table of these frame times or line counts.
+<strong>Found since (Read + measured):</strong> contrast AF chooses the drive
+level itself. The byte at contrast-AF object <code>+0x1022</code> is the
+level, 0 / 1 / 2 / 3 = 200 / 100 / 49 / 29 fps (snapshots: 0 in bright light,
+3 in dim, 1 at times in between). AF posts message <code>0x67c40808</code>
+(<code>0x533f728c</code>) to <code>LiveViewControl::OnMessage</code>
+(<code>0x5343787c</code>), which calls <code>SwitchLiveView(lv, 3, level,
+table)</code> (<code>0x53436184</code>) with AF's per-level drive table (pointer at
+<code>+0xfcc</code>, on the heap; entries at <code>+0x00/10/20/30/40</code>,
+bytes at <code>+0x50</code>). The code that writes <code>+0x1022</code> is not
+found by direct addressing; the next probe dumps the table and the AE
+exposure info (<code>+0xfe8</code>) to look for the thresholds.</p>
 <p><strong>Dim light: phase confidence.</strong> In the AF-S dim session, sweeps
 with a low phase grade (0/0) took 467 ms median against 240 ms with grade 1/1,
 through more reversals. In the dim AF-C session, with one larger AF area
