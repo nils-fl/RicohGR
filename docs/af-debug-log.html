@@ -847,6 +847,27 @@ There even stock finds nothing, so in that light failing may be the honest
 answer; the guard against end-of-scan peaks matters there. Between 60,000 and
 400,000 both patches lock more often than stock without false locks. The
 samples are small; the stock half of the A/B in the same light is next.</p>
+<h3 id="ab23">A/B, power-ons 2 and 3 (2026-10-29)</h3>
+<p><code>work/af-logs/dim-ab2</code> (stock, 14 presses: 7 locked, 6 failed,
+1 aborted) and <code>dim-ab3</code> (SCALE75, 8 presses: 6 locked, 2 failed).
+The card ran its scripts on each power-on without being taken out. The CSVs
+of an earlier power-on read back empty from Linux, so A/B mode now copies only
+the trace. Pooled over all traced sessions by brightness:</p>
+<table>
+<tr><th>Brightness</th><th>stock</th><th>x<sup>0.5</sup></th><th>x<sup>0.75</sup></th></tr>
+<tr><td>&lt; 60,000</td><td>0 of 8</td><td>5 of 6 (3 false)</td><td>1 of 5 (1 false)</td></tr>
+<tr><td>60,000–150,000</td><td>8 of 14 (57 %)</td><td>4 of 4</td><td>6 of 7 (85 %)</td></tr>
+<tr><td>150,000–400,000</td><td>8 of 10 (80 %)</td><td>1 of 1</td><td>8 of 8</td></tr>
+<tr><td>&gt; 400,000</td><td>6 of 6</td><td>1 of 1</td><td>9 of 10</td></tr>
+</table>
+<p>Between 60,000 and 400,000, SCALE75 locks 14 of 15 against stock's 16 of
+24, with no false locks. Below 60,000 nothing locks reliably. Lock times are
+similar (about 0.5–1.4 s median). The pre-move stayed at 170–260 ms in all
+light levels traced so far (no truly bright session yet).</p>
+<p><strong>Next test, FORCE49:</strong> the FORCE100 sites set to drive level 2
+(49 fps, <code>mov rX, #2</code>), emulated in all states. Card: SCALE75.ON on
+every power-on, <code>AB.ON</code> = FORCE49 on odd ones, to see whether
+faster sampling locks in dim light now that the margin is milder.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than

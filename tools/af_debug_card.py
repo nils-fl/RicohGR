@@ -698,6 +698,11 @@ SCALE75_SITES = tuple(zip(range(0x5340C5F0, 0x5340C618, 4), (
     0x8EB17AC0, 0x8EF16AC7, 0x8E270A26, 0x8A000005, 0xEEF57A00,
     0xEEB40AE7, 0xEEF1FA10, 0x4EB00A67, 0xEEB10AC0, 0xE1A00000)))
 
+# The same five sites forced to drive level 2 (49 fps) instead of 1 (100 fps):
+# for testing the faster sampling with the milder margin (SCALE75). Like
+# FORCE100 it also forces the level in bright light, where stock uses 200 fps.
+FORCE49_SITES = tuple((a, old, new + 1) for a, old, new in FORCE100_SITES)
+
 # MULTIPATCH: check the build identity, map every site read-write, require all
 # sites stock (apply) or all patched (exit 6, nothing to do); a mixture or an
 # unknown word exits 5 before anything is written. Then write each site, dsb,
@@ -1247,13 +1252,14 @@ def patch_sh():
         "d=/media/storage1/SCRIPT/AFDBG\n"
         "exec 2>>$d/MEM.LOG\n"
         # A/B mode (AB.ON holds a patch name, e.g. SCALE75): count power-ons,
-        # save the previous power-on's trace and CSVs to S<n-1>/ (copies; the
-        # camera's own files are left alone), and apply the patch on odd
-        # power-ons only. AB.LOG says which power-on had it.
+        # save the previous power-on's trace to S<n-1>/, and apply the patch on
+        # odd power-ons only. AB.LOG says which power-on had it. (The camera's
+        # CSVs from an earlier power-on read back empty from Linux, so they
+        # are not copied; they stay in the card root.)
         "if [ -f $d/AB.ON ]; then\n"
         " n=$(cat $d/BOOT.N 2>/dev/null); n=$((${n:-0} + 1)); echo $n >$d/BOOT.N\n"
         " s=$d/S$((n - 1)); mkdir -p $s\n"
-        " for f in $d/TRACE.DAT $d/TRACE.ERR /media/storage1/*.csv; do [ -f \"$f\" ] && cat \"$f\" >\"$s/${f##*/}\"; done\n"
+        " for f in $d/TRACE.DAT $d/TRACE.ERR; do [ -f \"$f\" ] && cat \"$f\" >\"$s/${f##*/}\"; done\n"
         " p=$(cat $d/AB.ON)\n"
         " if [ $((n % 2)) = 1 ]; then $d/$p.BIN; echo \"$n $p on $?\" >>$d/AB.LOG; else echo \"$n $p off\" >>$d/AB.LOG; fi\n"
         "fi\n"
@@ -1261,6 +1267,7 @@ def patch_sh():
         'if [ -f $d/FORCE100.ON ]; then $d/FORCE100.BIN; echo "on $?" >$d/FORCE.ERR; else echo off >$d/FORCE.ERR; fi\n'
         'if [ -f $d/SQRTNS.ON ]; then $d/SQRTNS.BIN; echo "on $?" >$d/SQRTNS.ERR; else echo off >$d/SQRTNS.ERR; fi\n'
         'if [ -f $d/SCALE75.ON ]; then $d/SCALE75.BIN; echo "on $?" >$d/SCALE75.ERR; else echo off >$d/SCALE75.ERR; fi\n'
+        'if [ -f $d/FORCE49.ON ]; then $d/FORCE49.BIN; echo "on $?" >$d/FORCE49.ERR; else echo off >$d/FORCE49.ERR; fi\n'
         # The tracer runs in the background for TRACE_RECORDS x TRACE_PERIOD_NS.
         'if [ -f $d/TRACE.ON ]; then rm -f $d/TRACE.DAT; ($d/TRACE.BIN; echo "$?" >$d/TRACE.ERR) </dev/null >/dev/null 2>&1 & fi\n'
         "exit 0\n"
@@ -1323,6 +1330,7 @@ def card_roots(flags):
             "SCRIPT/AFDBG/FORCE100.BIN": multipatch_bin(FORCE100_SITES),
             "SCRIPT/AFDBG/SQRTNS.BIN": multipatch_bin(SQRTNS_SITES),
             "SCRIPT/AFDBG/SCALE75.BIN": multipatch_bin(SCALE75_SITES),
+            "SCRIPT/AFDBG/FORCE49.BIN": multipatch_bin(FORCE49_SITES),
             "SCRIPT/AFDBG/TRACE.BIN": trace_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
