@@ -1161,6 +1161,54 @@ def trace_passes(path):
         prev = (t, w)
 
 
+def trace_summary(path):
+    """One line per AF run: start, time from half-press to done, the
+    pre-move (action 2 to the first action 4), passes, outcome (lock = action
+    8, fail = 64, abort = released before a result), the final lens position
+    (+0xc434 at action 128; about -15,900 is the near stop), the scale
+    +0x80 and the area-0 brightness (median during the search, a light level
+    that does not depend on a patch). Then totals."""
+    import statistics, struct
+    f32 = lambda x: struct.unpack("<f", struct.pack("<I", x))[0]
+    signed = lambda x: x - (1 << 32) if x >> 31 else x
+    records = trace_records(path)
+    has_contrast = len(records[0][1]) >= 29
+    runs, cur, last, t0 = [], None, None, records[0][0]
+    for t, w in records:
+        act = w[0] & 0xffff
+        if act == 2 and last in (1, None):
+            cur = {"t": t, "acts": [], "final": None, "scale": [], "y": []}
+            runs.append(cur)
+        if cur is not None and "end" not in cur:
+            if not cur["acts"] or cur["acts"][-1] != act:
+                cur["acts"].append(act)
+                if act == 4 and "pre" not in cur:
+                    cur["pre"] = t - cur["t"]
+            if act == 128 and signed(w[6]):
+                cur["final"] = signed(w[6])
+            if act == 4 and has_contrast:
+                cur["scale"].append(f32(w[22]))
+                cur["y"].append(w[17])
+            if act == 1 and len(cur["acts"]) > 1:
+                cur["end"] = t
+        last = act
+    outcome = lambda r: "lock" if 8 in r["acts"] else "fail" if 64 in r["acts"] else \
+        "done" if 128 in r["acts"] else "abort"
+    for r in runs:
+        ms = 1000 * (r.get("end", r["t"]) - r["t"])
+        extra = (f"  scale max {max(r['scale']):5.2f}  Y {statistics.median(r['y']):8.0f}"
+                 if r["scale"] else "")
+        print(f"{r['t'] - t0:7.2f} s {ms:5.0f} ms  pre-move {1000 * r.get('pre', 0):4.0f} ms  "
+              f"passes {r['acts'].count(4)}  {outcome(r):5s}  final {r['final']!s:>6s}{extra}")
+    if runs:
+        ok = [r for r in runs if outcome(r) in ("lock", "done")]
+        near = [r for r in ok if r["final"] is not None and r["final"] > -16000]
+        times = [1000 * (r["end"] - r["t"]) for r in runs if "end" in r]
+        print(f"\n{len(runs)} runs: {len(ok)} locked ({len(near)} of them at the near stop, final > -16000), "
+              f"{sum(outcome(r) == 'fail' for r in runs)} failed, {sum(outcome(r) == 'abort' for r in runs)} aborted; "
+              f"time median {statistics.median(times):.0f} ms" if times else "")
+
+
 def trace_runs(path):
     """Summarise a TRACE.DAT per AF run (action 2 ... back to 1): duration,
     action codes, accepted flag, and per pass (path 0/1/2) the area-0
@@ -1198,6 +1246,17 @@ def patch_sh():
     return (
         "d=/media/storage1/SCRIPT/AFDBG\n"
         "exec 2>>$d/MEM.LOG\n"
+        # A/B mode (AB.ON holds a patch name, e.g. SCALE75): count power-ons,
+        # save the previous power-on's trace and CSVs to S<n-1>/ (copies; the
+        # camera's own files are left alone), and apply the patch on odd
+        # power-ons only. AB.LOG says which power-on had it.
+        "if [ -f $d/AB.ON ]; then\n"
+        " n=$(cat $d/BOOT.N 2>/dev/null); n=$((${n:-0} + 1)); echo $n >$d/BOOT.N\n"
+        " s=$d/S$((n - 1)); mkdir -p $s\n"
+        " for f in $d/TRACE.DAT $d/TRACE.ERR /media/storage1/*.csv; do [ -f \"$f\" ] && cat \"$f\" >\"$s/${f##*/}\"; done\n"
+        " p=$(cat $d/AB.ON)\n"
+        " if [ $((n % 2)) = 1 ]; then $d/$p.BIN; echo \"$n $p on $?\" >>$d/AB.LOG; else echo \"$n $p off\" >>$d/AB.LOG; fi\n"
+        "fi\n"
         'if [ -f $d/AFCFAST.ON ]; then $d/AFCFAST.BIN; echo "on $?" >$d/PATCH.ERR; else echo off >$d/PATCH.ERR; fi\n'
         'if [ -f $d/FORCE100.ON ]; then $d/FORCE100.BIN; echo "on $?" >$d/FORCE.ERR; else echo off >$d/FORCE.ERR; fi\n'
         'if [ -f $d/SQRTNS.ON ]; then $d/SQRTNS.BIN; echo "on $?" >$d/SQRTNS.ERR; else echo off >$d/SQRTNS.ERR; fi\n'
@@ -1278,6 +1337,7 @@ def main():
     parser.add_argument("--read-tab", metavar="TAB.BIN", help="decode a pointer dump instead of writing files")
     parser.add_argument("--read-trace", metavar="TRACE.DAT", help="decode an AF state trace instead of writing files")
     parser.add_argument("--trace-runs", metavar="TRACE.DAT", help="summarise an AF state trace per AF run")
+    parser.add_argument("--trace-summary", metavar="TRACE.DAT", help="one line per AF run with outcome and light level")
     parser.add_argument("--trace-passes", metavar="TRACE.DAT", help="print the detector arrays at the end of each pass")
     parser.add_argument("--trace-contrast", metavar="TRACE.DAT", help="print the per-frame contrast of an AF state trace")
     args = parser.parse_args()
@@ -1292,6 +1352,9 @@ def main():
         return
     if args.trace_runs:
         trace_runs(args.trace_runs)
+        return
+    if args.trace_summary:
+        trace_summary(args.trace_summary)
         return
     if args.trace_passes:
         trace_passes(args.trace_passes)

@@ -815,6 +815,20 @@ for a fair comparison.</p>
 <tr><td>dim-sqrtns</td><td>x<sup>0.5</sup></td><td>12</td><td>11</td><td>3</td><td>about 2–70</td></tr>
 <tr><td>dim-scale75</td><td>x<sup>0.75</sup></td><td>11</td><td>11</td><td>0</td><td>1–16</td></tr>
 </table>
+<h3 id="ab-mode">Blind A/B mode and run summary (2026-10-29)</h3>
+<p>The SCALE75 session was about five times brighter than the stock one
+(median area-0 brightness during searches 520,000 against 112,000; the
+square-root session 51,000), so its result does not compare. For a fair test
+in one card trip, <code>PATCH.SH</code> has an A/B mode: with
+<code>AB.ON</code> holding a patch name (e.g. <code>SCALE75</code>) it counts
+power-ons in <code>BOOT.N</code>, applies that patch on odd power-ons only,
+logs <code>&lt;n&gt; &lt;patch&gt; on|off</code> to <code>AB.LOG</code>, and
+copies the previous power-on's <code>TRACE.DAT</code>, <code>TRACE.ERR</code>
+and card-root CSVs to <code>S&lt;n-1&gt;/</code> (copies only; the camera's own
+files are left alone). The user isn't told which session had the patch.
+<code>--trace-summary</code> prints one line per press (time, pre-move,
+passes, outcome, final lens position, scale, brightness) and the totals,
+including locks at the near stop.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than
