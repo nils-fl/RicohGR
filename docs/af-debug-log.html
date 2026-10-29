@@ -134,7 +134,20 @@ next normal power-on runs the script.</p>
 <code>12.34 EnableAfDebugDataSave 1 C sent</code>. That proves the
 script ran past the AF command. It does not prove the command was
 accepted; only the CSV files prove that.</li>
+<li>The script then runs <code>SCRIPT/AFDBG/MEM.SH</code> every 5 s for
+10 minutes. It copies RTOS RAM <code>0x5506b000</code>–<code>0x5506cfff</code>
+read-only from <code>/dev/mem</code> to <code>SCRIPT/AFDBG/MEM.BIN</code>
+(GRKit's dump tool reads RTOS memory the same way). That region holds the
+AF debug flags, the CSV counter and the log slots.
+<code>python3 tools/af_debug_card.py --read-mem MEM.BIN</code> decodes
+it. It shows whether the command set the C flag, whether a log was
+opened, and how many CSVs were written.</li>
 </ol>
+<p><strong>Check 1 (2026-10-29).</strong> Mode Set showed "Complete".
+After one normal power-on and about six half-presses,
+<code>MARK.OK</code> read <code>6.59 EnableAfDebugDataSave 1 C sent</code>,
+so SD scripts work and the script ran 6.6 s after Linux started. No CSV
+was written. The memory probe above was added to find out why.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
