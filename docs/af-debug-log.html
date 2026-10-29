@@ -471,6 +471,20 @@ ceiling from that setting, raising the limit in the menu would raise the
 ceiling with no patch. Not tested yet. The clamp code itself was not found
 (<code>0x80400</code>, <code>0x80200</code> and <code>0x2008</code> do not
 appear as such in the AE code).</li>
+<li><strong>Auto-ISO limit test (<code>work/af-logs/iso-102400/</code>):</strong>
+with the Auto-ISO upper limit at 102400 instead of 6400, the AF gain still
+peaked at 525,312 (as in every session), 9 of 15 dim sweeps ran at 29 fps, and
+the table showed levels 0–2 at the ceiling. The ceiling does not follow the
+menu setting. The three <code>0x80000</code> uses in
+<code>LiveViewProcess</code> are event-flag masks, not a clamp.</li>
+<li><strong>Physics (Inferred):</strong> the per-sample noise of contrast AF
+is set by the light collected per sample. More gain at a shorter integration
+amplifies signal and noise alike, so 100 fps at 3× the gain gives each sample
+a third of the light (about 1.7× worse signal-to-noise). The ceiling (about
+8×, the ISO-6400 equivalent) is probably the analog gain limit of this
+readout; beyond it only digital scaling would be possible, which adds no
+information. Slowing the frame rate in dim light is therefore most likely a
+deliberate noise trade-off, not an arbitrary limit.</li>
 <li><strong>Not known:</strong> whether the level choice reads this cap (if
 not, the patch only allows more gain without changing the frame rate),
 whether 24× is within what the sensor drive accepts, and whether contrast AF
