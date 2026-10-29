@@ -263,6 +263,28 @@ Algorithm block confirmed it. That is about 19 samples, roughly 630 ms, past
 the peak, plus the return. Path 0 and path 1 runs stopped 3–4 samples after
 the peak at every frame rate. Grade 0/0 alone does not cause it: 7 of the
 11 grade-0/0 runs took path 0 or 1 and stopped normally.</p>
+<h3 id="session-repetitive">Session: repetitive pattern (2026-10-29)</h3>
+<p>138 CSVs, 28 unique runs (<code>work/af-logs/repetitive/</code>). The AF
+mode was changed during the session; the CSVs show it in the area layout:</p>
+<table>
+<thead><tr><th>Layout in the CSV</th><th>Probably</th><th>Runs</th><th>Samples (median)</th><th>Sampling (median)</th><th>Path 1</th><th>2-pulse steps</th></tr></thead>
+<tbody>
+<tr><td>2 areas, window 262144 × 212992, main area 90 × 18</td><td>Select or Spot AF, centre</td><td>9</td><td>9</td><td>45 ms</td><td>3</td><td>5</td></tr>
+<tr><td>30 areas, window 1376256 × 884736, main area 328 × 42 or 104 × 20</td><td>Auto-area or zone modes</td><td>18</td><td>12</td><td>60 ms</td><td>16</td><td>13</td></tr>
+</tbody>
+</table>
+<p>All 28 runs: 200 fps, grade 1/1, no path 2, 3 samples after the peak
+(once 4, once 6). The repetitive pattern did not mislead the phase
+detection here. Multi-area AF takes about 3 samples (15 ms) more, with
+more path-1 searches and fine steps.</p>
+<p><strong>The area-0 rule, refined.</strong> In run <code>0058</code> area 0
+also confirmed no peak, yet the sweep stopped after 7 samples: its scan
+window ended at pulse 45, and it ended without an in-focus point
+(<code>InFocusPulse</code> 0). In the two long runs the window ended at 159
+and 177. So without a confirmed peak in area 0 the sweep runs to the end of
+the scan window; the cost depends on how far that is. Area 0's vertical
+channel is never used (its Algorithm row is empty in every run), so area 0's
+horizontal result is what stops a search early.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
