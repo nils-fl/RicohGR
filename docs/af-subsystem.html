@@ -1735,6 +1735,11 @@ frames flatten the focus peak; fast modes also read fewer lines. More pixels
 could in principle stand in for light, but a wider AF area mostly adds
 background: within the same sweeps it improved peak-to-noise by only 1.12×
 (<a href="af-debug-log.html#why-af-needs-light">af-debug-log</a>).</p>
+<p><strong>Dim light: the biggest cost is a second pass (measured).</strong> In
+dim light most sweeps cross the peak on the first pass without accepting it,
+run on about 7.5 samples, reverse and find it on the way back: about 750 ms
+of sampling against about 250 ms when the first pass accepts it
+(<a href="af-debug-log.html#dim-reversal">af-debug-log</a>).</p>
 <p><strong>Dim light: phase confidence.</strong> In the AF-S dim session, sweeps
 with a low phase grade (0/0) took 467 ms median against 240 ms with grade 1/1,
 through more reversals. In the dim AF-C session, with one larger AF area
