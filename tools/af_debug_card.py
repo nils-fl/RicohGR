@@ -968,6 +968,42 @@ def read_trace(path):
             prev = v
 
 
+def trace_runs(path):
+    """Summarise a TRACE.DAT per AF run (action 2 ... back to 1): duration,
+    action codes, accepted flag, and per pass (path 0/1/2) the area-0
+    detector's rising/falling counts as they change."""
+    import struct
+    data = Path(path).read_bytes()
+    rec = 8 + 4 * len(TRACE_OFFSETS)
+    runs, cur, t0 = [], None, None
+    for k in range(len(data) // rec):
+        sec, nsec, *w = struct.unpack_from(f"<II{len(TRACE_OFFSETS)}I", data, k * rec)
+        t = sec + nsec / 1e9
+        t0 = t if t0 is None else t0
+        act, path, counts = w[0] & 0xffff, (w[1] >> 16) & 0xff, (w[12] & 0xffff, w[12] >> 16)
+        if act == 2 and (cur is None or "end" in cur):
+            cur = {"t": t, "acts": [], "passes": []}
+            runs.append(cur)
+        if cur is None or "end" in cur:
+            continue
+        if not cur["passes"] or cur["passes"][-1][0] != path:
+            cur["passes"].append((path, t, []))
+        seq = cur["passes"][-1][2]
+        if not seq or seq[-1] != counts:
+            seq.append(counts)
+        if not cur["acts"] or cur["acts"][-1] != act:
+            cur["acts"].append(act)
+        if act == 1 and len(cur["acts"]) > 1:
+            cur["end"], cur["acc"] = t, w[3] & 0xff
+    for r in runs:
+        print(f"{r['t'] - t0:7.2f} s  {1000 * (r.get('end', r['t']) - r['t']):5.0f} ms  "
+              f"actions {r['acts']}  accepted {r.get('acc')}")
+        for path, t, seq in r["passes"]:
+            # The first entry is often left over from the previous run.
+            print(f"    path {path} from {1000 * (t - r['t']):5.0f} ms, rise/fall: "
+                  + " ".join(f"{a}/{b}" for a, b in seq[1:]))
+
+
 def patch_sh():
     # Applied once per power-on, only when AFCFAST.ON is on the card. The patch
     # lives in RAM; switching off (or starting without the file) gives stock.
@@ -1049,6 +1085,7 @@ def main():
     parser.add_argument("--read-mem", metavar="MEM.BIN", help="decode a probe dump instead of writing files")
     parser.add_argument("--read-tab", metavar="TAB.BIN", help="decode a pointer dump instead of writing files")
     parser.add_argument("--read-trace", metavar="TRACE.DAT", help="decode an AF state trace instead of writing files")
+    parser.add_argument("--trace-runs", metavar="TRACE.DAT", help="summarise an AF state trace per AF run")
     args = parser.parse_args()
     if args.read_mem:
         read_mem(args.read_mem)
@@ -1058,6 +1095,9 @@ def main():
         return
     if args.read_trace:
         read_trace(args.read_trace)
+        return
+    if args.trace_runs:
+        trace_runs(args.trace_runs)
         return
     flags = args.flags.upper()
     if not flags or any(c not in FLAGS for c in flags) or len(set(flags)) != len(flags):

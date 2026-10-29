@@ -64,7 +64,7 @@ strong{font-weight:650}
 <li><a href="#session-af-area" id="toc-session-af-area">Session: AF area size in dim light</a></li>
 <li><a href="#force100-test" id="toc-force100-test">Dim-light frame-rate test: force 100 fps</a></li>
 <li><a href="#why-af-needs-light" id="toc-why-af-needs-light">Why contrast AF needs light</a></li>
-<li><a href="#dim-reversal" id="toc-dim-reversal">Dim light: the first pass passes the peak</a></li>
+<li><a href="#dim-reversal" id="toc-dim-reversal">Dim light: the first pass turns back</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -594,7 +594,7 @@ either. So the 21 successful wide-area retries owe most of their success to
 being a second pass over a narrowed lens range, not to the width. Starting
 with the wide area would gain roughly the equivalent of 25% more light; not
 worth a patch.</p>
-<h2 id="dim-reversal">Dim light: the first pass passes the peak (analysis, 2026-10-29)</h2>
+<h2 id="dim-reversal">Dim light: the first pass turns back (analysis, 2026-10-29)</h2>
 <ul>
 <li><strong>Path 1 is a real reversal.</strong> Every store of path 1
 (<code>0x53404e1c</code>, <code>0x5340539c</code>, <code>0x534055e8</code>,
@@ -607,16 +607,15 @@ ends without an accepted peak, the code at <code>0x53404d8c</code> calls
 <code>0x53400b74</code> and <code>0x53403808</code> (about 1,000 instructions,
 the end-of-pass decision) and, if that returns 0, reverses at
 <code>0x5340561c</code>.</li>
-<li><strong>The first pass crosses the peak without accepting it.</strong> The
-return pass starts at the turning point, so the peak's distance into the
-logged pass is how far the first pass ran past it: median 7.5 samples
-(IQR 6.6–12.5) over 60 dim path-1 sweeps. The return pass then takes 12
-samples (median), the first 3–5 of them flat.</li>
-<li><strong>Cost:</strong> at 33 ms per sample, a reversed dim sweep is at
-least about 22 samples, roughly 750 ms, of which the logged part is 400 ms.
-The 12 dim sweeps that accepted the peak on the first pass took 7.5 samples,
-about 250 ms. The pass-turn-return pattern roughly triples dim-light AF time,
-and the light was enough to pass the peak the first time.</li>
+<li><s>The first pass crosses the peak without accepting it.</s>
+<strong>Corrected by the state trace below:</strong> in a clean reversal the
+first pass starts at or just past the peak and moves <em>away</em> from it;
+contrast falls from the first sample. The return pass retraces those samples
+before it reaches the peak, which is why the peak sits about 7.5 samples
+(median, IQR 6.6–12.5, 60 dim path-1 sweeps) into the logged pass.</li>
+<li><strong>Cost:</strong> measured directly in the trace below: a clean
+reversal adds about 320 ms (about 880 ms against about 560 ms from the
+half-press to the accepted peak).</li>
 </ul>
 <p><strong>Static decode so far (Read):</strong> the main peak check
 (<code>0x53404f50</code>, calling <code>0x5340bc4c</code>) is reached only from
@@ -635,6 +634,53 @@ timestamp, appending to <code>TRACE.DAT</code> in chunks. Switch
 <code>TRACE.ON</code>; started in the background by <code>PATCH.SH</code>;
 decoded with <code>tools/af_debug_card.py --read-trace</code>. Checked in the
 emulator over a real snapshot.</p>
+<h3 id="dim-trace">State trace of a dim AF-S session (2026-10-29)</h3>
+<p>The tracer ran with no patch active, in the dim room used before, AF-S,
+10 half-presses: <code>work/af-logs/dim-trace</code>, 20,500 records (41 s).
+All 10 searches ran at 29 fps; the CSVs of the same session match the runs
+one-to-one. Summary: <code>tools/af_debug_card.py --trace-runs TRACE.DAT</code>.</p>
+<table>
+<tr><th>Kind</th><th>Runs</th><th>Half-press to result</th><th>Area-0 detector</th></tr>
+<tr><td>Clean</td><td>4</td><td>580–630 ms</td><td>4–7 rises, then 3 falls: peak accepted (action 8, then 128)</td></tr>
+<tr><td>Wrong side</td><td>3 (+1 in a noisy run)</td><td>870–960 ms</td><td>first pass: only falls (4–5); area index −2, turn (path 1); return pass: 6–8 rises, 3 falls</td></tr>
+<tr><td>Noisy</td><td>3</td><td>1,490–2,680 ms</td><td>rises and falls alternate (1/0, 0/1, 2/0 …); two passes or three; accepted on area 1 (the wide area) or not at all (action 64)</td></tr>
+</table>
+<ul>
+<li><strong>Timing of a clean run:</strong> about 170 ms from the half-press
+(action 2) to the start of sampling (action 4, the lens moves to the scan
+start), about 300 ms of sampling at 34 ms per frame, then about 60 ms to the
+result.</li>
+<li><strong>The search starts about 6 samples before the expected peak.</strong>
+In clean runs the peak comes after 4–7 rising samples (45–53 pulses into the
+logged pass). In wrong-side runs the return pass rises 6–8 times: 4–5 of them
+retrace the first pass, so the scan start was 1–3 samples past the peak. The
+start error spreads over about ±3 samples in dim light; the phase grade was
+mostly 1 in both groups.</li>
+<li><strong>A turn costs about 10 samples:</strong> 4–5 falling samples until
+the turn, the same number again on the way back, plus about 40–70 ms for the
+turn itself (path 1 action 2 to 4).</li>
+<li><strong>The rise/fall detector has no noise margin</strong>
+(<code>0x5340bf78</code>–<code>0x5340c178</code>). It smooths the contrast
+series ([1 2 1]/4, plus a predicted next value [1 3]/4), and any smoothed
+sample below the previous one resets the rise count (<code>+0xbc</code>) and
+increments the fall count (<code>+0xbe</code>), and the other way round.
+In dim light noise breaks the run of rises, so the detector never sees enough
+rises then 3 falls in a row: those are the 1.5–2.7 s presses.</li>
+<li><strong>A clear rise is not always accepted:</strong> in run 1 the second
+pass rose 7 times and fell 10 times without action 8. The CSV shows only the
+last pass, so the contrast values of that pass are not known; the tracer would
+have to record them.</li>
+<li>The gate byte <code>+0x14ea5</code> stayed 0 throughout, as the static
+read predicted.</li>
+</ul>
+<p><strong>What this means for patches:</strong> the overshoot idea (accept
+on the first pass) is wrong. Two levers remain. (1) Noise: add a margin to the
+rise/fall comparison, or compare less smoothed differences, so noise doesn't
+reset the counts; this targets the slowest presses (1.5–2.7 s, 3 of 10).
+(2) Wrong side: turn after fewer falling samples, or jump back to the first
+pass's start instead of retracing it; at most about 300 ms on about 4 of 10
+presses. A wider start margin would cost about 100 ms on every press and save
+little on average.</p>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>
