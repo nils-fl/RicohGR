@@ -1681,9 +1681,13 @@ and <code>0x533f928c</code>) is the next offline target.</p>
 <tr><td>6</td><td>Old lever 1: shorter confirmation after the peak</td><td>≤ 15 ms (3 samples at 200 fps)</td><td>every AF-S run</td></tr>
 </tbody>
 </table>
-<p>Lead for lever 1 in this table: the engineering command
-<code>CAF_Debug CisDriveModeFix</code> (<code>0x5341768c</code>) suggests the
-sensor drive mode for contrast AF can be fixed; not yet decoded.</p>
+<p>Lever 1 in this table: the engineering command
+<code>CAF_Debug CisDriveModeFix</code> can only force the slower live-view
+drive mode, not the 200 fps mode (decoded,
+<a href="gr-mod-landscape.html#52-caf_debug">gr-mod-landscape §5.2</a>). The
+decision is the selector <code>0x533f70a4</code>; making AF-C fast needs a
+change there. Open: which of its inputs makes AF-C slow, and whether AF-C
+uses the live-view mode on purpose (to keep the display running).</p>
 </main>
 </div>
 <script>

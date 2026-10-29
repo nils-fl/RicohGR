@@ -457,6 +457,28 @@ the card. Whether that log adds a timestamp, and whether a card script
 can read it, is not decoded. If both are true, the start and result
 markers would give AF time per run without video.</p>
 
+<p><strong><code>CisDriveModeFix</code> (decoded 2026-10-29, Read).</strong>
+Syntax: <code>CAF_Debug CisDriveModeFix off</code>,
+<code>… on LV</code>, or <code>… on CAF High|H|Middle|M|Low|L|SuperLow|SL</code>
+(no level means High). It stores on/off at contrast AF object
+<code>+0x16d88</code>, LV (0) or CAF (1) at <code>+0x16d89</code>, and the
+level (0–3) at <code>+0x16d8a</code> (<code>0x5341768c</code>,
+<code>0x534174b4</code>). The only functional reader is the fast-drive
+selector <code>0x533f70a4</code>, called at search start
+(<code>0x53405abc</code>) and by <code>0x533f7124</code> and
+<code>0x5340a700</code>:</p>
+<pre><code>if +0xc44e == 0:  fast = override on ? (+0x16d89 == CAF) : 1
+else:             fast = (+0xc488 == 0) and (+0xc484 != 2)    // override ignored
+if +0x43c0 != 0, or (+0x1004 == 0 and +0xfec == 2):  fast = 0</code></pre>
+<p>The search start <code>0x53405a18(obj, kind)</code> sets
+<code>+0xc44e</code> to 1 for <code>kind</code> 2 or 4. The level
+(<code>+0x16d8a</code>) is only printed, not used. So the command can force
+contrast AF <em>down</em> to the live-view drive mode, but not up: in AF-C,
+which sampled at 59 fps (<a href="af-debug-log.html#session-afc">af-debug-log</a>),
+either the search ran in the <code>+0xc44e</code> branch, where the
+override is ignored, or a veto applied. A faster AF-C therefore needs a code
+change in <code>0x533f70a4</code>, not a shell command. Which branch AF-C
+takes is the next camera measurement (the probe now reads these fields).</p>
 <h3 id="53-other-af-shell-commands">5.3 Other AF shell commands</h3>
 <p>From the SHELLCMD table (Read; behaviour not decoded):
 <code>EnableAfBVC</code>, <code>TestAfError</code>, <code>camctl_af</code>,

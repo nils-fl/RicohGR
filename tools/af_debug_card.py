@@ -37,11 +37,15 @@ FLAGS = "PCZO"
 
 # The probe copies RTOS RAM 0x5506b000-0x5506cfff (RTOS addresses are physical
 # addresses; GRKit's dump tool maps /dev/mem the same way, read-only) to
-# SCRIPT/AFDBG/MEM.BIN every 10 s for 10 minutes. It holds the AF debug object
+# SCRIPT/AFDBG/MEM.BIN every 10 s for 10 minutes, and MEM.SH copies each
+# snapshot to Mnnn.BIN (cp works on the card, mv does not). It holds the AF debug object
 # 0x5506b56c (vtable 0x53c15308, flags +0x27..+0x2a, log slots +0x112c), its
 # guard 0x5506b564, the CSV counter 0x5506b568 and the busy bytes 0x5506b56a,
 # 0x5506c765. tools/af_debug_card.py --read-mem decodes it.
-PROBE_PAGE, PROBE_PAGES = 0x5506b000, 2
+PROBE_PAGE, PROBE_PAGES = 0x5506b000, 14
+# 14 pages also reach the static contrast AF object (0x5506c938) up to +0xc6c7:
+# the inputs of the fast-drive selector 0x533f70a4 (+0xc44e, +0xc484, +0xc488,
+# vetoes +0x43c0, +0xfec/+0x1004) and the search path +0xc4ca.
 # Re-arm every second (bright-edge session: presses about 3 s apart lost runs
 # with a 3 s re-arm); snapshot memory every 10th tick. 600 ticks = 10 minutes.
 TICK_MS, TICKS, PROBE_EVERY = 1000, 600, 10
@@ -123,6 +127,9 @@ def mem_sh():
         "$d/MEMRD.BIN\n"
         "s=$?\n"
         'echo "$s" >$d/MEM.ERR\n'
+        # Keep every snapshot: M000.BIN, M001.BIN ... (counter in MEM.N).
+        'n=$(cat $d/MEM.N 2>/dev/null || echo 0)\n'
+        '[ "$s" = 0 ] && cp $d/MEM.BIN $d/M$(printf %03d "$n").BIN && echo $((n + 1)) >$d/MEM.N\n'
         "read t _ </proc/uptime\n"
         'echo "$t" >$d/MEM.TIME\n'
         "exit 0\n"
@@ -242,8 +249,8 @@ def memrd_bin():
 def read_mem(path):
     """Decode a MEM.BIN that the probe wrote."""
     data = Path(path).read_bytes()
-    if len(data) != PROBE_PAGES * 4096:
-        sys.exit(f"{path}: {len(data)} bytes, expected {PROBE_PAGES * 4096}")
+    if len(data) % 4096 or len(data) < 2 * 4096:
+        sys.exit(f"{path}: {len(data)} bytes, expected a whole number of pages (at least 2)")
     u8 = lambda a: data[a - PROBE_PAGE]
     u16 = lambda a: int.from_bytes(data[a - PROBE_PAGE:a - PROBE_PAGE + 2], "little")
     u32 = lambda a: int.from_bytes(data[a - PROBE_PAGE:a - PROBE_PAGE + 4], "little")
@@ -261,6 +268,20 @@ def read_mem(path):
             # use, +4 name (std::string), +8 buffer, +0xc bytes logged, +0x10 size.
             print(f"slot {k}: in use, buffer {u32(s + 8):#010x}, logged {u32(s + 0xc):#x}, size {u32(s + 0x10):#x}")
     print("slots in use          " + str(sum(1 for k in range(10) if u8(obj + 0x112c + k * 0x14))))
+    caf = u32(CAF_POINTER)
+    if caf and caf + 0xc4ca < PROBE_PAGE + len(data):
+        # Inputs of the fast-drive selector 0x533f70a4 (Read): with +0xc44e = 0
+        # the result is 1 unless CisDriveModeFix says LV; with +0xc44e = 1 it is
+        # (+0xc488 == 0 and +0xc484 != 2). Vetoes: +0x43c0 set, or +0x1004 == 0
+        # and +0xfec == 2.
+        c44e, c484, c488 = u8(caf + 0xc44e), u32(caf + 0xc484), u8(caf + 0xc488)
+        v43c0, fec, f1004 = u8(caf + 0x43c0), u32(caf + 0xfec), u8(caf + 0x1004)
+        fast = (1 if c44e == 0 else int(c488 == 0 and c484 != 2))
+        if v43c0 or (f1004 == 0 and fec == 2):
+            fast = 0
+        print(f"contrast AF object    {caf:#010x}")
+        print(f"selector inputs       +c44e {c44e}  +c484 {c484}  +c488 {c488}  veto +43c0 {v43c0}  +fec {fec}  +1004 {f1004}")
+        print(f"fast drive (last)     {fast}   search path +c4ca {u8(caf + 0xc4ca)}")
 
 
 def card_roots(flags):
