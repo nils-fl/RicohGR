@@ -709,6 +709,21 @@ ratio does not cleanly separate accepted from rejected passes, possibly because
 the trace sees the smoothing only every 2 ms and not the detector's own
 per-sample array.</li>
 </ul>
+<p><strong>Tracer, third version:</strong> to see the detector's own data
+rather than a 2 ms reconstruction, the tracer also maps the detector arrays on
+the heap. Each detector holds three per-sample arrays of 0x1000 entries
+(<code>+0</code> raw contrast, <code>+4</code> the smoothed noise-normalised
+value the peak helpers read, <code>+8</code> brightness); in every snapshot so
+far they sit at <code>0x5cd30040</code>/<code>0x5cd34040</code> (area 0) and
+<code>0x5cd58040</code>/<code>0x5cd5c040</code> (area 1). The tracer reads the
+pointers at start, checks their order and spacing (exit 7 otherwise), maps
+them through <code>/dev/mem</code> and copies the first 40 raw and smoothed
+entries of both areas into every record, together with the detector headers
+(sample count, max/min/peak index, flags) and the per-area results written
+after a pass (<code>+0xf3c</code>, <code>+0xf40</code>, <code>+0xf5c</code>,
+<code>+0x4074</code>, <code>+0x40ec</code>). Period 4 ms, 15,000 records
+(60 s), 840 bytes each. <code>--trace-passes</code> prints the arrays at the
+end of every pass with the outcome.</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than

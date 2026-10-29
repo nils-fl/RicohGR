@@ -805,7 +805,10 @@ def multipatch_bin(sites):
 # every TRACE_PERIOD_NS records a timestamp plus the 32-bit words at
 # TRACE_OFFSETS (object-relative), TRACE_RECORDS times, appending to TRACE.BIN's
 # output TRACE.DAT every TRACE_CHUNK records (so a power-off keeps what was
-# written). Record: tv_sec, tv_nsec (CLOCK_MONOTONIC), then one word per offset.
+# written). Record: tv_sec, tv_nsec (CLOCK_MONOTONIC), then one word per offset,
+# then the four detector arrays. Exit status (TRACE.ERR): 0 done, 1 open
+# /dev/mem, 2 map, 3 create TRACE.DAT, 6 map the arrays, 7 unexpected array
+# pointers.
 CAF_OBJECT = 0x5506C938
 TRACE_OFFSETS = (
     0xC44C,   # action code (u16) | +0xc44e AF-C search flag
@@ -841,10 +844,22 @@ TRACE_OFFSETS = (
     0x11A4,   # area 1: b4
     0x11A8,   # area 1: b8
     0x11AC,   # area 1: rising / falling counts
+    # Detector headers: +0xc samples in the pass, +0x18 peak sample, +0x1c..+0x27
+    # flags (+0x24 and +0x26 are read by 0x5340bbd8 / 0x5340bbd0).
+    0x1038, 0x1044, 0x1048, 0x104C, 0x1050,     # area 0
+    0x10FC, 0x1108, 0x110C, 0x1110, 0x1114,     # area 1
+    # Per-area results after a pass (written at 0x53404658): count, flags.
+    0x0F3C, 0x0F40, 0x0F5C, 0x4074, 0x4078, 0x40EC, 0x40F0,
+    0x1100, 0x1104,                             # area 1: max / min index (+0x10/+0x14)
 )
-# Earlier traces recorded only the first 16 words.
-TRACE_FIELDS_V1 = 16
-TRACE_PERIOD_NS, TRACE_RECORDS, TRACE_CHUNK = 2_000_000, 30_000, 500
+# Then, per record, the first TRACE_ARRAY_WORDS entries of four per-sample
+# arrays on the heap, through the pointers at detector +0 and +4: raw
+# contrast (u32) and the smoothed noise-normalised value (float) that the
+# peak helpers 0x5340bbe0 / 0x5340bc18 / 0x5340bc2c read; area 0, then area 1.
+TRACE_ARRAY_WORDS = 40
+# Earlier layouts: (fields, array words) per record.
+TRACE_LAYOUTS = ((None, TRACE_ARRAY_WORDS), (29, 0), (16, 0))
+TRACE_PERIOD_NS, TRACE_RECORDS, TRACE_CHUNK = 4_000_000, 15_000, 250
 TRACE_MAP = 0x16000                      # 0x5506c000..0x55081fff covers all offsets
 
 TRACE_S = r"""    .syntax unified
@@ -872,6 +887,42 @@ _start:
     bhi     quit
     ldr     r1, ={obj_offset}
     add     r6, r0, r1              @ r6 = the object in the mapping
+    ldr     r3, =0x102c             @ area 0 detector
+    add     r3, r6, r3
+    ldr     r0, [r3]                @ p0: area 0 raw contrast array
+    ldr     r1, [r3, #4]            @ p1: area 0 smoothed array
+    ldr     r2, [r3, #0xc4]         @ p2: area 1 raw contrast array
+    ldr     r3, [r3, #0xc8]         @ p3: area 1 smoothed array
+    cmp     r0, #0                  @ expect p0 < p1 < p2 < p3, within 256 KB
+    beq     badptr
+    cmp     r1, r0
+    bls     badptr
+    cmp     r2, r1
+    bls     badptr
+    cmp     r3, r2
+    bls     badptr
+    sub     ip, r3, r0
+    cmp     ip, #0x40000
+    bhs     badptr
+    push    {r0, r1, r2, r3}        @ [sp] = p0..p3
+    lsr     r5, r0, #12             @ map from p0's page to past p3's array
+    sub     r1, r3, r5, lsl #12
+    add     r1, r1, #{array_bytes}
+    mov     r0, #0
+    mov     r2, #1
+    mov     r3, #1
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #6
+    bhi     quit
+    sub     r0, r0, r5, lsl #12     @ pointer -> mapping
+    pop     {r1, r2, r3, ip}
+    add     r1, r1, r0
+    add     r2, r2, r0
+    add     r3, r3, r0
+    add     ip, ip, r0
+    push    {r1, r2, r3, ip}
     mov     r0, #0                  @ anonymous buffer for one chunk
     ldr     r1, ={chunk_bytes}
     mov     r2, #3
@@ -912,6 +963,18 @@ field:
     add     r3, r3, #1
     cmp     r3, #{nfields}
     bne     field
+    mov     r3, #0                  @ the four arrays
+array:
+    ldr     r1, [sp, r3, lsl #2]
+    mov     r2, #{array_words}
+copy:
+    ldr     r0, [r1], #4
+    str     r0, [r9], #4
+    subs    r2, r2, #1
+    bne     copy
+    add     r3, r3, #1
+    cmp     r3, #4
+    bne     array
     adr     r0, period              @ nanosleep(&period, NULL)
     mov     r1, #0
     mov     r7, #162
@@ -939,6 +1002,9 @@ flush:
 quit:
     mov     r7, #1
     svc     #0
+badptr:
+    mov     r0, #7
+    b       quit
 dev:
     .asciz  "/dev/mem"
 out:
@@ -954,8 +1020,10 @@ offsets:
 
 def trace_bin():
     offsets = "\n".join(f"    .word   {o:#x}" for o in TRACE_OFFSETS)
-    rec = 8 + 4 * len(TRACE_OFFSETS)
+    rec = 8 + 4 * len(TRACE_OFFSETS) + 16 * TRACE_ARRAY_WORDS
     return arm_elf(TRACE_S.replace("{map_len}", f"{TRACE_MAP:#x}")
+                   .replace("{array_bytes}", f"{4 * TRACE_ARRAY_WORDS:#x}")
+                   .replace("{array_words}", str(TRACE_ARRAY_WORDS))
                    .replace("{map_page}", f"{(CAF_OBJECT & ~0xfff) >> 12:#x}")
                    .replace("{obj_offset}", f"{CAF_OBJECT & 0xfff:#x}")
                    .replace("{chunk_bytes}", f"{rec * TRACE_CHUNK:#x}")
@@ -967,18 +1035,19 @@ def trace_bin():
 
 
 def trace_records(path):
-    """The records of a TRACE.DAT as (seconds, words). Traces made before the
-    contrast fields were added have TRACE_FIELDS_V1 words per record; the
-    record size is picked by the 2 ms step between the first timestamps."""
+    """The records of a TRACE.DAT as (seconds, words): the fields, then any
+    array words. Older traces have fewer fields (TRACE_LAYOUTS); the layout
+    is picked by the plausible steps between the first timestamps."""
     import struct
     data = Path(path).read_bytes()
-    for n in (len(TRACE_OFFSETS), TRACE_FIELDS_V1):
+    for n, arrays in TRACE_LAYOUTS:
+        n = (n or len(TRACE_OFFSETS)) + 4 * arrays
         rec = 8 + 4 * n
         if len(data) % rec or len(data) < 3 * rec:
             continue
         ts = [struct.unpack_from("<II", data, k * rec) for k in range(3)]
         steps = [(b[0] - a[0]) * 1e9 + b[1] - a[1] for a, b in zip(ts, ts[1:])]
-        if all(nsec < 1_000_000_000 for _, nsec in ts) and all(0 < d < 50 * TRACE_PERIOD_NS for d in steps):
+        if all(nsec < 1_000_000_000 for _, nsec in ts) and all(0 < d < 100_000_000 for d in steps):
             return [(sec + nsec / 1e9, w) for sec, nsec, *w in
                     (struct.unpack_from(f"<II{n}I", data, k * rec) for k in range(len(data) // rec))]
     sys.exit(f"{path}: not a TRACE.DAT of a known layout")
@@ -1008,7 +1077,7 @@ def trace_contrast(path):
     that it compares with 0, and its rise/fall counts."""
     import struct
     records = trace_records(path)
-    if len(records[0][1]) < len(TRACE_OFFSETS):
+    if len(records[0][1]) < 29:
         sys.exit(f"{path}: recorded without the contrast fields")
     f32 = lambda x: struct.unpack("<f", struct.pack("<I", x))[0]
     t0, prev = records[0][0], {}
@@ -1028,6 +1097,39 @@ def trace_contrast(path):
             print(f"{t - t0:9.3f} path {path_} area {area}  raw {raw:9d}  Y {y:8d}  b8 {b8:10.4f}  "
                   f"step {step:+9.4f}  rise/fall {counts & 0xffff}/{counts >> 16}"
                   + (f"  margin {f32(w[21]):.4g} x {f32(w[22]):.4g}" if area == 0 else ""))
+
+
+def trace_passes(path):
+    """For each pass (action 4 to anything else) in a v3 trace, print the
+    detector state of the last record of the pass for areas 0 and 1: sample
+    count, max/min/peak indices (+0x10/+0x14/+0x18), flags (+0x1c..+0x27),
+    and the per-sample raw contrast and smoothed value; then the outcome
+    (action, area index, per-area results)."""
+    import struct
+    records = trace_records(path)
+    n = len(TRACE_OFFSETS)
+    if len(records[0][1]) < n + 4 * TRACE_ARRAY_WORDS:
+        sys.exit(f"{path}: recorded without the detector arrays")
+    f32 = lambda x: struct.unpack("<f", struct.pack("<I", x))[0]
+    signed = lambda x: x - (1 << 32) if x >> 31 else x
+    t0, prev = records[0][0], None
+    for t, w in records:
+        act = w[0] & 0xffff
+        if prev is not None and prev[1][0] & 0xffff == 4 and act != 4:
+            pt, pw = prev
+            print(f"{pt - t0:8.3f} path {(pw[1] >> 16) & 0xff} -> action {act}, area {signed(w[5])}; "
+                  f"results {w[39]:#010x} {w[40]:#010x} {w[41]:#010x} {[signed(x) for x in w[42:46]]}")
+            for area in (0, 1):
+                hdr = pw[29 + 5 * area: 34 + 5 * area]
+                count = min(hdr[0], TRACE_ARRAY_WORDS)
+                raw = pw[n + 2 * area * TRACE_ARRAY_WORDS:][:count]
+                val = [f32(x) for x in pw[n + (2 * area + 1) * TRACE_ARRAY_WORDS:][:count]]
+                max_i, min_i = (pw[13], pw[14]) if area == 0 else (pw[46], pw[47])
+                print(f"    area {area}: n {hdr[0]} max@{max_i} min@{min_i} peak@{signed(hdr[1])} "
+                      f"flags {hdr[2]:#010x} {hdr[3]:#010x} {hdr[4]:#010x}")
+                print("      raw " + " ".join(str(x) for x in raw))
+                print("      val " + " ".join(f"{x:.4f}" for x in val))
+        prev = (t, w)
 
 
 def trace_runs(path):
@@ -1143,6 +1245,7 @@ def main():
     parser.add_argument("--read-tab", metavar="TAB.BIN", help="decode a pointer dump instead of writing files")
     parser.add_argument("--read-trace", metavar="TRACE.DAT", help="decode an AF state trace instead of writing files")
     parser.add_argument("--trace-runs", metavar="TRACE.DAT", help="summarise an AF state trace per AF run")
+    parser.add_argument("--trace-passes", metavar="TRACE.DAT", help="print the detector arrays at the end of each pass")
     parser.add_argument("--trace-contrast", metavar="TRACE.DAT", help="print the per-frame contrast of an AF state trace")
     args = parser.parse_args()
     if args.read_mem:
@@ -1156,6 +1259,9 @@ def main():
         return
     if args.trace_runs:
         trace_runs(args.trace_runs)
+        return
+    if args.trace_passes:
+        trace_passes(args.trace_passes)
         return
     if args.trace_contrast:
         trace_contrast(args.trace_contrast)
