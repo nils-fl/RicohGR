@@ -37,18 +37,21 @@ FLAGS = "PCZO"
 
 # The probe copies RTOS RAM 0x5506b000-0x5506cfff (RTOS addresses are physical
 # addresses; GRKit's dump tool maps /dev/mem the same way, read-only) to
-# SCRIPT/AFDBG/MEM.BIN every 10 s for 10 minutes, and MEM.SH copies each
+# SCRIPT/AFDBG/MEM.BIN every 2 s for 10 minutes, and MEM.SH copies each
 # snapshot to Mnnn.BIN (cp works on the card, mv does not). It holds the AF debug object
 # 0x5506b56c (vtable 0x53c15308, flags +0x27..+0x2a, log slots +0x112c), its
 # guard 0x5506b564, the CSV counter 0x5506b568 and the busy bytes 0x5506b56a,
 # 0x5506c765. tools/af_debug_card.py --read-mem decodes it.
-PROBE_PAGE, PROBE_PAGES = 0x5506b000, 14
-# 14 pages also reach the static contrast AF object (0x5506c938) up to +0xc6c7:
+PROBE_PAGE, PROBE_PAGES = 0x5506b000, 23
+# 23 pages reach the static contrast AF object (0x5506c938) up to +0x156c7:
 # the inputs of the fast-drive selector 0x533f70a4 (+0xc44e, +0xc484, +0xc488,
-# vetoes +0x43c0, +0xfec/+0x1004) and the search path +0xc4ca.
+# vetoes +0x43c0, +0xfec/+0x1004), the search path +0xc4ca, the scan window
+# +0xc438/+0xc43c, and the two flags that skip the peak check at 0x53404f50
+# (+0xc53d, printed as EyeDetectStatus; +0x150c9, the state of an outside
+# position-list request, set by 0x53406d10).
 # Re-arm every second (bright-edge session: presses about 3 s apart lost runs
 # with a 3 s re-arm); snapshot memory every 10th tick. 600 ticks = 10 minutes.
-TICK_MS, TICKS, PROBE_EVERY = 1000, 600, 10
+TICK_MS, TICKS, PROBE_EVERY = 1000, 600, 2
 # The contrast CSV needs a second command (check 3, 2026-10-29): the logger
 # 0x53407c5c is called from 0x53408870 only while CAF byte +0x16d8c is set,
 # and only "CAF_Debug SaveDebugFile on [N] [name]" sets it (0x5341716c ->
@@ -398,6 +401,9 @@ def read_mem(path):
         print(f"contrast AF object    {caf:#010x}")
         print(f"selector inputs       +c44e {c44e}  +c484 {c484}  +c488 {c488}  veto +43c0 {v43c0}  +fec {fec}  +1004 {f1004}")
         print(f"fast drive (last)     {fast}   search path +c4ca {u8(caf + 0xc4ca)}")
+        if caf + 0x150c9 < PROBE_PAGE + len(data):
+            print(f"peak-check skips      +c53d (EyeDetectStatus) {u8(caf + 0xc53d)}  +150c9 (position request) {u8(caf + 0x150c9)}")
+            print(f"scan window           end +c438 {u32(caf + 0xc438)}  in focus +c43c {u32(caf + 0xc43c)}  start +c434 {u32(caf + 0xc434)}")
 
 
 def card_roots(flags):
