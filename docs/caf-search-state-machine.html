@@ -366,9 +366,9 @@ hand-off, in the per-frame dispatcher <code>0x5340a2bc</code> (codes 1, 2, 4,
 outside request to measure at given lens positions: set to 1 (one position)
 by <code>0x533ea7f4</code> and to 3 (five positions) by
 <code>0x533ea888</code> through <code>0x53406d10</code>, and advanced to 4 by
-<code>0x53407368</code>. Which of the two flags held off the clear peaks in
-the low-light path-2 runs is the next camera measurement; the probe now
-reads both.</li>
+<code>0x53407368</code>. Measured afterwards (<a href="af-debug-log.html#session-low-light-face">af-debug-log</a>):
+both flags stayed 0 during path-2 searches, so neither is the cause. Path 2
+went with a low phase grade (0/0) in every case.</li>
 </ul>
 </main>
 </div>

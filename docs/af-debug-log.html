@@ -58,6 +58,7 @@ strong{font-weight:650}
 <li><a href="#results-across-sessions" id="toc-results-across-sessions">Results across the sessions</a></li>
 <li><a href="#session-selector" id="toc-session-selector">Session: drive-mode selector</a></li>
 <li><a href="#session-low-light-eye" id="toc-session-low-light-eye">Session: low light, eye detection on/off</a></li>
+<li><a href="#session-low-light-face" id="toc-session-low-light-face">Session: low light, AF-S, face on/off</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -352,7 +353,10 @@ searches to the live-view mode (most likely to keep the display running) is
 not known, and only a camera test of a patched build could show the
 effect.</p>
 <h3 id="session-low-light-eye">Session: low light, eye detection on/off (2026-10-29)</h3>
-<p>Stock, AF-S, dim room, a few runs with face/eye detection on and a few with
+<p><strong>Correction:</strong> the camera was in AF-C in this session, not
+AF-S (the owner noticed afterwards). That explains the single AF area and the
+single grade value. The AF-S repeat follows below.</p>
+<p>Stock, dim room, a few runs with face/eye detection on and a few with
 it off; 18 unique sweeps and 36 snapshots every 2 s
 (<code>work/af-logs/low-light-eye/</code>). The owner felt no speed
 difference.</p>
@@ -369,6 +373,37 @@ larger area gave the phase detection enough signal in this light
 (Inferred).</li>
 <li>29 fps in 14 sweeps, 100 fps in 4; median sweep 367 ms, the same as the
 first low-light session.</li>
+</ul>
+<h3 id="session-low-light-face">Session: low light, AF-S, face detection on then off (2026-10-29)</h3>
+<p>Stock, two-area AF-S layout as in the first low-light session; a few runs
+with face detection on, then a few with it off. 28 unique sweeps and 48
+snapshots every 2 s (<code>work/af-logs/low-light-face/</code>). The owner
+felt face off a bit faster.</p>
+<table>
+<thead><tr><th>Sweeps</th><th>Count</th><th>Median</th><th>Mean</th></tr></thead>
+<tbody>
+<tr><td>Phase grade 1/1</td><td>13</td><td>240 ms</td><td>303 ms</td></tr>
+<tr><td>Phase grade 0/0</td><td>15</td><td>467 ms</td><td>514 ms</td></tr>
+<tr><td>Path 0 / 1 / 2</td><td>4 / 16 / 8</td><td>217 / 367 / 517 ms</td><td>217 / 364 / 621 ms</td></tr>
+</tbody>
+</table>
+<ul>
+<li><strong>The skip-flag hypothesis is ruled out.</strong> <code>+0xc53d</code>
+(<code>EyeDetectStatus</code>) and <code>+0x150c9</code> were 0 in all 48
+snapshots, including those taken during path-2 searches without a window
+(M011, M013, M038, M040, M043).</li>
+<li>All 8 path-2 sweeps had grade 0/0. Six of them still ended normally
+(a window, 3 samples after a confirmed peak). The two full scans without a
+window (<code>0026</code>, <code>0076</code>, 27–28 samples, ~900 ms) had
+<em>no</em> confirmed peak in any area: too little contrast, not an
+ignored peak. In the first low-light session the four full scans showed
+confirmed peaks; whether that confirmation came only on the way back is
+open.</li>
+<li>Low phase confidence roughly doubles the low-light sweep (467 vs 240 ms
+median) through more reversals (paths 1 and 2). That, together with the
+29 fps sampling, is the low-light cost.</li>
+<li>Face on/off: the switch time is not in the data. Splitting the session
+in halves gives 367 vs 383 ms median, no clear difference.</li>
 </ul>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
