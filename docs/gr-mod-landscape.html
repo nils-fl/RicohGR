@@ -398,6 +398,12 @@ use sample counts rather than timings from logged runs.</p>
 <code>sendln 'EnableAfDebugDataSave 1 C'</code> (or <code>CZ</code>),
 the same way GRKit sends <code>lcmd</code>. That needs SD scripts on, but
 not GRKit itself and no code patch.</p>
+<p><strong>Correction from the camera (2026-10-29,
+<a href="af-debug-log.html">af-debug-log</a> check 3):</strong> the C flag
+alone writes nothing. The contrast logger also needs
+<code>CAF_Debug SaveDebugFile on</code>, which arms one dump at the next
+AF start and is cleared after it. <code>sendln</code> reaching the shell is
+now measured: the C flag read back as 1 from RAM.</p>
 <p><strong>Does <code>sendln</code> reach every shell command?</strong>
 In the interpreter, <code>sendln</code> becomes command ID
 <code>0x4e</code> (<code>0x538c38b4</code>, Read). I did not trace its

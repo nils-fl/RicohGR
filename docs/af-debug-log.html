@@ -76,8 +76,11 @@ It stays on until a second ModeSet command turns it off (§7).</li>
 from the card. Ours waits 3 s, then sends
 <code>EnableAfDebugDataSave 1 C</code> to the engineering shell, then asks
 Linux to write a marker file.</li>
-<li>With the C flag set, contrast AF writes
-<code>Caf_DebugTmpNNNN.csv</code> files to the card root.</li>
+<li>With the C flag set <em>and</em> a save armed by
+<code>CAF_Debug SaveDebugFile on</code>, contrast AF writes one
+<code>Caf_DebugTmpNNNN.csv</code> to the card root at the next AF start.
+The save is one-shot, so the script re-arms it every 3 s, once the
+contrast AF object exists (<code>CAF.OK</code>, see §4).</li>
 <li><strong>Nothing is written to flash.</strong> The flag lives in RAM
 and is gone after power-off. Without the <code>SCRIPT</code> folder on
 the card, the camera behaves as stock (SD scripts on, but nothing to
@@ -158,6 +161,23 @@ was written. The memory probe above was added to find out why.</p>
 <code>dd: /dev/mem: Bad address</code>: this kernel refuses
 <code>read()</code> on the RTOS range. Still no CSV. The probe now maps the
 memory instead (<code>MEMRD.BIN</code>).</p>
+<p><strong>Check 3 (2026-10-29).</strong> <code>MEMRD.BIN</code> worked
+(<code>MEM.ERR</code> 0, last snapshot at 63 s). The AF debug object was
+constructed (vtable <code>0x53c15308</code>) and its <strong>C flag was
+1</strong>, so <code>sendln</code> does reach the shell (measured). But no
+log slot was opened and the CSV counter stayed 0. Reason (Read): the
+logger is called from <code>0x53408870</code> only while contrast AF byte
+<code>+0x16d8c</code> is set (<code>0x534088f8</code>), and only
+<code>CAF_Debug SaveDebugFile on [N] [name]</code> sets it
+(<code>0x5341716c</code> → <code>0x53408b5c</code>: enable
+<code>+0x16d8c</code>, <code>N</code> at <code>+0x16d8e</code>, name at
+<code>+0x16d90</code>, default <code>"Caf_Debug"</code>). After one dump
+<code>0x53408870</code> clears all three (<code>0x534089f0</code>). The
+command reaches the object through <code>[CafFactory 0x5506c870 + 4]</code>,
+which held <code>0x5506c938</code> in the snapshot. Because that pointer is
+0 until the factory builds the object, <code>MEM.SH</code> writes
+<code>CAF.OK</code> once it sees it non-zero, and only then does the
+script arm the save.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),

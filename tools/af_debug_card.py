@@ -7,7 +7,8 @@ card directly. Copy the contents of one folder to the card root:
 
   enable/   turns SD scripts on  (once; hold MENU while switching on)
   log/      SCRIPT/STARTUP.TTL: at each power-on, sends
-            "EnableAfDebugDataSave 1 <flags>" to the engineering shell
+            "EnableAfDebugDataSave 1 <flags>" to the engineering shell,
+            then re-arms "CAF_Debug SaveDebugFile on" every 3 s
   disable/  turns SD scripts off again (hold MENU while switching on)
 
 The procedure, what the camera writes and how to recover are in
@@ -36,12 +37,22 @@ FLAGS = "PCZO"
 
 # The probe copies RTOS RAM 0x5506b000-0x5506cfff (RTOS addresses are physical
 # addresses; GRKit's dump tool maps /dev/mem the same way, read-only) to
-# SCRIPT/AFDBG/MEM.BIN every 5 s for 10 minutes. It holds the AF debug object
+# SCRIPT/AFDBG/MEM.BIN every 3 s for 10 minutes. It holds the AF debug object
 # 0x5506b56c (vtable 0x53c15308, flags +0x27..+0x2a, log slots +0x112c), its
 # guard 0x5506b564, the CSV counter 0x5506b568 and the busy bytes 0x5506b56a,
 # 0x5506c765. tools/af_debug_card.py --read-mem decodes it.
 PROBE_PAGE, PROBE_PAGES = 0x5506b000, 2
-PROBE_POLL_MS, PROBE_POLLS = 5000, 120
+PROBE_POLL_MS, PROBE_POLLS = 3000, 200
+# The contrast CSV needs a second command (check 3, 2026-10-29): the logger
+# 0x53407c5c is called from 0x53408870 only while CAF byte +0x16d8c is set,
+# and only "CAF_Debug SaveDebugFile on [N] [name]" sets it (0x5341716c ->
+# 0x53408b5c). After one dump 0x53408870 clears it again (0x534089f0), so the
+# script re-arms it at every poll. SaveDebugFile writes through the contrast AF
+# object [CafFactory 0x5506c870 + 4] (getter 0x533f1d94), which is 0 until the
+# factory builds it, so the script arms only after MEM.SH has seen the pointer
+# set (CAF.OK). Check 3 saw 0x5506c938 there.
+ARM_CSV = "sendln 'CAF_Debug SaveDebugFile on'"
+CAF_POINTER = 0x5506c874
 
 
 def startup_ttl(flags):
@@ -52,6 +63,7 @@ def startup_ttl(flags):
         "mpause 3000",
         "sendln 'lcmd_resp on'",
         f"sendln 'EnableAfDebugDataSave 1 {flags}'",
+        "filedelete 'C:\\SCRIPT\\AFDBG\\CAF.OK'",
         # Proof that the script ran this far: Linux writes BOOT.OK and appends
         # the uptime to MARK.OK. lcmd returns NG until Linux is up, so retry.
         "filedelete 'C:\\SCRIPT\\AFDBG\\BOOT.OK'",
@@ -67,6 +79,10 @@ def startup_ttl(flags):
         ":probe",
         "polls = 0",
         ":poll",
+        "filesearch 'C:\\SCRIPT\\AFDBG\\CAF.OK'",
+        "if result = 0 goto read",
+        ARM_CSV,
+        ":read",
         "sendln 'lcmd sh /media/storage1/SCRIPT/AFDBG/MEM.SH'",
         f"mpause {PROBE_POLL_MS}",
         "polls = polls + 1",
@@ -96,6 +112,9 @@ def mem_sh():
         "s=$?\n"
         'echo "$s" >$d/MEM.ERR\n'
         '[ "$s" = 0 ] && mv $d/MEM.TMP $d/MEM.BIN\n'
+        # CAF.OK once the contrast AF object pointer is non-zero (any non-zero byte).
+        f"n=$(dd if=$d/MEM.BIN bs=1 skip={CAF_POINTER - PROBE_PAGE} count=4 2>/dev/null | tr -d '\\000' | wc -c)\n"
+        '[ "$s" = 0 ] && [ "$n" -gt 0 ] && echo "$n" >$d/CAF.OK\n'
         "read t _ </proc/uptime\n"
         'echo "$t" >$d/MEM.TIME\n'
         "exit 0\n"
