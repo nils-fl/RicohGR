@@ -453,6 +453,24 @@ difference. Either the camera rewrites the table between runs, or the write
 does not reach what the camera uses. The patcher now exits 6 for "already
 patched" and 0 only for "written now", and <code>MEM.SH</code> logs every run
 to <code>GAIN.LOG</code> to tell the two apart.</li>
+<li><strong>Second run, with the run log (<code>work/af-logs/gaincap-log/</code>):</strong>
+<code>GAIN.LOG</code> shows exit 5 ("unexpected table") in most runs, 0
+(written) a few times and 6 (still patched 2 s later) once. The camera
+rewrites the table continuously. The last dump, in brighter light, read gain
+25,746 / 12,857 / 8,200 / 8,200 and integration 4,986 / 9,970 / 15,658 /
+15,658 µs: time × gain is the same at every level (about 128.4 M). So the
+table is <strong>AE's current exposure plan for each level</strong>, the same
+exposure split into integration (at most the frame time) and gain clamped
+between about 8,200 and about 524,288, not a table of limits. Patching it
+cannot work; the patch is switched off again.</li>
+<li><strong>The gain scale (Inferred):</strong> the minimum 8,200 is about
+8,192 = 2<sup>13</sup> and the maximum 524,288 = 2<sup>19</sup> = 64× the
+minimum. With the minimum at ISO 100 (base ISO), the AF gain ceiling is
+exactly ISO 6400, a common Auto-ISO upper limit. If contrast AF takes its
+ceiling from that setting, raising the limit in the menu would raise the
+ceiling with no patch. Not tested yet. The clamp code itself was not found
+(<code>0x80400</code>, <code>0x80200</code> and <code>0x2008</code> do not
+appear as such in the AE code).</li>
 <li><strong>Not known:</strong> whether the level choice reads this cap (if
 not, the patch only allows more gain without changing the frame rate),
 whether 24× is within what the sensor drive accepts, and whether contrast AF
