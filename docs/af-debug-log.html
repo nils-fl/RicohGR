@@ -530,7 +530,22 @@ already, mixed, unknown word, restore, other build.</li>
 still act on the real level, and the AE plan for level 1 in dim light is
 underexposed (gain at the ceiling, 10 ms). AF may hunt or miss; the live view
 may look darker during AF. A power-off removes the patch.</li>
+<li><strong>Camera run (<code>work/af-logs/force100/</code>):</strong>
+<code>FORCE.ERR</code> <code>on 0</code>; all 13 sweeps ran at 100 fps. The
+owner saw focus fail far more often and the screen get darker during AF.</li>
 </ul>
+<table>
+<thead><tr><th>Dim AF-S</th><th>Sweeps</th><th>No peak found</th><th>Path 2</th><th>Samples, median</th><th>Sampling, median</th></tr></thead>
+<tbody>
+<tr><td>Stock (4 sessions)</td><td>74</td><td>4 (5%)</td><td>17 (23%)</td><td>14</td><td>400 ms</td></tr>
+<tr><td>Forced 100 fps</td><td>13</td><td>6 (46%)</td><td>8 (62%)</td><td>19</td><td>190 ms</td></tr>
+</tbody>
+</table>
+<p><strong>Conclusion:</strong> with a third of the light per sample the
+contrast curve is too noisy; almost half the sweeps find no peak, and those
+that work need more samples. The drop to 29 fps in dim light is necessary,
+not an arbitrary limit, and a higher gain ceiling (same light per sample)
+would not help either. The test is switched off again.</p>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>

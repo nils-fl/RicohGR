@@ -1722,6 +1722,13 @@ table)</code> (<code>0x53436184</code>) with AF's per-level drive table (pointer
 bytes at <code>+0x50</code>). The code that writes <code>+0x1022</code> is not
 found by direct addressing; the next probe dumps the table and the AE
 exposure info (<code>+0xfe8</code>) to look for the thresholds.</p>
+<p><strong>Dim light: the frame rate is necessary (measured, 2026-10-29).</strong>
+Forcing contrast AF to 100 fps in dim light (a third of the light per
+sample) raised the share of sweeps that found no peak from 5% to 46% and of
+path-2 sweeps from 23% to 62%
+(<a href="af-debug-log.html#force100-test">af-debug-log</a>). The slow drive
+levels are what make contrast AF work in the dark; neither a faster level nor
+a higher gain ceiling is a lever.</p>
 <p><strong>Dim light: phase confidence.</strong> In the AF-S dim session, sweeps
 with a low phase grade (0/0) took 467 ms median against 240 ms with grade 1/1,
 through more reversals. In the dim AF-C session, with one larger AF area
