@@ -66,6 +66,7 @@ python3 tools/strings_index.py work/fwdc243b-v160.decoded.bin
 | `tools/strings_index.py` | Writes `work/index.json`, grouping names by subsystem (AF, lens, AE, stabilisation, …) |
 | `tools/af_debug_card.py` | Writes the SD-card files that turn SD scripts on and off, enable the camera's AF debug log, snapshot AF state, and optionally apply the AF-C fast-drive RAM patch (into `work/af-debug-card/`; see `docs/af-debug-log.html`) |
 | `tools/af_csv.py` | Summarises the contrast-AF debug CSVs from the camera: one row per run with phase result, samples, peak and samples after the peak |
+| `tools/af_light.py` | Light, noise and peak margin of each logged contrast-AF sweep, by sensor mode (why dim-light AF needs light) |
 | `tools/af_timing_tally.py` | Summarises AF timings you measured from high-speed video (offline arithmetic on your own CSV; see `docs/af-subsystem.html` §10.6) |
 | `tools/initramfs.py` | Lists or extracts files from the Linux initramfs (e.g. `webapid`, `mtpd`) into `work/initramfs/` |
 | `tools/gr_repack.py` | Rebuilds a container from a decoded payload and re-runs the camera's update checks (offline; writes a file, installs nothing) |
