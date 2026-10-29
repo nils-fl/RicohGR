@@ -61,6 +61,7 @@ strong{font-weight:650}
 <li><a href="#session-low-light-face" id="toc-session-low-light-face">Session: low light, AF-S, face on/off</a></li>
 <li><a href="#session-drive-table" id="toc-session-drive-table">Session: drive table</a></li>
 <li><a href="#gain-cap-patch" id="toc-gain-cap-patch">Dim-light gain-cap patch (prototype)</a></li>
+<li><a href="#session-af-area" id="toc-session-af-area">Session: AF area size in dim light</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -490,6 +491,21 @@ not, the patch only allows more gain without changing the frame rate),
 whether 24× is within what the sensor drive accepts, and whether contrast AF
 still finds the peak in the noisier signal.</li>
 </ul>
+<h3 id="session-af-area">Session: AF area size in dim light (2026-10-29)</h3>
+<p>AF-S, dark enough for 29 fps throughout; first the usual area (two areas,
+small window), then a multi-area mode (30 areas, window 1376256 × 884736)
+(<code>work/af-logs/af-area/</code>).</p>
+<table>
+<thead><tr><th>Area</th><th>Sweeps</th><th>Median</th><th>Mean</th><th>Worst</th><th>Grade 0/0</th><th>Path 2</th></tr></thead>
+<tbody>
+<tr><td>Usual (2 areas)</td><td>8</td><td>434 ms</td><td>613 ms</td><td>1,233 ms</td><td>4</td><td>2</td></tr>
+<tr><td>Multi-area (30 areas)</td><td>9</td><td>567 ms</td><td>593 ms</td><td>867 ms</td><td>3</td><td>0</td></tr>
+</tbody>
+</table>
+<p>The larger area removed the full-range sweeps and the worst cases but made
+the typical sweep longer (more samples, as in bright light). On average it is
+a wash; with 8 and 9 sweeps the difference is within the spread. Not the
+everyday win hoped for.</p>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>
