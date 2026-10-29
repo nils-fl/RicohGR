@@ -83,6 +83,7 @@ def startup_ttl(flags):
         "if attempts < 60 goto mark",
         "goto done",
         ":probe",
+        "sendln 'lcmd sh /media/storage1/SCRIPT/AFDBG/PATCH.SH'",
         "ticks = 0",
         "countdown = 0",
         ":tick",
@@ -218,10 +219,14 @@ caf_ok:
 
 
 def memrd_bin():
+    return arm_elf(MEMRD_S.replace("{page:#x}", f"{PROBE_PAGE // 4096:#x}")
+                   .replace("{size}", str(PROBE_PAGES * 4096))
+                   .replace("{caf_offset}", f"{CAF_POINTER - PROBE_PAGE:#x}"))
+
+
+def arm_elf(source):
+    """Assemble ARM source with clang and wrap its .text in a static ELF."""
     import struct, subprocess, tempfile
-    source = (MEMRD_S.replace("{page:#x}", f"{PROBE_PAGE // 4096:#x}")
-              .replace("{size}", str(PROBE_PAGES * 4096))
-              .replace("{caf_offset}", f"{CAF_POINTER - PROBE_PAGE:#x}"))
     with tempfile.TemporaryDirectory() as tmp:
         src, obj = Path(tmp, "memrd.S"), Path(tmp, "memrd.o")
         src.write_text(source)
@@ -234,7 +239,7 @@ def memrd_bin():
     names = secs[shstrndx][4]
     name = lambda sec: o[names + sec[0]:].split(b"\0")[0]
     if any(name(sec).startswith(b".rel") for sec in secs):
-        sys.exit("MEMRD: the object has relocations; it must use PC-relative references only")
+        sys.exit("the object has relocations; it must use PC-relative references only")
     text = next(sec for sec in secs if name(sec) == b".text")
     code = o[text[4]:text[4] + text[5]]
     # One PT_LOAD segment (read + execute) at 0x10000; the code follows the headers.
@@ -244,6 +249,117 @@ def memrd_bin():
         "<HHIIIIIHHHHHH", 2, 40, 1, base + headers, 52, 0, 0x05000200, 52, 32, 1, 0, 0, 0)
     phdr = struct.pack("<8I", 1, 0, base, base, size, size, 5, 0x1000)
     return ehdr + phdr + code
+
+
+# The AF-C fast-drive patch (prototype). In the selector 0x533f70a4 the AF-C
+# branch ends "ldr r3,[r3,#0x484]; subs r3,r3,#2; movne r3,#1", so +0xc484 = 2
+# gives 0 (live-view drive, 59 fps). Making the movne unconditional gives 1
+# (the 200 fps CAF drive that AF-S uses); the +0xc488 test and both vetoes stay.
+# Selector session (af-debug-log): AF-C alternated 200/59 fps through +0xc484.
+RTOS_IDENTITY, GR3X_160 = 0x53002038, 0x110B3C01
+AFC_SITE, AFC_STOCK, AFC_FAST = 0x533F7118, 0x13A03001, 0xE3A03001
+
+# AFCFAST.BIN: check the build identity and the word at the site, write one
+# word through /dev/mem (O_RDWR | O_SYNC, as GRKit's installer does), dsb,
+# cacheflush (ARM private syscall 0xf0002), read back. No argument applies the
+# patch, any argument restores the stock word. Exit status: 0 done or already
+# in that state, 1 open, 2 map identity page, 3 not GR IIIx 1.60, 4 map site
+# page, 5 unexpected word at the site (nothing written), 7 read-back differs.
+PATCH_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    ldr     r9, [sp]                @ argc
+    adr     r0, dev
+    ldr     r1, =0x101002           @ O_RDWR | O_SYNC
+    mov     r7, #5                  @ open
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0
+    mov     r0, #0
+    mov     r1, #4096
+    mov     r2, #1                  @ PROT_READ
+    mov     r3, #1                  @ MAP_SHARED
+    ldr     r5, ={id_page}
+    mov     r7, #192                @ mmap2
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, ={id_offset}
+    ldr     r0, [r0, r1]
+    ldr     r1, ={identity}
+    cmp     r0, r1
+    movne   r0, #3
+    bne     quit
+    mov     r0, #0
+    mov     r1, #4096
+    mov     r2, #3                  @ PROT_READ | PROT_WRITE
+    mov     r3, #1
+    ldr     r5, ={site_page}
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #4
+    bhi     quit
+    ldr     r1, ={site_offset}
+    add     r6, r0, r1              @ the site in the mapping
+    cmp     r9, #1
+    ldreq   r2, ={stock}            @ apply: expect stock, write fast
+    ldreq   r3, ={fast}
+    ldrne   r2, ={fast}             @ restore: expect fast, write stock
+    ldrne   r3, ={stock}
+    ldr     r0, [r6]
+    cmp     r0, r3
+    moveq   r0, #0                  @ already in that state
+    beq     quit
+    cmp     r0, r2
+    movne   r0, #5
+    bne     quit
+    str     r3, [r6]
+    dsb     sy
+    mov     r0, r6
+    add     r1, r6, #4
+    mov     r2, #0
+    ldr     r7, =0xf0002            @ cacheflush
+    svc     #0
+    ldr     r0, [r6]
+    cmp     r0, r3
+    movne   r0, #7
+    bne     quit
+    mov     r0, #0
+quit:
+    mov     r7, #1                  @ exit
+    svc     #0
+dev:
+    .asciz  "/dev/mem"
+    .balign 4
+    .ltorg
+"""
+
+
+def afcfast_bin():
+    return arm_elf(PATCH_S.replace("{id_page}", f"{RTOS_IDENTITY >> 12:#x}")
+                   .replace("{id_offset}", f"{RTOS_IDENTITY & 0xfff:#x}")
+                   .replace("{identity}", f"{GR3X_160:#x}")
+                   .replace("{site_page}", f"{AFC_SITE >> 12:#x}")
+                   .replace("{site_offset}", f"{AFC_SITE & 0xfff:#x}")
+                   .replace("{stock}", f"{AFC_STOCK:#x}")
+                   .replace("{fast}", f"{AFC_FAST:#x}"))
+
+
+def patch_sh():
+    # Applied once per power-on, only when AFCFAST.ON is on the card. The patch
+    # lives in RAM; switching off (or starting without the file) gives stock.
+    return (
+        "d=/media/storage1/SCRIPT/AFDBG\n"
+        "exec 2>>$d/MEM.LOG\n"
+        'if [ -f $d/AFCFAST.ON ]; then $d/AFCFAST.BIN; echo "on $?" >$d/PATCH.ERR; else echo off >$d/PATCH.ERR; fi\n'
+        "exit 0\n"
+    ).encode("ascii")
 
 
 def read_mem(path):
@@ -292,6 +408,8 @@ def card_roots(flags):
             "SCRIPT/AFDBG/MARK.SH": mark_sh(flags),
             "SCRIPT/AFDBG/MEM.SH": mem_sh(),
             "SCRIPT/AFDBG/MEMRD.BIN": memrd_bin(),
+            "SCRIPT/AFDBG/PATCH.SH": patch_sh(),
+            "SCRIPT/AFDBG/AFCFAST.BIN": afcfast_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
     }

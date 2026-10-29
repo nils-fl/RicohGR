@@ -64,7 +64,7 @@ python3 tools/strings_index.py work/fwdc243b-v160.decoded.bin
 | `tools/gr_unpack.py` | Decodes the firmware container for analysis |
 | `tools/segments.py` | Lists payload regions and device-tree properties; `--split` writes them to `work/segments/` |
 | `tools/strings_index.py` | Writes `work/index.json`, grouping names by subsystem (AF, lens, AE, stabilisation, …) |
-| `tools/af_debug_card.py` | Writes the SD-card files that turn SD scripts on and off and enable the camera's AF debug log (into `work/af-debug-card/`; see `docs/af-debug-log.html`) |
+| `tools/af_debug_card.py` | Writes the SD-card files that turn SD scripts on and off, enable the camera's AF debug log, snapshot AF state, and optionally apply the AF-C fast-drive RAM patch (into `work/af-debug-card/`; see `docs/af-debug-log.html`) |
 | `tools/af_csv.py` | Summarises the contrast-AF debug CSVs from the camera: one row per run with phase result, samples, peak and samples after the peak |
 | `tools/af_timing_tally.py` | Summarises AF timings you measured from high-speed video (offline arithmetic on your own CSV; see `docs/af-subsystem.html` §10.6) |
 | `tools/initramfs.py` | Lists or extracts files from the Linux initramfs (e.g. `webapid`, `mtpd`) into `work/initramfs/` |
@@ -132,7 +132,8 @@ Verified reference values for GR IIIx 1.60:
 - Ricoh, GR and related marks belong to their owners.
 - The findings come from static analysis of one firmware version and may be
   incomplete or wrong.
-- This project gives no instructions for flashing modified firmware. The one
-  camera procedure ([`docs/af-debug-log.html`](docs/af-debug-log.html)) is
-  untested on a camera and is at your own risk.
+- This project gives no instructions for flashing modified firmware. The camera
+  procedure in [`docs/af-debug-log.html`](docs/af-debug-log.html) (debug log,
+  and an optional one-word RAM patch for AF-C that is gone after power-off) is
+  at your own risk.
 - No licence has been chosen for this repository yet.

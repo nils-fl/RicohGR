@@ -57,6 +57,7 @@ strong{font-weight:650}
 <li><a href="#9-what-each-step-rests-on" id="toc-9-what-each-step-rests-on">9. What each step rests on</a></li>
 <li><a href="#results-across-sessions" id="toc-results-across-sessions">Results across the sessions</a></li>
 <li><a href="#session-selector" id="toc-session-selector">Session: drive-mode selector</a></li>
+<li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
 </nav>
@@ -349,6 +350,39 @@ step at <code>0x533f49d8</code>. Why the firmware switches some AF-C
 searches to the live-view mode (most likely to keep the display running) is
 not known, and only a camera test of a patched build could show the
 effect.</p>
+<h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
+<p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
+firmware file; nothing goes to flash.</p>
+<ul>
+<li><strong>Change:</strong> <code>0x533f7118</code> in the selector's AF-C
+branch, <code>movne r3, #1</code> (<code>0x13a03001</code>) →
+<code>mov r3, #1</code> (<code>0xe3a03001</code>). AF-C searches then get the
+200 fps CAF drive whatever <code>+0xc484</code> says. The
+<code>+0xc488</code> test and both vetoes stay.</li>
+<li><strong>Patcher:</strong> <code>SCRIPT/AFDBG/AFCFAST.BIN</code> (376 bytes,
+built by <code>tools/af_debug_card.py</code>). It checks the build identity
+(<code>0x53002038</code> = <code>0x110b3c01</code>, GR IIIx 1.60) and the stock
+word, writes one word through <code>/dev/mem</code>, then runs
+<code>dsb</code> and <code>cacheflush</code> and reads it back, as GRKit's
+installer does for its hooks. With an argument it restores the stock word.
+Exit status in <code>PATCH.ERR</code>: <code>on 0</code> done, 3 other
+build, 5 unexpected word (nothing written), 1/2/4/7 open, map or read-back
+errors.</li>
+<li><strong>Switch:</strong> the start-up script runs <code>PATCH.SH</code>
+once after Linux is up. It patches only if
+<code>SCRIPT/AFDBG/AFCFAST.ON</code> exists. Without that file
+<code>PATCH.ERR</code> says <code>off</code> and the camera runs stock code.
+A power-off always removes the patch.</li>
+<li><strong>Checked offline:</strong> in an ARM emulator (Unicorn, syscalls
+faked over the decoded images): patches 1.60; leaves an already patched or
+stock site alone; restores; refuses GR III 2.10 and IIIx 1.70 (exit 3) and an
+unexpected word (exit 5).</li>
+<li><strong>Not known until a camera test:</strong> whether the RTOS core sees
+the new instruction at once (its instruction cache), and what AF-C does in
+the 200 fps drive: the live view may freeze or stutter during sweeps, which
+may be why Ricoh uses the live-view drive. If the camera misbehaves, switch
+off; without <code>AFCFAST.ON</code> or without the card it is stock.</li>
+</ul>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
