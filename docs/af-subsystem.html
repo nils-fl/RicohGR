@@ -1695,6 +1695,27 @@ AF-C use the 200 fps drive; a typical AF-C refocus sweep went from 267 ms to
 70 ms (median, same targets), with no visible display problem
 (<a href="af-debug-log.html#afc-fast-patch">af-debug-log</a>). Why Ricoh uses
 the live-view drive in AF-C is still unknown.</p>
+<p><strong>Dim light: how the contrast-AF frame rate is chosen (measured,
+2026-10-29, all sessions).</strong> In AF-S the AF exposure time always equals
+the frame time (4,986 / 9,970 / 19,967 / 29,964 µs at 200 / 100 / 49 / 29 fps),
+and each frame rate is used until the AF gain reaches the same ceiling, about
+524,288 raw (8× if 65,536 is 1×): the largest exposure (time × gain) seen at
+each rate matches frame time × 524,288 (2.56 / 5.24 / 9.83 / 15.71 against
+2.61 / 5.23 / 10.47 / 15.72). So in dim light the camera trades frame rate,
+not gain. A higher AF gain ceiling would keep contrast AF at 100 fps longer
+(about 3× less time per sample) at the cost of a noisier contrast signal.
+Where AE makes this choice is not found yet: not in the contrast-AF code (the
+exposure arrives through <code>0x533fcac4</code>, called by pointer), not a
+shell command (<code>AE_Mode</code>, <code>AE_Store</code> do other things;
+the <code>AeCommandListener</code> handlers <code>SetContrastAfIso</code> and
+<code>SetContrastAfExposureManual</code>, <code>0x53496250</code> and
+<code>0x53496178</code>, have no shell route), and not a plain constant or a
+table of these frame times or line counts.</p>
+<p><strong>Dim light: phase confidence.</strong> In the AF-S dim session, sweeps
+with a low phase grade (0/0) took 467 ms median against 240 ms with grade 1/1,
+through more reversals. In the dim AF-C session, with one larger AF area
+(178 × 144 instead of two of 90 × 54), the grade was 1 in 17 of 18 sweeps
+(Inferred: the larger area gives phase detection more signal).</p>
 </main>
 </div>
 <script>
