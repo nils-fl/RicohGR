@@ -1668,6 +1668,22 @@ confirmed peak in path 2 would save that, about 0.6 s in 1 run in 5 in low
 light, the largest lever found so far. Where path 2 is chosen
 (<code>0x5340576c</code>, after the floats from <code>0x533f93c8</code>
 and <code>0x533f928c</code>) is the next offline target.</p>
+<p><strong>Levers ranked on the measured data (103 runs, 2026-10-29;
+<a href="af-debug-log.html#results-across-sessions">af-debug-log</a>).</strong></p>
+<table>
+<thead><tr><th>#</th><th>Lever</th><th>Measured cost today</th><th>How often</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>AF-C sweeps at the live-view rate (59 fps) instead of the 200 fps readout AF-S uses</td><td>≈ 190 ms per sweep at 700–1,000 µm (267 vs 72 ms)</td><td>every AF-C refocus</td></tr>
+<tr><td>2</td><td>Path 2: full-travel sweep without a stop window, past a confirmed peak</td><td>≈ 630 ms</td><td>4 of 20 low-light runs, 2 of 39 AF-C</td></tr>
+<tr><td>3</td><td>Low-light frame rate (29/49 fps); integration time is then about 30 ms, so this is exposure-bound (lever 4, pixel-adding)</td><td>≈ 300 ms per sweep vs bright</td><td>every low-light AF</td></tr>
+<tr><td>4</td><td>No phase result (defocus 65535): full scan</td><td>≈ 1 s</td><td>5 of 39 AF-C runs</td></tr>
+<tr><td>5</td><td>Area 0 without a confirmed peak: sweep to the window end</td><td>up to ≈ 80 ms</td><td>2 of 16 bright AF-S runs</td></tr>
+<tr><td>6</td><td>Old lever 1: shorter confirmation after the peak</td><td>≤ 15 ms (3 samples at 200 fps)</td><td>every AF-S run</td></tr>
+</tbody>
+</table>
+<p>Lead for lever 1 in this table: the engineering command
+<code>CAF_Debug CisDriveModeFix</code> (<code>0x5341768c</code>) suggests the
+sensor drive mode for contrast AF can be fixed; not yet decoded.</p>
 </main>
 </div>
 <script>

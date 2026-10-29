@@ -55,6 +55,7 @@ strong{font-weight:650}
 <li><a href="#7-turning-it-off" id="toc-7-turning-it-off">7. Turning it off</a></li>
 <li><a href="#8-if-something-goes-wrong" id="toc-8-if-something-goes-wrong">8. If something goes wrong</a></li>
 <li><a href="#9-what-each-step-rests-on" id="toc-9-what-each-step-rests-on">9. What each step rests on</a></li>
+<li><a href="#results-across-sessions" id="toc-results-across-sessions">Results across the sessions</a></li>
 </ul></li>
 </ul>
 </nav>
@@ -285,6 +286,39 @@ and 177. So without a confirmed peak in area 0 the sweep runs to the end of
 the scan window; the cost depends on how far that is. Area 0's vertical
 channel is never used (its Algorithm row is empty in every run), so area 0's
 horizontal result is what stops a search early.</p>
+<h3 id="session-afc">Session: AF-C (2026-10-29)</h3>
+<p>139 CSVs, 39 unique runs (<code>work/af-logs/afc/</code>), bright edge,
+half-press held while moving between near and far targets. One AF area,
+no decision-grade field. <strong>34 runs sampled at 59 fps</strong>
+(frame time 16,668 µs), not 200 fps. At the same phase defocus AF-C takes
+about the same number of samples as AF-S, so the extra time is the frame
+rate alone:</p>
+<table>
+<thead><tr><th>|defocus|, path 0</th><th>AF-S, 200 fps</th><th>AF-C, 59 fps</th></tr></thead>
+<tbody>
+<tr><td>0–400 µm</td><td>8 runs, 9 samples, 45 ms</td><td>2 runs, 5.5 samples, 92 ms</td></tr>
+<tr><td>400–700 µm</td><td>3 runs, 12 samples, 60 ms</td><td>2 runs, 15.5 samples, 258 ms</td></tr>
+<tr><td>700–1,000 µm</td><td>4 runs, 14.5 samples, 72 ms</td><td>10 runs, 16 samples, 267 ms</td></tr>
+<tr><td>1,000–2,500 µm</td><td>–</td><td>4 runs, 23 samples, 383 ms</td></tr>
+</tbody>
+</table>
+<p>Five AF-C runs had no phase result (defocus 65535); three of them scanned
+56–60 samples, about 1 s. Two path-2 runs took 32–33 samples.</p>
+
+<h2 id="results-across-sessions">Results across the sessions</h2>
+<table>
+<thead><tr><th>Session</th><th>Runs</th><th>fps</th><th>Samples, median</th><th>Sampling, median (range)</th><th>Path 0 / 1 / 2</th></tr></thead>
+<tbody>
+<tr><td>Quick check</td><td>7</td><td>200 (100 once)</td><td>9</td><td>45 ms (45–105)</td><td>7 / 0 / 0</td></tr>
+<tr><td>Bright edge, AF-S</td><td>9</td><td>200</td><td>10</td><td>50 ms (35–120)</td><td>9 / 0 / 0</td></tr>
+<tr><td>Repetitive, AF-S, mixed area modes</td><td>28</td><td>200</td><td>11.5</td><td>57 ms (35–85)</td><td>9 / 19 / 0</td></tr>
+<tr><td>Low light, AF-S</td><td>20</td><td>29 (13), 49 (4), 100 (3)</td><td>11.5</td><td>367 ms (60–1,100)</td><td>6 / 10 / 4</td></tr>
+<tr><td>AF-C, bright</td><td>39</td><td>59 (34), 200 (4), 100 (1)</td><td>18</td><td>283 ms (45–1,300)</td><td>24 / 13 / 2</td></tr>
+</tbody>
+</table>
+<p>These are sampling times of the contrast sweep (samples × frame time).
+The time before the sweep starts and after it ends (lens travel to the
+start point, return to the peak, settling) is not in the logs.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
