@@ -1636,6 +1636,17 @@ time, so the video is still needed for the total. Reaching the shell
 needs SD-card scripts. See
 <a href="gr-mod-landscape.html#51-enableafdebugdatasave">gr-mod-landscape
 §5.1</a>.</p>
+<p><strong>First camera data (2026-10-29).</strong> The CSV also needs
+<code>CAF_Debug SaveDebugFile on</code> (one dump per command). With both,
+seven runs (<a href="af-debug-log.html">af-debug-log</a> check 5) show:
+the contrast AF <strong>samples at 200 fps</strong> (frame time 4,997 µs;
+100 fps in one darker run), not the 30–60 fps assumed above. Normal runs
+take 8–11 samples (40–55 ms of sampling) and end exactly
+<strong>3 samples after the peak</strong>. One run took 21 samples
+(105 ms). At 200 fps the five-sample floor of the fit is 25 ms, and lever 1
+(a shorter confirmation) could save at most the 15 ms of those 3 samples
+plus their lens travel. Not yet measured: the time before the sweep starts
+and after it ends, which the 240 fps video still has to give.</p>
 </main>
 </div>
 <script>

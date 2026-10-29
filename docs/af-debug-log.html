@@ -78,7 +78,9 @@ from the card. Ours waits 3 s, then sends
 Linux to write a marker file.</li>
 <li>With the C flag set <em>and</em> a save armed by
 <code>CAF_Debug SaveDebugFile on</code>, contrast AF writes one
-<code>Caf_DebugTmpNNNN.csv</code> to the card root at the next AF start.
+CSV to the card root at the next AF start (named <code>Caf_0000.csv</code>, then
+<code>CTmp0001.csv</code>, <code>CTmp0002.csv</code> …: the camera shortens the
+long name).
 The save is one-shot, so the script re-arms it every 3 s, once the
 contrast AF object exists (<code>CAF.OK</code>, see §4).</li>
 <li><strong>Nothing is written to flash.</strong> The flag lives in RAM
@@ -186,6 +188,28 @@ work on the camera's BusyBox; its error was not captured.
 <code>MEMRD.BIN</code> now reads the pointer from the mapped page and
 creates <code>CAF.OK</code> itself, and <code>MEM.SH</code> appends its
 errors to <code>MEM.LOG</code>.</p>
+<p><strong>Check 5 (2026-10-29): it works.</strong> <code>CAF.OK</code>
+appeared, the CSV counter reached 15 and the card held 15 CSVs. Five had
+no search yet, seven were unique runs, and the rest repeated the previous
+run (only the live first row of the sample table differs; the camera
+dumps again at an AF start without a new search). <code>MEM.SH</code>'s
+<code>mv</code> failed every time with <code>Input/output error</code>
+(the RTOS has the card mounted as well), so <code>MEMRD.BIN</code> now
+writes <code>MEM.BIN</code> directly. The runs (<code>tools/af_csv.py</code>):</p>
+<table>
+<thead><tr><th>Run</th><th>fps</th><th>Step</th><th>Phase result</th><th>Samples</th><th>Sampling</th><th>Peak at pulse</th><th>Samples after peak</th></tr></thead>
+<tbody>
+<tr><td>0005</td><td>200</td><td>8</td><td>near, −868 µm</td><td>11</td><td>55 ms</td><td>40</td><td>3</td></tr>
+<tr><td>0006</td><td>200</td><td>8</td><td>near, −654 µm</td><td>21</td><td>105 ms</td><td>23</td><td>16</td></tr>
+<tr><td>0008</td><td>100</td><td>8</td><td>far, 235 µm</td><td>8</td><td>80 ms</td><td>32</td><td>3</td></tr>
+<tr><td>0009</td><td>200</td><td>8</td><td>near, −321 µm</td><td>9</td><td>45 ms</td><td>25</td><td>3</td></tr>
+<tr><td>0010</td><td>200</td><td>8</td><td>far, 226 µm</td><td>9</td><td>45 ms</td><td>30</td><td>3</td></tr>
+<tr><td>0011</td><td>200</td><td>2</td><td>far, 0 µm</td><td>9</td><td>45 ms</td><td>8</td><td>3</td></tr>
+<tr><td>0012</td><td>200</td><td>8</td><td>near, −376 µm</td><td>9</td><td>45 ms</td><td>31</td><td>3</td></tr>
+</tbody>
+</table>
+<p>Decision grade 1/1 and search path 0 in every run. Not yet controlled:
+the subjects, light and distances of this quick check.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
@@ -202,12 +226,14 @@ folder named after the condition before the next one.</p>
 <li>Switch on and wait 15 s.</li>
 <li>For each run: point at the far target (or infinity), then at the
 subject, and half-press until focus is confirmed. Release.
-<strong>20 runs.</strong></li>
+<strong>20 runs, at least 4–5 s apart</strong>, so that the script has
+re-armed the save (every 3 s) before the next run.</li>
 <li>Then <strong>one extra half-press</strong>. The data of a run is
 probably written when the next AF starts, so this flushes run 20.</li>
-<li>Switch off. Copy every <code>Caf_DebugTmp*.csv</code> from the card
-root to <code>work/af-logs/&lt;condition&gt;/</code>. Delete them from
-the card.</li>
+<li>Switch off. Copy every <code>*.csv</code> from the card root to
+<code>work/af-logs/&lt;condition&gt;/</code>. Delete them from the card.
+<code>python3 tools/af_csv.py work/af-logs/&lt;condition&gt;</code> prints
+one row per run and leaves out repeats and files without a search.</li>
 </ol>
 <table>
 <thead><tr><th>Condition</th><th>Setup</th></tr></thead>

@@ -109,12 +109,13 @@ def mem_sh():
     return (
         "d=/media/storage1/SCRIPT/AFDBG\n"
         # Errors of this script, for the next check (check 4: a dd/tr/wc
-        # pointer test here never wrote CAF.OK; MEMRD.BIN now does it).
+        # pointer test here never wrote CAF.OK; MEMRD.BIN now does it.
+        # Check 5: mv on the card failed with EIO, so MEMRD.BIN writes
+        # MEM.BIN directly).
         "exec 2>>$d/MEM.LOG\n"
         "$d/MEMRD.BIN\n"
         "s=$?\n"
         'echo "$s" >$d/MEM.ERR\n'
-        '[ "$s" = 0 ] && mv $d/MEM.TMP $d/MEM.BIN\n'
         "read t _ </proc/uptime\n"
         'echo "$t" >$d/MEM.TIME\n'
         "exit 0\n"
@@ -122,7 +123,7 @@ def mem_sh():
 
 
 # MEMRD.BIN: open /dev/mem with O_SYNC, map the probe pages read-only, write
-# them to MEM.TMP, and create CAF.OK when the contrast AF object pointer is
+# them to MEM.BIN, and create CAF.OK when the contrast AF object pointer is
 # non-zero. Exit status 1 open, 2 mmap, 3 create, 4 write, 0 done.
 # Only PC-relative references, so the assembled .text runs as is and needs no
 # linker (Apple clang assembles ARM ELF objects but ships no ELF linker).
@@ -194,7 +195,7 @@ quit:
 dev:
     .asciz  "/dev/mem"
 out:
-    .asciz  "/media/storage1/SCRIPT/AFDBG/MEM.TMP"
+    .asciz  "/media/storage1/SCRIPT/AFDBG/MEM.BIN"
 caf_ok:
     .asciz  "/media/storage1/SCRIPT/AFDBG/CAF.OK"
     .balign 4

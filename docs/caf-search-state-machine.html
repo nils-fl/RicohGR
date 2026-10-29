@@ -332,8 +332,13 @@ success.</li>
 <code>0x533f928c</code>).</li>
 <li>The tail of the function at <code>0x53405840</code>, which sets
 <code>+0x14b9a…9d</code> and restarts a sweep.</li>
-<li>The frame count from the jump to acceptance. It needs a run on a
-camera.</li>
+<li>The frame count from the jump to acceptance. <strong>First camera
+data (2026-10-29, <a href="af-debug-log.html">af-debug-log</a> check 5,
+7 runs):</strong> contrast AF sampled at 200 fps (100 fps in one darker
+run) with 8-pulse steps. Six runs ended exactly 3 samples after the
+contrast peak, after 8–11 samples in all. One run went on 16 samples past
+its peak (21 in all). So the confirmation past the peak costs 3 frames,
+15 ms at 200 fps; a controlled session should confirm this.</li>
 </ul>
 </main>
 </div>
