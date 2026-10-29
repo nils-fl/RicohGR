@@ -344,17 +344,41 @@ label strings):
 horizontal and vertical), <code>[AF_Area_Num]</code>,
 <code>[LensPulsePosition]</code> and per area
 <code>[%d:ContrastAfDataH] [%d:ContrastAfDataV] [%d:YData]</code>.</li>
-<li><strong>Destination:</strong> the CSV writers <code>0x533efbd0</code>
-and <code>0x533f0198</code> build a path from <code>"C:\"</code>, a name,
-<code>"Tmp"</code>, a three-digit number and <code>".csv"</code>. They
-then call file functions in the updater's file-system range
-(<code>0x53627bdc</code>, <code>0x5362eb24</code>,
-<code>0x5362d548</code>). <code>C:</code> is the SD card (GRKit's scripts
-use <code>C:\SCRIPT\…</code>). The exact file name is not decoded.</li>
-<li>The logger is called from <code>0x53407b1c</code>, which two places
-in the contrast AF code reach (<code>0x53407bc4</code>,
-<code>0x53408874</code>). When that happens within an AF run is not
-decoded. That the CSV is written once per AF run is Inferred.</li>
+<li><strong>File name (Read, 2026-10-29):</strong> the CSV writer
+<code>0x533efbd0(obj, slot)</code> builds
+<code>"C:\" + name + "Tmp" + NNNN + ".csv"</code>. <code>NNNN</code> is a
+four-digit counter at <code>0x5506b568</code> (padded with
+<code>"000"</code>/<code>"00"</code>/<code>"0"</code>, stops at 9999), shared
+by all logs. The name of the contrast log is the global string at
+<code>0x5506c908</code>, which the start-up code <code>0x5340ac78</code>
+sets to <code>"Caf_Debug"</code>. The phase log is named
+<code>"Zaf_DebugLog"</code>. So the files are
+<strong><code>C:\Caf_DebugTmp0000.csv</code></strong>,
+<code>C:\Zaf_DebugLogTmp0001.csv</code> and so on, in the card root
+(<code>C:</code> is the card; GRKit's scripts use
+<code>C:\SCRIPT\…</code>). The write goes through the updater's file
+functions (<code>0x53627bdc</code>, then <code>0x5362eb24</code>).</li>
+<li><strong>Counter reset:</strong> <code>0x5506b568</code> lies beyond
+the initialised data (which ends at <code>0x5503a080</code>), so it is
+zero after each power-on. A second session probably overwrites the
+first session's files (Inferred). Copy the files off the card between
+sessions.</li>
+<li><strong>Memory:</strong> opening a log (<code>0x533ef614</code>)
+takes one of 10 slots (<code>+0x112c</code>, 0x14 bytes each) and a
+buffer of the requested size (10,000,000 bytes for the contrast log,
+0xa00000 for the phase log) from a memory pool. If the pool has no more
+free space than that, it returns <code>0xff</code> and the logger skips
+silently (Read). An empty card after a test can mean exactly this.</li>
+<li><strong>When it is written (corrected 2026-10-29):</strong> the
+labelled-column logger <code>0x53407c5c</code> is called from
+<code>0x53408870</code> (at <code>0x5340899c</code>). That function is
+called from <code>0x5340aa8c</code>, inside slot 5 (<code>0x5340a80c</code>)
+of the contrast AF class vtable <code>0x53c16580</code>. Slot 5 first
+clears the run flags <code>+0xc45c</code>…<code>+0xc467</code>, so it
+looks like the start of an AF operation. The previous run's data is then
+probably written when the next AF starts, which adds card I/O to that
+start (Inferred). <code>0x53407b1c</code>, which I named as the caller
+before, feeds the second writer <code>0x533f0198</code> instead.</li>
 <li>The flags live in RAM and the constructor clears them, so they reset
 at power-off (Inferred).</li>
 </ul>
@@ -371,9 +395,16 @@ use sample counts rather than timings from logged runs.</p>
 <p><strong>How it would be sent:</strong> a card script with
 <code>sendln 'EnableAfDebugDataSave 1 C'</code> (or <code>CZ</code>),
 the same way GRKit sends <code>lcmd</code>. That needs SD scripts on, but
-not GRKit itself and no code patch. Untested: whether the interpreter's
-<code>sendln</code> reaches every shell command, and whether the
-logger's file writes are safe from the AF task while shooting.</p>
+not GRKit itself and no code patch.</p>
+<p><strong>Does <code>sendln</code> reach every shell command?</strong>
+In the interpreter, <code>sendln</code> becomes command ID
+<code>0x4e</code> (<code>0x538c38b4</code>, Read). I did not trace its
+executor. The evidence is Structural: GRKit's loader, which works on
+cameras, sends two different SHELLCMD entries this way
+(<code>lcmd_resp on</code>, <code>lcmd sh …</code>), and SHELLCMD is one
+generic "name , handler" table. So any entry is very probably reachable
+(Inferred). Still open: whether the logger's file writes are safe from
+the AF task while shooting.</p>
 
 <h3 id="52-caf_debug">5.2 <code>CAF_Debug</code></h3>
 <p>Handler <code>0x53017958</code> (Read). Sub-commands and targets:
@@ -390,12 +421,33 @@ logger's file writes are safe from the AF task while shooting.</p>
 <code>GetKfp</code> and <code>DispCurrentState</code>.</p>
 <p><code>InfocusTimeMeasure</code> sets a byte at contrast AF object
 <code>+0x16d78</code> (getter <code>0x533f3b5c</code>, Read). Three places
-test it: <code>0x53400e68</code> (next to the search-path byte
-<code>+0xc4ca</code>), <code>0x53406640</code> and
-<code>0x5340a638</code> (in <code>0x5340a5a0</code>, the completion path
-that otherwise ends in <code>0x53409000</code>). It changes the search
-flow, so it is a test mode, not a passive timer (Inferred). Do not use it
-to time stock behaviour until those branches are decoded.</p>
+test it (Read, decoded 2026-10-29). Each one prints a line with the RTOS
+logger <code>0x536b82d4</code> and then goes back to the stock path, so
+the mode is <strong>passive logging</strong>. This corrects my first
+reading, which called it a test mode that changes the search.</p>
+<table>
+<thead><tr><th>Test</th><th>Prints</th><th>Then</th></tr></thead>
+<tbody>
+<tr><td><code>0x53400e68</code></td>
+<td><code>"ZAF_SEARCH_START[%d]:%d(%d)"</code>: lens position in pulses
+(<code>0x533ecaf4</code>, parameter <code>0x5205</code>),
+<code>+0xe88</code>, byte <code>+0xc51d</code></td>
+<td>back to <code>0x53400e74</code></td></tr>
+<tr><td><code>0x53406640</code></td>
+<td><code>"ZAF[%d] PEAK:%d LOG:%d(%d,%d,%d) AREA:%d/%d GAIN:%3.2f F:%d(AVE:%d) N:%d(AVE:%d) --&gt; OFFSET:%d(FULL:%d AVE:%d LIMIT:%d CORRECTION:%d)"</code></td>
+<td>stock path</td></tr>
+<tr><td><code>0x5340a638</code></td>
+<td><code>"RESULT_FOCUS[%d]:%d:%d(%d):%d"</code>: lens position in pulses,
+<code>[+0x24]</code>, search path <code>+0xc4ca</code>, halfword
+<code>+0xc4b8</code>, <code>+0xc430</code></td>
+<td>back to <code>0x5340a644</code></td></tr>
+</tbody>
+</table>
+<p>The bracketed number is the lens position, not a frame counter, and
+none of the formats has a time field. The lines go to the RTOS log, not
+the card. Whether that log adds a timestamp, and whether a card script
+can read it, is not decoded. If both are true, the start and result
+markers would give AF time per run without video.</p>
 
 <h3 id="53-other-af-shell-commands">5.3 Other AF shell commands</h3>
 <p>From the SHELLCMD table (Read; behaviour not decoded):
@@ -511,8 +563,11 @@ SD scripts on and a card script that sends
 <code>EnableAfDebugDataSave 1 C</code>, followed by the shooting
 conditions of af-subsystem §10.6. This repository does not provide that
 script.</li>
-<li>Offline: decode the CSV writer's file name and whether there is a
-time column, and the <code>InfocusTimeMeasure</code> branches (§5.2).</li>
+<li>Done offline on 2026-10-29: CSV file names, counter, memory
+condition and write timing (§5.1); <code>InfocusTimeMeasure</code> is
+passive logging (§5.2). Still open offline: whether the RTOS log has
+timestamps and can reach the card, and the second writer
+<code>0x533f0198</code>'s columns.</li>
 <li>With CSV data: settle the <code>0x5340bc4c</code> question and design
 the shorter criterion. Then fork GRKit, add the hook group of §6 and a
 <code>CORE.AF_CONFIRM</code> capability, build offline, and verify the
