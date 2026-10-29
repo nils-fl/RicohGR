@@ -654,6 +654,153 @@ def gaincap_bin():
     return arm_elf(src)
 
 
+# Dim-light frame-rate test (prototype): force contrast AF to drive level 1
+# (100 fps). The level byte at CAF +0x1022 (0..3 = 200/100/49/29 fps) is read
+# by these five instructions (all "ldrb rX, [obj+0x1000, #0x22]"); each becomes
+# "mov rX, #1". In dim light the AF frames then get a third of the light
+# (integration 10 ms at the same gain ceiling), which is the question: does
+# contrast AF still find focus with that, and how fast? Test only: it also
+# slows bright light from 200 to 100 fps.
+FORCE100_SITES = (
+    (0x533F2604, 0xE5D03022, 0xE3A03001),   # level -> byte table 0x53c16548
+    (0x533F728C, 0xE5D52022, 0xE3A02001),   # message 0x67c40808 to the live view
+    (0x533F8DC0, 0xE5D33022, 0xE3A03001),   # table[level] in 0x533f8d88
+    (0x533F8F14, 0xE5D33022, 0xE3A03001),   # 0x533f8e94
+    (0x534057B8, 0xE5D33022, 0xE3A03001),   # search 0x53404b24
+)
+
+# MULTIPATCH: check the build identity, map every site read-write, require all
+# sites stock (apply) or all patched (exit 6, nothing to do); a mixture or an
+# unknown word exits 5 before anything is written. Then write each site, dsb,
+# cacheflush, read back. Any argument restores the stock words instead.
+# Exit: 0 written, 6 already, 1 open, 2 map identity, 3 other build, 4 map site,
+# 5 unexpected or mixed (nothing written), 7 read-back differs.
+MULTIPATCH_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    ldr     r9, [sp]                @ argc
+    sub     sp, sp, #64             @ site pointers in the mappings
+    adr     r0, dev
+    ldr     r1, =0x101002
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0
+    mov     r0, #0
+    mov     r1, #4096
+    mov     r2, #1
+    mov     r3, #1
+    ldr     r5, ={id_page}
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, ={id_offset}
+    ldr     r0, [r0, r1]
+    ldr     r1, ={identity}
+    cmp     r0, r1
+    movne   r0, #3
+    bne     quit
+    mov     r11, #0                 @ pass 1: map and check
+    mov     r8, #0                  @ sites already in the wanted state
+check:
+    adr     r10, sites
+    add     r1, r11, r11, lsl #1
+    add     r10, r10, r1, lsl #2    @ this entry: address, stock, new
+    ldr     r6, [r10]
+    mov     r0, #0
+    mov     r1, #4096
+    mov     r2, #3
+    mov     r3, #1
+    lsr     r5, r6, #12
+    mov     r7, #192
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #4
+    bhi     quit
+    ldr     r1, =0xfff
+    and     r1, r6, r1
+    add     r0, r0, r1
+    str     r0, [sp, r11, lsl #2]
+    ldr     r2, [r10, #4]           @ expected (stock)
+    ldr     r3, [r10, #8]           @ wanted (new)
+    cmp     r9, #1
+    movne   r1, r2
+    movne   r2, r3
+    movne   r3, r1
+    ldr     r0, [r0]
+    cmp     r0, r3
+    addeq   r8, r8, #1
+    beq     checked
+    cmp     r0, r2
+    movne   r0, #5
+    bne     quit
+checked:
+    add     r11, r11, #1
+    cmp     r11, #{count}
+    bne     check
+    cmp     r8, #{count}
+    moveq   r0, #6
+    beq     quit
+    cmp     r8, #0
+    movne   r0, #5                  @ mixed state: refuse
+    bne     quit
+    mov     r11, #0                 @ pass 2: write
+write:
+    adr     r10, sites
+    add     r1, r11, r11, lsl #1
+    add     r10, r10, r1, lsl #2
+    ldr     r3, [r10, #8]
+    cmp     r9, #1
+    ldrne   r3, [r10, #4]
+    ldr     r6, [sp, r11, lsl #2]
+    str     r3, [r6]
+    dsb     sy
+    mov     r0, r6
+    add     r1, r6, #4
+    mov     r2, #0
+    ldr     r7, =0xf0002
+    svc     #0
+    ldr     r0, [r6]
+    adr     r10, sites
+    add     r1, r11, r11, lsl #1
+    add     r10, r10, r1, lsl #2
+    ldr     r3, [r10, #8]
+    cmp     r9, #1
+    ldrne   r3, [r10, #4]
+    cmp     r0, r3
+    movne   r0, #7
+    bne     quit
+    add     r11, r11, #1
+    cmp     r11, #{count}
+    bne     write
+    mov     r0, #0
+quit:
+    mov     r7, #1
+    svc     #0
+dev:
+    .asciz  "/dev/mem"
+    .balign 4
+sites:
+{entries}
+    .ltorg
+"""
+
+
+def multipatch_bin(sites):
+    entries = "\n".join(f"    .word   {a:#x}, {o:#x}, {n:#x}" for a, o, n in sites)
+    return arm_elf(MULTIPATCH_S.replace("{id_page}", f"{RTOS_IDENTITY >> 12:#x}")
+                   .replace("{id_offset}", f"{RTOS_IDENTITY & 0xfff:#x}")
+                   .replace("{identity}", f"{GR3X_160:#x}")
+                   .replace("{count}", str(len(sites)))
+                   .replace("{entries}", entries))
+
+
 def patch_sh():
     # Applied once per power-on, only when AFCFAST.ON is on the card. The patch
     # lives in RAM; switching off (or starting without the file) gives stock.
@@ -661,6 +808,7 @@ def patch_sh():
         "d=/media/storage1/SCRIPT/AFDBG\n"
         "exec 2>>$d/MEM.LOG\n"
         'if [ -f $d/AFCFAST.ON ]; then $d/AFCFAST.BIN; echo "on $?" >$d/PATCH.ERR; else echo off >$d/PATCH.ERR; fi\n'
+        'if [ -f $d/FORCE100.ON ]; then $d/FORCE100.BIN; echo "on $?" >$d/FORCE.ERR; else echo off >$d/FORCE.ERR; fi\n'
         "exit 0\n"
     ).encode("ascii")
 
@@ -718,6 +866,7 @@ def card_roots(flags):
             "SCRIPT/AFDBG/PATCH.SH": patch_sh(),
             "SCRIPT/AFDBG/AFCFAST.BIN": afcfast_bin(),
             "SCRIPT/AFDBG/GAINCAP.BIN": gaincap_bin(),
+            "SCRIPT/AFDBG/FORCE100.BIN": multipatch_bin(FORCE100_SITES),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
     }

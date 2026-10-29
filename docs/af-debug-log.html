@@ -62,6 +62,7 @@ strong{font-weight:650}
 <li><a href="#session-drive-table" id="toc-session-drive-table">Session: drive table</a></li>
 <li><a href="#gain-cap-patch" id="toc-gain-cap-patch">Dim-light gain-cap patch (prototype)</a></li>
 <li><a href="#session-af-area" id="toc-session-af-area">Session: AF area size in dim light</a></li>
+<li><a href="#force100-test" id="toc-force100-test">Dim-light frame-rate test: force 100 fps</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -506,6 +507,30 @@ small window), then a multi-area mode (30 areas, window 1376256 × 884736)
 the typical sweep longer (more samples, as in bright light). On average it is
 a wash; with 8 and 9 sweeps the difference is within the spread. Not the
 everyday win hoped for.</p>
+<h2 id="force100-test">Dim-light frame-rate test: force 100 fps (prototype, 2026-10-29)</h2>
+<p>Question: does contrast AF still find focus in dim light at 100 fps, with
+a third of the light per sample? (A higher gain ceiling would give the same
+light per sample, so this tests that idea too.)</p>
+<ul>
+<li><strong>Change:</strong> the five instructions that read the drive level
+(<code>ldrb rX, [obj+0x1000, #0x22]</code> at <code>0x533f2604</code>,
+<code>0x533f728c</code>, <code>0x533f8dc0</code>, <code>0x533f8f14</code>,
+<code>0x534057b8</code>) become <code>mov rX, #1</code>, so contrast AF
+uses level 1 (100 fps) everywhere. Test only: it also slows bright light
+from 200 to 100 fps.</li>
+<li><strong>Patcher:</strong> <code>FORCE100.BIN</code> (568 bytes), a
+general multi-site patcher. It checks the build, checks every site before
+writing any (all stock: apply; all patched: exit 6; mixed or unknown: exit
+5, nothing written), then writes, flushes and verifies each site. Any argument
+restores. Switch <code>SCRIPT/AFDBG/FORCE100.ON</code>; run once after boot by
+<code>PATCH.SH</code>; result in <code>FORCE.ERR</code>.</li>
+<li><strong>Checked offline:</strong> emulator over the 1.60 image: apply,
+already, mixed, unknown word, restore, other build.</li>
+<li><strong>Risks:</strong> a writer of the level we have not found might
+still act on the real level, and the AE plan for level 1 in dim light is
+underexposed (gain at the ceiling, 10 ms). AF may hunt or miss; the live view
+may look darker during AF. A power-off removes the patch.</li>
+</ul>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>
