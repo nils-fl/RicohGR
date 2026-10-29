@@ -57,7 +57,8 @@ TONING = {
     "bleach_bypass": {"none", "1", "2", "3"},
     "retro": {"none", "1", "2", "3"},
     "hdr_tone": {"none", "1", "2", "3"},
-    "cross_process": {"none", "1", "2", "3"},
+    # Cross Process has three types; formatter 0x532acf54 shows them as B, M, Y.
+    "cross_process": {"basic", "magenta", "yellow"},
 }
 
 # Which parameters each control supports (capability table at 0x53b5a750).
