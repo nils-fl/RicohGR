@@ -669,6 +669,21 @@ FORCE100_SITES = (
     (0x534057B8, 0xE5D33022, 0xE3A03001),   # search 0x53404b24
 )
 
+# Dim-light peak margin. The detectors accept a peak only when the contrast
+# rises and then falls by at least T = +0x28 + +0x4c x +0x80 (normalised
+# units). +0x80 comes from 0x5340c590: with y = brightness per pixel and a
+# per-mode base b (table 0x53c16bb0, about 570-600), it returns sqrt(max(b/y,
+# 0.25)) when y >= b, but b/y itself when y < b, so in dim light the margin
+# grows with 1/brightness instead of 1/sqrt(brightness). Traces show the
+# jitter of the normalised series stays at 0.001-0.002 while T reaches 20-35
+# times that, and clear peaks are rejected because their fall stays below T.
+# The patch removes the early return (bhi to the end) so dim light also takes
+# the square root. It changes all three callers of 0x5340c590 (the per-frame
+# detector update 0x5340caec, 0x5340c7c8, and the threshold helper 0x5340c620).
+SQRTNS_SITES = (
+    (0x5340C5F0, 0x8A000008, 0xE1A00000),   # bhi 0x5340c618 -> nop
+)
+
 # MULTIPATCH: check the build identity, map every site read-write, require all
 # sites stock (apply) or all patched (exit 6, nothing to do); a mixture or an
 # unknown word exits 5 before anything is written. Then write each site, dsb,
@@ -1171,6 +1186,7 @@ def patch_sh():
         "exec 2>>$d/MEM.LOG\n"
         'if [ -f $d/AFCFAST.ON ]; then $d/AFCFAST.BIN; echo "on $?" >$d/PATCH.ERR; else echo off >$d/PATCH.ERR; fi\n'
         'if [ -f $d/FORCE100.ON ]; then $d/FORCE100.BIN; echo "on $?" >$d/FORCE.ERR; else echo off >$d/FORCE.ERR; fi\n'
+        'if [ -f $d/SQRTNS.ON ]; then $d/SQRTNS.BIN; echo "on $?" >$d/SQRTNS.ERR; else echo off >$d/SQRTNS.ERR; fi\n'
         # The tracer runs in the background for TRACE_RECORDS x TRACE_PERIOD_NS.
         'if [ -f $d/TRACE.ON ]; then rm -f $d/TRACE.DAT; ($d/TRACE.BIN; echo "$?" >$d/TRACE.ERR) </dev/null >/dev/null 2>&1 & fi\n'
         "exit 0\n"
@@ -1231,6 +1247,7 @@ def card_roots(flags):
             "SCRIPT/AFDBG/AFCFAST.BIN": afcfast_bin(),
             "SCRIPT/AFDBG/GAINCAP.BIN": gaincap_bin(),
             "SCRIPT/AFDBG/FORCE100.BIN": multipatch_bin(FORCE100_SITES),
+            "SCRIPT/AFDBG/SQRTNS.BIN": multipatch_bin(SQRTNS_SITES),
             "SCRIPT/AFDBG/TRACE.BIN": trace_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},

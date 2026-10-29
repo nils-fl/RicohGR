@@ -724,6 +724,41 @@ after a pass (<code>+0xf3c</code>, <code>+0xf40</code>, <code>+0xf5c</code>,
 <code>+0x4074</code>, <code>+0x40ec</code>). Period 4 ms, 15,000 records
 (60 s), 840 bytes each. <code>--trace-passes</code> prints the arrays at the
 end of every pass with the outcome.</p>
+<h3 id="dim-margin">Why clear peaks are rejected: the dim-light margin (2026-10-29)</h3>
+<p>Tracer v3 session <code>work/af-logs/dim-arrays</code> (stock, 13 presses,
+6 failed), read with <code>--trace-passes</code>. The detector array at
+<code>+0</code> turns out to hold the lens pulse per sample; the one at
+<code>+4</code> holds the smoothed normalised value.</p>
+<ul>
+<li><strong>The rule:</strong> a pass is accepted when the value has risen and
+then fallen by at least the margin T = <code>+0x28</code> +
+<code>+0x4c</code> × <code>+0x80</code> (the comparisons in
+<code>0x5340dd18</code>–<code>0x5340df84</code>; <code>+0x28</code> was not
+traced and seems near 0). Measured against f × scale: every accepted pass
+fell by 1.0–23 T; every rejected pass that had a rise fell by only
+0.2–0.6 T, or reached the end of the scan before falling.</li>
+<li><strong>The margin explodes in dim light:</strong> f = <code>+0x4c</code>
+is fixed per mode (0.00205 at 29 fps). The scale <code>+0x80</code> comes from
+<code>0x5340c590</code>: with y = brightness per pixel and a per-mode base b
+(<code>0x53c16bb0</code>, 563–598), it returns sqrt(max(b/y, 0.25)) when
+y ≥ b, but b/y when y &lt; b. Measured scale: 0.8 in bright light, 6.8, 15,
+27 as Y falls. Emulating <code>0x5340c590</code> on the image gives the same
+values (0.83, 6.1, 13.0, 27.0).</li>
+<li><strong>The real jitter does not grow like that:</strong> the
+frame-to-frame jitter of the normalised value is 0.0004–0.0022 in every pass,
+bright or dim. In bright light T is about 1× the jitter; in the dim passes
+20–37×. So in dim light the camera demands a fall of 20–37 noise widths, and
+broad dim peaks don't fall that far before the scan ends.</li>
+</ul>
+<p><strong>Patch <code>SQRTNS</code> (prototype):</strong> one word,
+<code>0x5340c5f0</code> <code>bhi 0x5340c618</code> (<code>0x8a000008</code>)
+→ <code>nop</code> (<code>0xe1a00000</code>), so dim light also takes the
+square root: scale 13 → 3.6, 27 → 5.2 (still about 6× the measured jitter).
+Bright light (y ≥ b) is unchanged. It affects all three callers of
+<code>0x5340c590</code>, including the threshold helper <code>0x5340c620</code>
+that other contrast code (AF-C among it) calls. Same multi-site patcher,
+switch <code>SQRTNS.ON</code>, status in <code>SQRTNS.ERR</code>; emulated in
+all states (stock → 0, patched → 6, unknown → 5, restore).</p>
 <p><strong>What this means for patches:</strong> the overshoot idea (accept
 on the first pass) is wrong. Two levers remain. (1) The slowest presses: the
 contrast trace above shows that clear peaks are rejected by a test other than
