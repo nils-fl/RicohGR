@@ -29,6 +29,7 @@ Open [`docs/index.html`](docs/index.html) in a browser to read them.
 | [`docs/firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) | Whether a modified firmware would be accepted (checksum and version rule, no signature) and what happens if it fails (no recovery found) |
 | [`docs/recipe-format.html`](docs/recipe-format.html) | The plain-text `RECIPES.TXT` format for a recipe library and the offline checker; needs no firmware change |
 | [`docs/gr3x-vs-gr4.html`](docs/gr3x-vs-gr4.html) | GR IIIx vs GR IV firmware comparison: container, platform, subsystem diff, and an address-level comparison of the AF code (§5) |
+| [`docs/gr-mod-landscape.html`](docs/gr-mod-landscape.html) | Community mods for the GR IIIx (GRKit, GR Mod, others) and how our AF work could build on GRKit; built-in AF debug logging; recipes via `UserData Set` |
 
 Statements in the documents are labelled **Read** (taken from the code or
 data), **Structural** (from names, strings and dependencies) or **Inferred**
@@ -109,6 +110,15 @@ Verified reference values for GR IIIx 1.60:
   material) applies to that project, not this one.
 - [hhornbacher/gr3x-fw-hack](https://github.com/hhornbacher/gr3x-fw-hack):
   earlier GR III/IIIx work on the Linux side.
+- [ahonn/GRKit](https://github.com/ahonn/GRKit): SD-card plugin system for
+  GR III, GR IIIx and GR IV that patches the RTOS in RAM (MIT). Its loader,
+  hook and relocation design is summarised in
+  [`docs/gr-mod-landscape.html`](docs/gr-mod-landscape.html). No code from it
+  is included here.
+- [Maxwooow/Ricoh-GRMod](https://github.com/Maxwooow/Ricoh-GRMod): firmware
+  modding tool for GR III, GR IIIx and GR IV (GPL-2.0-only). Its container
+  code was used to test `tools/gr_repack.py`; no code from it is included
+  here.
 
 ## Disclaimer
 

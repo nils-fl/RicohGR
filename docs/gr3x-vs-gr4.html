@@ -159,7 +159,7 @@ the GR III.</li>
 <h3 id="11-gr-mods-container-code-on-the-gr-iiix-file">1.1 GR Mod's
 container code on the GR IIIx file (Read)</h3>
 <p><a href="https://github.com/Maxwooow/Ricoh-GRMod">Maxwooow/Ricoh-GRMod</a>
-(GR IV 1.11 only) has a TypeScript container codec and a self-check.
+(GR IV 1.11 only at the time of this test) has a TypeScript container codec and a self-check.
 Its three base files (<code>core/src/fw/container.ts</code>,
 <code>selfcheck.ts</code>, <code>types.ts</code>, commit
 <code>675ba64</code>) were run unchanged on both official files. The test
@@ -207,6 +207,13 @@ keeps the official layout the same way and gives a byte-identical file
 model-record change. <code>profile.ts</code> (section offsets, GR IV
 addresses, hashes) and every feature module do not carry over.</li>
 </ul>
+<p><strong>Update 2026-10-29.</strong> GR Mod 0.8.5 (merged 2026-10-26
+from <a href="https://github.com/Maxwooow/Ricoh-GRMod/pull/3">PR #3</a>)
+supports GR III 2.10 and GR IIIx 1.60 itself, with its own guarded GR
+IIIx code path. The port notes in this section and in §3.1 are therefore
+only background. GR Mod does not support GR IIIx 1.70. For the
+alternative that needs no flash, see
+<a href="gr-mod-landscape.html">gr-mod-landscape</a>.</p>
 <h2 id="2-platform-read-from-each-firmwares-device-tree">2. Platform
 (Read, from each firmware's device tree)</h2>
 <table>
@@ -300,7 +307,8 @@ values for the GR IIIx (Read unless marked)</h3>
 places and the image-control tables its slot editor uses. They were found
 offline on 2026-10-15. A draft profile with these values passes its own
 asserts on the official 1.60 file. It is kept outside this repository,
-because GR Mod is GPL-2.0-only.</p>
+because GR Mod is GPL-2.0-only. Superseded on 2026-10-26: GR Mod 0.8.5
+supports the GR IIIx 1.60 natively (§1.1).</p>
 <table>
 <thead>
 <tr><th>Item</th><th>GR IV 1.11 (GR Mod)</th><th>GR IIIx 1.60</th></tr>
@@ -382,11 +390,31 @@ default path.</li>
 The function never reads <code>[r1+0x14]</code>, and the default path copies
 the same curve into all channels.</li>
 </ul>
-What the settings byte is has not been identified (open). It is not the
-image control (that byte is at <code>+0x77c</code>). <code>R2yService</code>
-checks it together with other settings at <code>+0x950</code>,
-<code>+0x9d0</code>, <code>+0x9f0</code>, <code>+0xa58</code> and
-<code>+0xad8</code>.
+<strong>The settings byte is Cross Process (Read).</strong> It is
+not a menu setting. It is a working value, and its only writer is GR IIIx
+<code>0x536dd270</code> (GR IV <code>0x53912990</code>). That writer stores 0
+unless the image control (<code>+0x77c</code>) is 0x15 (GR IV 0x17). For
+0x15 it stores 2, 3 or 4 for the Cross Process toning value 0, 1 or 2
+(<code>+0x797</code>; GR IV <code>+0x7b9</code>), and 0 for any other value.
+The byte at <code>+0x797</code> is Cross Process toning:
+<ul>
+<li>the Cross Process toning getter <code>0x5328410c</code> (slot 11 in
+the feasibility doc's §4.4) returns it;</li>
+<li>its setter <code>0x53559904</code> has the same form as the
+image-control setter <code>0x53558260</code>;</li>
+<li>its formatter <code>0x532acf54</code> accepts only 0, 1 and 2, labelled
+"B", "M" and "Y" (Basic, Magenta, Yellow; Inferred names) and asserts on
+anything else.</li>
+</ul>
+Through <code>0x53dbd19c</code>, 2/3/4 select curve sets 1/2/3 of the
+12-curve table. So the shared per-channel path is Cross Process's own
+R/G/B curves, one set per toning, on both cameras. Every other control
+leaves the flag clear. That also fixes image control 0x15 as Cross Process
+(Read). The <code>ImageControlModel.cpp</code> lists
+(<code>0x53b58fcc</code>, <code>0x53b5919c</code>, <code>0x53b59224</code>)
+hold 0x0b–0x10, 0x16, 0x11–0x15. This fits Standard = 0x0b and the eleven
+older controls numbered in order up to Cross Process = 0x15, with Negative
+Film added as 0x16 (Inferred; the builder reads 0x16 as entry 0x19).
 <br><strong>For a port:</strong> the GR IIIx lacks the GR IV's per-style
 curve branch, not just its data. Per-slot curves would need a code change in
 <code>0x536e8660</code> (<code>ToneControlTuning.cpp</code>, outside the
@@ -722,9 +750,9 @@ where they are set.</li>
 <li>The GR IV shift → defocus calibration tables against the GR IIIx
 ones.</li>
 <li>The remaining items in 5.4.</li>
-<li>What the settings byte at <code>+0x38a98</code> (GR IV <code>+0x38ad0</code>)
-is: it switches on the shared 12-curve per-channel tone (§3.1). Also the
-image-control enum behind the 26 GR IIIx style entries.</li>
+<li>The image-control enum behind the 26 GR IIIx style entries. Cross
+Process = 0x15 is Read (§3.1); the rest of 0x0b–0x16 is Inferred, and
+entries 0x00–0x0a and 0x17–0x19 are not mapped.</li>
 <li>What the <code>SricM343</code> command set does beyond its
 names.</li>
 </ul>

@@ -74,6 +74,9 @@ Update start-up mode: the built-in rescue path (Read)</a></li>
 <li><a href="#22-guard-toolspatch_guardpy"
 id="toc-22-guard-toolspatch_guardpy">2.2 Guard
 (<code>tools/patch_guard.py</code>)</a></li>
+<li><a href="#23-a-route-without-flashing-sd-card-scripts"
+id="toc-23-a-route-without-flashing-sd-card-scripts">2.3 A route without
+flashing: SD-card scripts</a></li>
 </ul></li>
 <li><a href="#3-what-a-recipe-mod-would-need"
 id="toc-3-what-a-recipe-mod-would-need">3. What a recipe mod would
@@ -128,6 +131,9 @@ firmware the normal way (§2.1).</li>
 <li>A mod that breaks early start-up, the updater, card access or the
 power-chip link would still be permanent. Such code must not be
 touched.</li>
+<li><strong>Added 2026-10-29:</strong> there is a lower-risk route that
+needs no flash at all. The camera can run scripts from the SD card, and
+GRKit uses them to patch the RTOS in RAM at each power-on (§2.3).</li>
 </ul>
 <h2 id="1-how-an-update-is-found-and-checked">1. How an update is found
 and checked</h2>
@@ -406,6 +412,29 @@ visible to it, so it could not be trusted in either direction.</p>
 crash the camera when RAW development is opened. That case is covered by
 the rescue path in §2.1; the guard only keeps changes away from the code
 that path needs.</p>
+<h3 id="23-a-route-without-flashing-sd-card-scripts">2.3 A route without
+flashing: SD-card scripts</h3>
+<p>Added 2026-10-29, from the GRKit sources and our 1.60 image. Details in
+<a href="gr-mod-landscape.html">gr-mod-landscape</a>.</p>
+<ul>
+<li>A one-time "Mode Set Command" (MENU at power-on with two files on the
+card) turns on SD scripts. The dispatcher in §2.1 has a separate
+"ModeSet" start-up reason, which probably serves this (Inferred).</li>
+<li>Then, at each power-on, the RTOS runs <code>SCRIPT/STARTUP.TTL</code>
+from the card. The script can send lines to the engineering shell
+(<code>SHELLCMD</code>, 584 commands). One of them, <code>lcmd</code>
+(<code>0x53014c90</code>), runs a command on Linux, and Linux can write
+the RTOS code region in RAM. GRKit uses this to install its hooks at each
+power-on.</li>
+<li>Nothing reaches flash, so the §1–§2.2 risks of a bad image do not
+apply. A failing script can hang start-up, but starting without the card
+gives the stock camera.</li>
+<li>The shell also has <code>UserData Set</code>
+(<code>0x53008038</code>), which writes Custom 1/2 image-control
+parameters, WB shift and other settings by name. For recipes this
+replaces the code changes of §3 and §4.4–§4.5 when shooting. Only
+applying recipes inside RAW development would still need a RAM hook.</li>
+</ul>
 <h2 id="3-what-a-recipe-mod-would-need">3. What a recipe mod would
 need</h2>
 <ol type="1">
@@ -774,7 +803,7 @@ RAW file; Inferred).</li>
 <td>Toning, cross process</td>
 <td><code>0x5328410c</code></td>
 <td><code>0x532acf54</code></td>
-<td>see formatter</td>
+<td>3 (B, M, Y)</td>
 </tr>
 <tr>
 <td>12</td>
@@ -962,6 +991,11 @@ line)</td>
 <tr>
 <td>Warranty</td>
 <td>Void (Inferred)</td>
+</tr>
+<tr>
+<td>SD-script route instead of a flash (§2.3)</td>
+<td>No flash write. A start-up hang is cleared by starting without the
+card (GRKit's recovery guide; not tested here)</td>
 </tr>
 </tbody>
 </table>

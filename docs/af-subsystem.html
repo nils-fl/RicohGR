@@ -1624,6 +1624,18 @@ pointing at the subject. The differences between those conditions show
 how large the contrast confirmation, the fallback scan and the pre-focus
 effect are. They give the frame rate too, from the lens stepping
 cadence.</p>
+<p><strong>Candidate second source (added 2026-10-29).</strong> The
+firmware has an engineering shell command,
+<code>EnableAfDebugDataSave &lt;0/1&gt; [P/C/Z/O]</code>
+(<code>0x53017778</code>, Read). With <code>C</code> set, contrast AF
+writes a CSV to the card for each run (Inferred). The CSV holds the lens
+position, phase defocus and direction, the loose-decision grade flag and
+every contrast sample with its lens pulse. That gives the sample count per
+condition directly, which the video cannot. It does not give wall-clock
+time, so the video is still needed for the total. Reaching the shell
+needs SD-card scripts. See
+<a href="gr-mod-landscape.html#51-enableafdebugdatasave">gr-mod-landscape
+§5.1</a>.</p>
 </main>
 </div>
 <script>

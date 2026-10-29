@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GR mod landscape and the AF work</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#gr-mod-landscape" id="toc-gr-mod-landscape">GR mod landscape
+and the AF work</a>
+<ul>
+<li><a href="#1-short-answer" id="toc-1-short-answer">1. Short answer</a></li>
+<li><a href="#2-projects-that-support-the-gr-iiix"
+id="toc-2-projects-that-support-the-gr-iiix">2. Projects that support the
+GR IIIx</a></li>
+<li><a href="#3-how-grkit-works" id="toc-3-how-grkit-works">3. How GRKit
+works</a>
+<ul>
+<li><a href="#31-loading" id="toc-31-loading">3.1 Loading</a></li>
+<li><a href="#32-hooks-and-relocation" id="toc-32-hooks-and-relocation">3.2
+Hooks and relocation</a></li>
+<li><a href="#33-what-a-module-may-do" id="toc-33-what-a-module-may-do">3.3
+What a module may do</a></li>
+<li><a href="#34-safety" id="toc-34-safety">3.4 Safety</a></li>
+</ul></li>
+<li><a href="#4-gr-iii-210-gr-iiix-160-and-170"
+id="toc-4-gr-iii-210-gr-iiix-160-and-170">4. GR III 2.10, GR IIIx 1.60 and
+1.70</a></li>
+<li><a href="#5-af-debug-logging-through-the-engineering-shell"
+id="toc-5-af-debug-logging-through-the-engineering-shell">5. AF debug
+logging through the engineering shell</a>
+<ul>
+<li><a href="#51-enableafdebugdatasave" id="toc-51-enableafdebugdatasave">5.1
+<code>EnableAfDebugDataSave</code></a></li>
+<li><a href="#52-caf_debug" id="toc-52-caf_debug">5.2
+<code>CAF_Debug</code></a></li>
+<li><a href="#53-other-af-shell-commands"
+id="toc-53-other-af-shell-commands">5.3 Other AF shell commands</a></li>
+</ul></li>
+<li><a href="#6-lever-1-as-a-grkit-hook" id="toc-6-lever-1-as-a-grkit-hook">6.
+Lever 1 as a GRKit hook</a></li>
+<li><a href="#7-recipes-userdata-set-on-the-gr-iiix"
+id="toc-7-recipes-userdata-set-on-the-gr-iiix">7. Recipes:
+<code>UserData Set</code> on the GR IIIx</a></li>
+<li><a href="#8-grkit-or-gr-mod" id="toc-8-grkit-or-gr-mod">8. GRKit or GR
+Mod</a></li>
+<li><a href="#9-next-steps" id="toc-9-next-steps">9. Next steps</a></li>
+<li><a href="#10-sources" id="toc-10-sources">10. Sources</a></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="gr-mod-landscape">GR mod landscape and the AF work</h1>
+<p>Question behind this document: which community mod projects support
+the GR IIIx, and can one of them carry our autofocus work
+(<a href="af-subsystem.html">af-subsystem</a>,
+<a href="caf-search-state-machine.html">caf-search-state-machine</a>)?
+Survey date 2026-10-29. Firmware: GR IIIx 1.60 (the camera in question),
+compared with GR III 2.10 and GR IIIx 1.70.</p>
+<p>Labels as in the other documents: <strong>Read</strong> (from code or
+data), <strong>Structural</strong> (from names, strings and
+dependencies), <strong>Inferred</strong> (interpreted). Statements about
+other projects come from their repositories on the survey date. Those
+projects change daily (GRKit released 1.3.1 to 1.3.3 in two days).</p>
+
+<h2 id="1-short-answer">1. Short answer</h2>
+<ul>
+<li><strong>No project touches AF.</strong> All of them change image
+looks, aspect ratios, grain, date imprint, shutdown images or menus. Our
+AF analysis has no overlap with community work.</li>
+<li><strong>GRKit is the right base.</strong> It is MIT-licensed. It does
+not flash the camera: it patches the RTOS in RAM at every power-on from
+the SD card, and checks every site before it changes anything. Without
+the card the camera is stock.</li>
+<li><strong>AF cannot be a GRKit module.</strong> Modules may not name
+firmware addresses. AF needs a new core hook group in a GRKit fork, gated
+by a capability word that a small module page sets (§6).</li>
+<li><strong>The GR IIIx 1.60 RTOS is the GR III 2.10 RTOS.</strong> The
+decoded images differ in 45 words (model name, version, build date, a
+product table). The AF code is byte-identical, so our addresses are
+GRKit's pinned addresses (§4).</li>
+<li><strong>The camera has AF debug logging built in.</strong> The
+engineering shell command <code>EnableAfDebugDataSave 1 C</code> makes
+contrast AF write a per-run CSV of lens positions, phase defocus and
+every contrast sample to the card. A GRKit-style card script can send
+it. This may replace the 240 fps filming (§5).</li>
+<li><strong>Recipes no longer need a flash.</strong> The GR IIIx has the
+same <code>UserData Set</code> shell command that a GRKit fork uses on
+the GR IV to write Custom slots. It covers Custom 1 and 2 (103 names
+each). This supersedes the zoom-controller cave design (§7).</li>
+</ul>
+
+<h2 id="2-projects-that-support-the-gr-iiix">2. Projects that support the
+GR IIIx</h2>
+<table>
+<thead>
+<tr><th>Project</th><th>GR IIIx firmware</th><th>Method</th><th>License</th><th>Features</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/ahonn/GRKit">ahonn/GRKit</a></td>
+<td>1.60 supported, 1.70 experimental</td>
+<td>SD card script, RAM only, no flash</td><td>MIT</td>
+<td>Film Look (LUT-fitted effects), framing (XPan, 2.35:1, 7:6 …), guides,
+date imprint, grain size. Modules in C.</td></tr>
+<tr><td>Forks: <a href="https://github.com/iceboerg00/grkit">iceboerg00</a>
+(<code>grade</code> branch),
+<a href="https://github.com/jakeds/grkit">jakeds</a> (Soft edition),
+<a href="https://github.com/alexanderclin/grkit">alexanderclin</a></td>
+<td>as GRKit</td><td>as GRKit</td><td>MIT</td>
+<td>iceboerg00: native recipes through <code>UserData Set</code> (tested on
+GR IV 1.11, <a href="https://github.com/ahonn/grkit/issues/27">GRKit
+issue #27</a>). jakeds: soft focus, seeded grain.</td></tr>
+<tr><td><a href="https://github.com/Maxwooow/Ricoh-GRMod">Maxwooow/Ricoh-GRMod</a>
+0.8.5</td>
+<td>1.60 (merged 2026-10-26 from
+<a href="https://github.com/Maxwooow/Ricoh-GRMod/pull/3">PR #3</a>);
+1.70 "a different program", not supported</td>
+<td>Builds and flashes a modified firmware (the start-up script route
+was dropped after 0.7)</td><td>GPL-2.0-only</td>
+<td>XMP/CUBE looks, up to 20 added looks, aspect ratios, soft focus,
+date imprint, direct flash, shutdown images</td></tr>
+<tr><td><a href="https://github.com/Mrjie7205/GR-DLC">Mrjie7205/GR-DLC</a></td>
+<td>IIIx</td><td>Based on GR Mod</td><td>GPL-2.0</td>
+<td>Film looks, ratios, firmware extensions</td></tr>
+<tr><td><a href="https://github.com/tinyblckc0000al/gr3x-fw-play">tinyblckc0000al/gr3x-fw-play</a></td>
+<td>1.60</td><td>Flash</td><td>GPL-2.0</td>
+<td>14 → 22 image controls, shutdown image</td></tr>
+<tr><td><a href="https://github.com/crciuperca/Ricoh-GR-IIIX-HDR">crciuperca/Ricoh-GR-IIIX-HDR</a></td>
+<td>1.60</td><td>Fixed binary delta, flash</td><td>MIT</td>
+<td>Display P3, HDR JPEG with gain map, Natural and Provia profiles</td></tr>
+<tr><td><a href="https://github.com/idontknownihil/gr3-film-mods">idontknownihil/gr3-film-mods</a></td>
+<td>GR III 2.10 (so also IIIx 1.60, §4)</td><td>Offline patcher, flash</td><td>MIT</td>
+<td>Film looks, RAW NR. GRKit's effect fitting is ported from it.</td></tr>
+<tr><td><a href="https://github.com/hhornbacher/gr3x-fw-hack">hhornbacher/gr3x-fw-hack</a>,
+<a href="https://github.com/yeahnope/gr_unpack">yeahnope/gr_unpack</a></td>
+<td>IIIx</td><td>Reverse-engineering tools</td><td>—</td>
+<td>Container decode, Linux rootfs in Docker</td></tr>
+</tbody>
+</table>
+<p>Ricoh released GR IIIx 1.70 on 2026-10-21. It cannot be rolled back,
+and GR Mod does not support it.</p>
+
+<h2 id="3-how-grkit-works">3. How GRKit works</h2>
+<p>From the GRKit sources (<code>docs/architecture.md</code>,
+<code>docs/module-reference.md</code>, <code>crates/grkit-build</code>,
+<code>runtime/</code>) at 1.3.3.</p>
+
+<h3 id="31-loading">3.1 Loading</h3>
+<ul>
+<li><strong>Enabling SD scripts</strong> is a one-time, persistent camera
+setting. Put <code>DEVELOP.MOD</code> and <code>00078350.588</code> on the
+card, hold MENU while powering on, and the camera shows "Mode Set
+Command", then "Complete", and turns off. Our start-up dispatcher
+<code>0x53229134</code> logs "ModeSet" as its own start-up reason, next
+to "Update" (<a href="firmware-mod-feasibility.html#21-update-start-up-mode-the-built-in-rescue-path-read">firmware-mod-feasibility
+§2.1</a>). With those files on the card, MENU at power-on probably takes
+the ModeSet branch instead of the updater (Inferred, not traced).</li>
+<li>At each power-on the RTOS script interpreter runs
+<code>SCRIPT/STARTUP.TTL</code>, which includes
+<code>SCRIPT/GRKIT/LOADER.TTL</code>. The script language looks like a
+Tera Term macro: <code>sendln</code>, <code>filesearch</code>,
+<code>intdim</code>, <code>mpause</code>.</li>
+<li><code>sendln 'lcmd sh …'</code> sends a line to the RTOS engineering
+shell. <code>lcmd</code> is the shell command (SHELLCMD table,
+<code>0x53014c90</code>, Read) that runs a command on Linux. Linux then
+runs <code>SCAN.SH</code> and <code>INSTALL.SH</code>, which runs
+<code>CORE.BIN --install</code>. Only Linux can write the RTOS code
+region.</li>
+<li>INSTALL links the modules, writes effects and icons, restores
+settings from <code>GRKIT/STATE.TXT</code>, and installs the hooks last.
+Private code lives in a reservation after the RTOS image. Data lives in
+script integer arrays (<code>intdim</code>), which the loader script
+allocates in the RTOS heap.</li>
+</ul>
+
+<h3 id="32-hooks-and-relocation">3.2 Hooks and relocation</h3>
+<ul>
+<li>A <strong>target</strong> pins one firmware build. The GR III family
+has one target, <code>gr3-2.10</code>
+(<code>crates/grkit-build/src/target/gr3_210.rs</code>,
+<code>runtime/targets/gr3-2.10.h</code>), whose comment reads "GR III
+2.10, which GR IIIx 1.60 also runs". GRKit's pinned firmware SHA-256
+(<code>d6a3c9c2…</code>) and decoded SHA-256 (<code>53da6907…</code>)
+match ours.</li>
+<li>A hook <strong>site</strong> is (symbol, address, stock bytes), for
+example <code>("grain_gate", 0x5351361c, "e7feffeb")</code>. A hook spec
+says whether the site gets a B or a BL to the runtime code
+(<code>components.rs</code>).</li>
+<li><strong>Relocation</strong> (<code>relocation.rs</code>). For each
+address the build stores a window of masked words (16 before, 48 after)
+from the pinned image. The mask clears B/BL offsets, absolute RTOS
+addresses and MOVW/MOVT immediates. INSTALL searches each window within
+±0x10000 of the pinned address in the running image. If a window is
+missing or found twice, it stops with status 47 and changes nothing.
+<code>GRKIT/RELOC.BIN</code> caches the results.</li>
+<li>Hot paths never run module code. They read <strong>capability
+words</strong> (<code>CORE.TONE</code>, <code>CORE.ASPECT</code>,
+<code>CORE.GRAIN</code>, <code>CORE.GRAIN_SIZE</code>) that the menu
+sets.</li>
+</ul>
+
+<h3 id="33-what-a-module-may-do">3.3 What a module may do</h3>
+<p>A module (<code>&lt;ID&gt;.GRM</code>, C plus <code>module.toml</code>,
+ABI 2.0) gets settings, a choice page in ADJ and MENU, live-view layers
+(720×480 RGBA), plane filters on recorded YCbCr pictures, timers, toasts
+and dialogs. Callbacks run in the App task. <strong>The build rejects any
+undefined symbol that is not a listed service</strong>, so a module cannot
+call or patch firmware. Limits: 64 KB code per module, 1536-byte stack
+frames, no <code>/</code> or <code>%</code> on variables.</p>
+<p>So an AF change is core work: a hook group in the family
+(<code>target/gr3.rs</code>), sites in the target, runtime code next to
+<code>runtime/processing.S</code>, and a new capability in
+<code>crates/grkit-core/src/capabilities.rs</code>. A module only supplies
+the menu page.</p>
+
+<h3 id="34-safety">3.4 Safety</h3>
+<ul>
+<li>Nothing is written to flash. Removing the card, or deleting
+<code>SCRIPT</code>, gives the stock camera. An empty
+<code>GRKIT/SAFE</code> file stops all modules.</li>
+<li><code>INSTALL.ERR</code> records the step that was running.
+<code>REPORT.TXT</code> and <code>BOOT.TXT</code> log each start.</li>
+<li>Failure mode: the camera can hang at start-up. The recovery is to pull
+the battery and start without the card (<code>resources/RECOVERY.md</code>).
+That is a much better position than a bad flash, where we found no
+recovery path except the Update start-up mode.</li>
+<li>The SD-script setting stays on until a second Mode Set Command turns
+it off.</li>
+</ul>
+
+<h2 id="4-gr-iii-210-gr-iiix-160-and-170">4. GR III 2.10, GR IIIx 1.60 and
+1.70</h2>
+<p>We fetched <code>gr3_v210.zip</code> and <code>gr3x_v170.zip</code>
+from Ricoh with <code>tools/fetch_firmware.py</code>, decoded them with
+<code>tools/gr_unpack.py</code>, and compared the images word by word
+(Read).</p>
+<table>
+<thead><tr><th>Comparison</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>GR III 2.10 vs GR IIIx 1.60, whole decoded image (59,718,388
+bytes each)</td>
+<td>45 differing words. Model string (<code>"GR III"</code> vs
+<code>"GR IIIx"</code>), version and build date (<code>0x5300200c</code>
+to <code>0x53002078</code>), two instructions at <code>0x536b62ec</code>
+and <code>0x536b6574</code> (a year constant, <code>0x7e2</code> vs
+<code>0x7e4</code>, Inferred), a small table of returned constants at
+<code>0x5381fe4c</code>–<code>0x5381fe9c</code> (product IDs, Inferred),
+and the same identity words in the data section.</td></tr>
+<tr><td>AF code <code>0x533e0000</code>–<code>0x53440000</code></td>
+<td>0 differing words</td></tr>
+<tr><td>GR IIIx 1.70 vs 1.60, GRKit-style windows of the sites in §5–6</td>
+<td>Each window found once. The contrast AF code moved by
+<code>+0xf0</code> (search entry <code>0x53404b24</code> →
+<code>0x53404c14</code>). The shell handlers did not move. The SHELLCMD
+table has the same 584 entries.</td></tr>
+</tbody>
+</table>
+<p>So the GR IIIx is a GR III with a different lens and model ID (the lens
+data must be selected at run time). Every address in our AF documents is
+also a valid GRKit <code>gr3-2.10</code> address. Our hook sites would
+relocate to 1.70 the way GRKit's do.</p>
+<p>A correction to a spot check I made during the survey: only 44 of
+GRKit's 80 <code>gr3-2.10</code> addresses are function prologues. That
+is because many of them are hook sites inside functions or leaf getters,
+not because the addresses differ.</p>
+
+<h2 id="5-af-debug-logging-through-the-engineering-shell">5. AF debug
+logging through the engineering shell</h2>
+<p>The <code>SHELLCMD</code> block (<a href="firmware-mod-feasibility.html">firmware-mod-feasibility</a>)
+is a table of 584 engineering commands as "name , handler" text. The
+GRKit loader reaches this shell with <code>sendln</code>. Several entries
+are AF tools.</p>
+
+<h3 id="51-enableafdebugdatasave">5.1 <code>EnableAfDebugDataSave</code></h3>
+<p><strong>Handler</strong> <code>0x53017778</code> (SHELLCMD entry, Read).
+Usage string <code>"EnableAfDebugDataSave &lt;0/1&gt; [P/C/Z/O]"</code>.</p>
+<ul>
+<li>It gets the AF debug object (singleton <code>0x5506b56c</code> via
+<code>0x533ee89c</code>; constructor <code>0x533ee7b0</code> clears it).
+It parses the first argument as on/off. With no second argument it sets
+four byte flags at once (<code>0x533efa40</code>). With letters it sets
+only the named ones: <strong>P</strong> <code>+0x27</code>,
+<strong>C</strong> <code>+0x28</code>, <strong>Z</strong> <code>+0x29</code>,
+<strong>O</strong> <code>+0x2a</code>. It prints
+<code>"[AF] Debug Data Save P:%d C:%d Z:%d O:%d"</code> (Read).</li>
+<li><strong>Z</strong> is also pushed to the phase AF object (singleton
+<code>0x5341df74</code>, <code>[+0x220]</code> byte <code>+0x65</code>,
+event <code>0x8000</code> via <code>0x534266f4</code>). With it set,
+<code>0x53426ba4</code> takes <code>0x5341b794</code>, which opens a 10 MB
+log named <code>"Zaf_DebugLog"</code> (Read).</li>
+<li><strong>C</strong> is tested at the start of the contrast AF logger
+<code>0x53407c60</code> (<code>ldrb [r5,#0x28]</code>, with
+<code>r5 = [obj+0x50]</code>; that this is the debug object is Inferred).
+The logger opens a 10,000,000-byte log (<code>0x533ef614</code>), writes
+labelled columns (<code>0x533ef8b8</code>, <code>0x533ef9a0</code>), and
+calls the CSV writer <code>0x533efbd0</code>. Columns (Read, from the
+label strings):
+<code>[LensPosition[mm]]</code>, <code>[LensPosition[pulse]]</code>,
+<code>[ZafSearchDirection/NOP:0/Far:1/Near:2]</code>,
+<code>[ZafSearchDirectionAreaNo.]</code>, <code>[ZafDefocusUm]</code>,
+<code>[ZafPeakAroundCheckAreaNo.]</code>,
+<code>[ZafPeakAroundLooseDecisionGradeFlag]</code>,
+<code>[ZafContrastAfSearchPathDetectPeak]</code>, an
+<code>[-----Algorithm-----]</code> block (<code>[Point] [MaxCounter]
+[Pulse] [Threshold*1000000] [MaxMinOffset] … [LinearSlope]</code>,
+horizontal and vertical), <code>[AF_Area_Num]</code>,
+<code>[LensPulsePosition]</code> and per area
+<code>[%d:ContrastAfDataH] [%d:ContrastAfDataV] [%d:YData]</code>.</li>
+<li><strong>Destination:</strong> the CSV writers <code>0x533efbd0</code>
+and <code>0x533f0198</code> build a path from <code>"C:\"</code>, a name,
+<code>"Tmp"</code>, a three-digit number and <code>".csv"</code>. They
+then call file functions in the updater's file-system range
+(<code>0x53627bdc</code>, <code>0x5362eb24</code>,
+<code>0x5362d548</code>). <code>C:</code> is the SD card (GRKit's scripts
+use <code>C:\SCRIPT\…</code>). The exact file name is not decoded.</li>
+<li>The logger is called from <code>0x53407b1c</code>, which two places
+in the contrast AF code reach (<code>0x53407bc4</code>,
+<code>0x53408874</code>). When that happens within an AF run is not
+decoded. That the CSV is written once per AF run is Inferred.</li>
+<li>The flags live in RAM and the constructor clears them, so they reset
+at power-off (Inferred).</li>
+</ul>
+<p><strong>What it would give us:</strong> for every AF run, the number of
+contrast samples, the lens pulse of each, the phase defocus, the search
+direction and the "loose decision" grade flag. That covers the open
+questions in <a href="caf-search-state-machine.html">caf-search-state-machine
+§6</a> (the minimum frame count, what <code>0x5340bc4c</code> really
+tests) and the sample count part of the 240 fps protocol in
+<a href="af-subsystem.html">af-subsystem §10.6</a>. It does not give
+wall-clock time unless the CSV has a time column, which the labels do not
+show. Writing a large CSV to the card may also slow the next AF run, so
+use sample counts rather than timings from logged runs.</p>
+<p><strong>How it would be sent:</strong> a card script with
+<code>sendln 'EnableAfDebugDataSave 1 C'</code> (or <code>CZ</code>),
+the same way GRKit sends <code>lcmd</code>. That needs SD scripts on, but
+not GRKit itself and no code patch. Untested: whether the interpreter's
+<code>sendln</code> reaches every shell command, and whether the
+logger's file writes are safe from the AF task while shooting.</p>
+
+<h3 id="52-caf_debug">5.2 <code>CAF_Debug</code></h3>
+<p>Handler <code>0x53017958</code> (Read). Sub-commands and targets:
+<code>AllOff</code> <code>0x53416aa4</code>,
+<code>InfocusTimeMeasure</code> <code>0x53416f9c</code>,
+<code>PintShift</code> <code>0x53417410</code>,
+<code>CisDriveModeFix</code> <code>0x5341768c</code>,
+<code>YDivCoefMeasure</code> <code>0x53416fe0</code>,
+<code>JointQuickReturn</code> <code>0x53417098</code>,
+<code>MovieLensDebug</code> <code>0x534170e0</code>,
+<code>ContrastH1Data</code> <code>0x53417128</code>,
+<code>SaveDebugFile</code> <code>0x5341716c</code>,
+<code>TestTrace</code> <code>0x53417310</code>, then
+<code>GetKfp</code> and <code>DispCurrentState</code>.</p>
+<p><code>InfocusTimeMeasure</code> sets a byte at contrast AF object
+<code>+0x16d78</code> (getter <code>0x533f3b5c</code>, Read). Three places
+test it: <code>0x53400e68</code> (next to the search-path byte
+<code>+0xc4ca</code>), <code>0x53406640</code> and
+<code>0x5340a638</code> (in <code>0x5340a5a0</code>, the completion path
+that otherwise ends in <code>0x53409000</code>). It changes the search
+flow, so it is a test mode, not a passive timer (Inferred). Do not use it
+to time stock behaviour until those branches are decoded.</p>
+
+<h3 id="53-other-af-shell-commands">5.3 Other AF shell commands</h3>
+<p>From the SHELLCMD table (Read; behaviour not decoded):
+<code>EnableAfBVC</code>, <code>TestAfError</code>, <code>camctl_af</code>,
+<code>camctl_get_focus_state</code>, the lens commands
+<code>focus_pi</code>, <code>focus_req</code>, <code>focus_loop</code>,
+<code>focus_inf</code>, <code>focus_set</code>, <code>focus_rom</code>,
+<code>focus_vol</code>, <code>focus_spd</code>, <code>focus_tmp</code>,
+<code>focus_bk</code>, <code>AF_drive</code>, <code>AF_hp</code>, and
+<code>Af_Led_On/Off</code>. Strings such as
+<code>m_eContrastAfStopMode</code> and <code>[ContrastAfSearchPath]</code>
+are printf formats in debug dumps, not commands.</p>
+
+<h2 id="6-lever-1-as-a-grkit-hook">6. Lever 1 as a GRKit hook</h2>
+<p>Lever 1 (<a href="af-subsystem.html">af-subsystem §10.5</a>) is a
+shorter confirmation after a good phase result. The state machine
+(<a href="caf-search-state-machine.html">caf-search-state-machine</a>)
+accepts a result when <code>0x5340bc4c</code> returns 0. Candidate sites,
+written as GRKit sites. The windows were checked with GRKit's mask and
+uniqueness rule against GR IIIx 1.60, GR III 2.10 and GR IIIx 1.70
+(Read):</p>
+<table>
+<thead><tr><th>Site</th><th>Address (1.60 = 2.10)</th><th>Stock word</th><th>1.70</th><th>Use</th></tr></thead>
+<tbody>
+<tr><td><code>af_peak_check_1</code></td><td><code>0x53404fac</code></td>
+<td><code>eb001b26</code> <code>bl 0x5340bc4c</code></td><td><code>0x5340509c</code></td>
+<td>BL hook: peak check, first area set</td></tr>
+<tr><td><code>af_peak_check_2</code></td><td><code>0x534051c0</code></td>
+<td><code>eb001aa1</code> <code>bl 0x5340bc4c</code></td><td><code>0x534052b0</code></td>
+<td>BL hook: peak check, second area set (<code>+0x2724</code>)</td></tr>
+<tr><td>(reference) accept branch</td><td><code>0x53404fb8</code></td>
+<td><code>e3a03001</code></td><td><code>0x534050a8</code></td>
+<td>Success exit: sets <code>+0xc470</code>, calls <code>0x533fb3c0(obj,2)</code></td></tr>
+<tr><td><code>af_guided_margin</code></td><td><code>0x534051c8</code></td>
+<td><code>e59313ac</code></td><td><code>0x534052b8</code></td>
+<td>Path 0 stop margin (3 × 10 × x)</td></tr>
+<tr><td><code>af_first_reversal</code></td><td><code>0x5340539c</code></td>
+<td><code>e5c514ca</code></td><td><code>0x5340548c</code></td>
+<td>First reversal (strb #1 to <code>+0xc4ca</code>), for direction handling</td></tr>
+</tbody>
+</table>
+<p><strong>Shape of the hook (design, not built).</strong> Replace the two
+BLs with BLs to a runtime function <code>af_peak_check(area, n)</code>.
+When a new capability word <code>CORE.AF_CONFIRM</code> is 0, it
+tail-calls <code>0x5340bc4c</code>, so the camera runs stock code. When
+it is 1, it applies the shorter criterion. The function runs in the AF
+task once per frame. It may only read the capability word and the AF
+objects. It may not call UI services or allocate memory. A module
+<code>AF</code> supplies the on/off page.</p>
+<p><strong>What blocks the criterion itself:</strong> we still do not know
+why <code>0x5340bc4c</code> returning 0 means success (caf §4), or which
+field holds the phase grade at that moment. The debug CSV (§5.1), with
+its per-sample data and <code>LooseDecisionGradeFlag</code> column,
+should answer both, so measurement comes before the hook.</p>
+
+<h2 id="7-recipes-userdata-set-on-the-gr-iiix">7. Recipes:
+<code>UserData Set</code> on the GR IIIx</h2>
+<ul>
+<li>SHELLCMD <code>UserData</code> → <code>0x53008038</code> (Read). This
+is the same address the GR IV 1.11 report gives. With four arguments and
+<code>argv[1] = "Set"</code> it calls the parser <code>0x5334688c</code>.
+With three and <code>"Get"</code> it calls <code>0x53386230</code>.</li>
+<li>The parser compares <code>argv[2]</code> with each setting name in a
+long chain (it runs to about <code>0x53351af0</code>). One example:
+<code>"StillImageControlNo1ParamStandardSaturation"</code> at
+<code>0x53347b50</code>. Each match tail-calls a per-setting function,
+for example <code>0x532f2ccc</code>, which matches the value text
+<code>M4</code> … <code>M1</code> … (Read).</li>
+<li>Names present (Read): 103 <code>StillImageControlNo1…</code> and 103
+<code>StillImageControlNo2…</code> (Custom 1 and 2; no No3 on the
+IIIx), <code>StillActiveImageControlSet</code>,
+<code>StillWhiteBalance…AdjustBA/GM</code>,
+<code>StillWhiteBalanceColorTemp</code>, <code>StillHighlightCorrect</code>,
+<code>StillShadowCorrect</code>, <code>StillLensShadingCorrection</code>,
+<code>StillHighIsoNR</code>.</li>
+<li>Missing on the IIIx: <code>camctl_set_user_still_imgctl_custom_name</code>.
+The recipe name cannot be set on the slot this way.</li>
+</ul>
+<p>Consequence: the plan in <a href="firmware-mod-feasibility.html">firmware-mod-feasibility</a>
+(apply a recipe through <code>0x53289244</code>, code in the RAW-dev zoom
+controller, flash) is no longer the best route. Shooting with a recipe
+needs no code at all: a card script sends the <code>UserData Set</code>
+lines. Applying a recipe while developing a RAW still needs a hook.
+GRKit's author plans recipes after an architecture rework (issue #27), so
+contributing there is better than a separate build.</p>
+
+<h2 id="8-grkit-or-gr-mod">8. GRKit or GR Mod</h2>
+<table>
+<thead><tr><th></th><th>GRKit</th><th>GR Mod</th></tr></thead>
+<tbody>
+<tr><td>Install</td><td>Card script, RAM patch each start</td><td>Flash a modified firmware</td></tr>
+<tr><td>Failure</td><td>Start-up hang; recover without the card</td>
+<td>Non-booting firmware; no recovery path found
+(<a href="firmware-mod-feasibility.html">feasibility</a>)</td></tr>
+<tr><td>Site check</td><td>Every site and window before any write; status 47</td>
+<td>Container self-checks</td></tr>
+<tr><td>GR IIIx 1.70</td><td>Experimental</td><td>Not supported</td></tr>
+<tr><td>License</td><td>MIT</td><td>GPL-2.0-only; derivatives must be GPL</td></tr>
+<tr><td>Extension point for AF</td><td>New core hook group (fork), §6</td>
+<td>Own patch in the firmware image</td></tr>
+<tr><td>Fit with our tools</td><td>Same pinned image and addresses</td>
+<td><code>tools/gr_repack.py</code> output is byte-identical to its build</td></tr>
+</tbody>
+</table>
+<p>For AF experiments, which will need many attempts, a RAM-only patch
+with a card-removal undo is the only reasonable risk. GR Mod remains
+useful as a reference for the container and the image pipeline.</p>
+
+<h2 id="9-next-steps">9. Next steps</h2>
+<ol>
+<li>Outside this repository's offline scope: a camera test would need
+SD scripts on and a card script that sends
+<code>EnableAfDebugDataSave 1 C</code>, followed by the shooting
+conditions of af-subsystem §10.6. This repository does not provide that
+script.</li>
+<li>Offline: decode the CSV writer's file name and whether there is a
+time column, and the <code>InfocusTimeMeasure</code> branches (§5.2).</li>
+<li>With CSV data: settle the <code>0x5340bc4c</code> question and design
+the shorter criterion. Then fork GRKit, add the hook group of §6 and a
+<code>CORE.AF_CONFIRM</code> capability, build offline, and verify the
+windows with <code>grkit verify</code>.</li>
+<li>Recipes: test <code>UserData Set</code> lines for Custom 1 on the
+camera, then follow GRKit issue #27.</li>
+</ol>
+
+<h2 id="10-sources">10. Sources</h2>
+<ul>
+<li><a href="https://github.com/ahonn/GRKit">ahonn/GRKit</a>, with
+<code>docs/architecture.md</code>, <code>docs/module-reference.md</code>,
+<code>docs/modules.md</code>, <code>resources/INSTALLATION.md</code>,
+<code>resources/RECOVERY.md</code>, <code>resources/DUMP.md</code>,
+<code>crates/grkit-build/src/{target.rs,target/gr3.rs,target/gr3_210.rs,components.rs,relocation.rs}</code>,
+<code>runtime/targets/gr3.h</code>, <code>runtime/targets/gr3-2.10.h</code>,
+<code>CHANGELOG.md</code>; issues
+<a href="https://github.com/ahonn/grkit/issues/17">#17</a> (new firmware)
+and <a href="https://github.com/ahonn/grkit/issues/27">#27</a> (recipes).</li>
+<li><a href="https://github.com/Maxwooow/Ricoh-GRMod">Maxwooow/Ricoh-GRMod</a>
+README and <a href="https://github.com/Maxwooow/Ricoh-GRMod/pull/3">PR #3</a>.</li>
+<li>Project pages listed in §2.</li>
+<li><a href="https://pentaxrumors.com/2026/10/21/ricoh-released-new-firmware-updates-for-the-gr-iv-monochrome-gr-iv-gr-iv-hdf-gr-iii-and-gr-iiix-cameras/">Pentax
+Rumors, 2026-10-21</a> on the GR IIIx 1.70 release.</li>
+<li>Our own reads: <code>work/fwdc243b-v160.decoded.bin</code>,
+<code>work/fwdc239b-v210.decoded.bin</code>,
+<code>work/gr3x-v170.decoded.bin</code> with
+<code>tools/rtos_analysis.py</code>.</li>
+</ul>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>
