@@ -383,6 +383,14 @@ the 200 fps drive: the live view may freeze or stutter during sweeps, which
 may be why Ricoh uses the live-view drive. If the camera misbehaves, switch
 off; without <code>AFCFAST.ON</code> or without the card it is stock.</li>
 </ul>
+<p><strong>First camera run, patched (2026-10-29,
+<code>work/af-logs/afc-patched/</code>).</strong> <code>PATCH.ERR</code> read
+<code>on 0</code>. AF-C, bright edge, 10 held runs: 15 unique sweeps, 13 at
+200 fps and 2 at 100 fps, none at 59 fps, also while <code>+0xc484</code> was
+2 (snapshot M003). At 700–1,000 µm defocus the sweeps took 65–90 ms (stock
+AF-C: median 267 ms). Median over all patched AF-C sweeps 100 ms (stock AF-C
+session: 283 ms). The live view looked and AF felt normal to the owner. A
+stock run with the same targets follows for the comparison.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),
