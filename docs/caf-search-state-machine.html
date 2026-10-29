@@ -344,6 +344,12 @@ its peak (21 in all). So the confirmation past the peak costs 3 frames,
 area 0 but one in area 1, and swept 16 samples past it. So the stop test
 waits for area 0. Where that rule sits in this function or its callers is
 open.</li>
+<li><strong>Path 2 measured (low light, 2026-10-29).</strong> The four path-2
+runs set no scan window (<code>DetectEndFocusPulse</code> and
+<code>InFocusPulse</code> 0) and swept the whole lens travel (about pulse
+231, 31–33 samples) past a confirmed peak. So path 2 is a full-range
+search. What makes the floats at <code>0x533f93c8</code> and
+<code>0x533f928c</code> select it is still open.</li>
 </ul>
 </main>
 </div>

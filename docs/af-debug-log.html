@@ -238,6 +238,31 @@ then ran 16 samples (80 ms) past that peak towards the end of the scan
 window. The reverse case (check 5 <code>0009</code>: area 0 confirmed,
 area 1 not) stopped normally after 3. So <strong>area 0 must confirm to
 stop the search</strong>; a peak in another area alone does not.</p>
+<h3 id="session-low-light">Session: low light (2026-10-29)</h3>
+<p>91 CSVs, 20 unique runs (<code>work/af-logs/low-light/</code>). With the
+1 s re-arm the camera also dumps <em>during</em> a search (12 files without a
+search header, sample counts growing to the final dump), so slot 5 runs
+during searches too; <code>tools/af_csv.py</code> leaves those out.</p>
+<table>
+<thead><tr><th></th><th>Bright edge (9)</th><th>Low light (20)</th></tr></thead>
+<tbody>
+<tr><td>Sampling rate</td><td>200 fps</td><td>29 fps (13), 49 (4), 100 (3)</td></tr>
+<tr><td>Samples, median (range)</td><td>10 (7–24)</td><td>11.5 (6–33)</td></tr>
+<tr><td>Sampling time, median (range)</td><td>50 ms (35–120)</td><td>367 ms (60–1,100)</td></tr>
+<tr><td>Phase decision grade</td><td>1/1 in all</td><td>0/0 in 11, 1/1 in 9</td></tr>
+<tr><td>Search path</td><td>0 in all</td><td>0: 6, 1: 10, 2: 4</td></tr>
+</tbody>
+</table>
+<p><strong>Finding: path 2 is a full-travel sweep.</strong> All four path-2
+runs (<code>0060</code>, <code>0071</code>, <code>0074</code>,
+<code>0078</code>; all 29 fps, grade 0/0) have no scan window
+(<code>DetectEndFocusPulse</code> 0, <code>InFocusPulse</code> 0). Each swept
+one way to about pulse 231 in 31–33 samples (1.03–1.10 s), although the
+contrast had a clear peak (up to 2.2× the baseline) around sample 11 and the
+Algorithm block confirmed it. That is about 19 samples, roughly 630 ms, past
+the peak, plus the return. Path 0 and path 1 runs stopped 3–4 samples after
+the peak at every frame rate. Grade 0/0 alone does not cause it: 7 of the
+11 grade-0/0 runs took path 0 or 1 and stopped normally.</p>
 
 <h2 id="5-shooting-sessions">5. Shooting sessions</h2>
 <p>Keep these fixed for all sessions: AF-S (except in the AF-C row),

@@ -1655,6 +1655,16 @@ search (<a href="af-debug-log.html#session-bright-edge">af-debug-log</a>).
 Stopping when another area has confirmed and area 0 is flat would save
 those 80 ms in about 1 of 8 runs, five times what lever 1 can save per
 run. The code that combines the areas is not yet located.</p>
+<p><strong>Low light (measured, 20 runs).</strong> The contrast AF drops to
+49 or 29 fps, so the same 8–13 samples take 160–530 ms instead of 40–65 ms.
+That frame rate is the largest single cost in low light, and the place
+where lever 4 (pixel-adding) would act. On top of it, 4 of 20 runs took
+search path 2: a sweep over the whole lens travel with no stop window,
+which ran about 630 ms past a clearly confirmed peak. A stop on the
+confirmed peak in path 2 would save that, about 0.6 s in 1 run in 5 in low
+light, the largest lever found so far. Where path 2 is chosen
+(<code>0x5340576c</code>, after the floats from <code>0x533f93c8</code>
+and <code>0x533f928c</code>) is the next offline target.</p>
 </main>
 </div>
 <script>

@@ -7,12 +7,13 @@ Reads every *.csv in each DIR (files the camera wrote with
 per AF run: phase result (direction, defocus, decision grade), sample rate,
 step width, number of contrast samples, the lens pulse of the contrast peak,
 and the samples taken after the peak, from the camera's own per-area result
-(the Algorithm block), with the end of the scan window. Repeats (the camera dumps the last run
-again when an AF start has no new search; only the live lens position and
-the live first table row differ) and header-only files (no search yet) are counted but not listed.
-Offline; reads your own files.
+(the Algorithm block), with the end of the scan window. Left out but counted:
+repeats (the camera dumps the last run again when an AF start has no new
+search; only the live lens position and first table row differ), dumps taken
+mid-search (no search header yet) and header-only files (no search yet).
+A summary line per call follows. Offline; reads your own files.
 """
-import hashlib, re, sys
+import hashlib, re, statistics, sys
 from pathlib import Path
 
 
@@ -76,7 +77,7 @@ def run(path):
 
 
 def main(dirs):
-    seen, runs, empty, repeats = set(), [], 0, 0
+    seen, runs, empty, repeats, partial = set(), [], 0, 0, 0
     for d in dirs:
         for path in sorted(Path(d).glob("*.csv")):
             digest = hashlib.sha256(key(path.read_text(encoding="latin-1")).encode("latin-1")).hexdigest()
@@ -87,6 +88,10 @@ def main(dirs):
             r = run(path)
             if r["n"] == 0:
                 empty += 1
+            elif r["fps"] is None:
+                # Dumped while the search was still running: no search header
+                # yet, and the final dump of the same run follows.
+                partial += 1
             else:
                 runs.append(r)
     print(f"{'file':14s} {'fps':>4s} {'step':>4s} {'grade':>5s} {'dir':>4s} {'defocus':>7s} {'path':>4s} "
@@ -96,7 +101,16 @@ def main(dirs):
         print(f"{r['file']:14s} {r['fps']!s:>4s} {r['step']!s:>4s} {r['grade']:>5s} {r['direction']:>4s} "
               f"{r['defocus_um']!s:>7s} {r['path']!s:>4s} {r['n']:3d} {ms:4.0f} {r['areas']:>12s} {r['peak_pulse']!s:>5s} "
               f"{r['after_peak']!s:>5s} {r['end_pulse']!s:>4s}  {r['pulses']}")
-    print(f"\n{len(runs)} runs; {repeats} identical repeats and {empty} files without a search left out.")
+    print(f"\n{len(runs)} runs; left out: {repeats} repeats, {partial} mid-search dumps, {empty} without a search.")
+    if runs:
+        ms = [r["n"] * r["frame_us"] / 1000 for r in runs]
+        count = lambda field: {v: sum(1 for r in runs if r[field] == v) for v in sorted({r[field] for r in runs})}
+        long_runs = sum(1 for r in runs if (r["after_peak"] or 0) > 4)
+        print(f"samples median {statistics.median(r['n'] for r in runs):g} "
+              f"(range {min(r['n'] for r in runs)}-{max(r['n'] for r in runs)}); "
+              f"sampling median {statistics.median(ms):.0f} ms (range {min(ms):.0f}-{max(ms):.0f})")
+        print(f"fps {count('fps')}; search path {count('path')}; grade {count('grade')}; "
+              f"more than 4 samples after the peak: {long_runs}")
     print("ms = samples x frame time (VsyncTimeUs): sampling time of the sweep, not the whole AF lag.")
     print("areas = peak pulse per AF area from the camera's Algorithm block, * confirmed, - no peak;")
     print("peak/after = the confirmed area with the latest maximum; end = scan window end (DetectEndFocusPulse).")
