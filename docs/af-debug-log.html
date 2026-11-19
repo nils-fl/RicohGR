@@ -65,6 +65,9 @@ strong{font-weight:650}
 <li><a href="#force100-test" id="toc-force100-test">Dim-light frame-rate test: force 100 fps</a></li>
 <li><a href="#why-af-needs-light" id="toc-why-af-needs-light">Why contrast AF needs light</a></li>
 <li><a href="#dim-reversal" id="toc-dim-reversal">Dim light: the first pass turns back</a></li>
+<li><a href="#auto-runs" id="toc-auto-runs">Automated runs: the script presses the shutter</a></li>
+<li><a href="#rise-floor" id="toc-rise-floor">Dim light: the phase grade and the rise floor</a></li>
+<li><a href="#opt-study" id="toc-opt-study">Parameter search with Optuna</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -316,6 +319,7 @@ rate alone:</p>
 56–60 samples, about 1 s. Two path-2 runs took 32–33 samples.</p>
 
 <h2 id="results-across-sessions">Results across the sessions</h2>
+<p>Charts of these results, drawn from the raw logs: <a href="af-charts.html">AF measurement charts</a>.</p>
 <table>
 <thead><tr><th>Session</th><th>Runs</th><th>fps</th><th>Samples, median</th><th>Sampling, median (range)</th><th>Path 0 / 1 / 2</th></tr></thead>
 <tbody>
@@ -734,7 +738,9 @@ end of every pass with the outcome.</p>
 then fallen by at least the margin T = <code>+0x28</code> +
 <code>+0x4c</code> × <code>+0x80</code> (the comparisons in
 <code>0x5340dd18</code>–<code>0x5340df84</code>; <code>+0x28</code> was not
-traced and seems near 0). Measured against f × scale: every accepted pass
+traced here; <strong>corrected 2026-11-19:</strong> it is not near 0 but
+0.001 or 0.02 depending on the phase decision grade, see
+<a href="#rise-floor">the rise floor</a>; in these very dim passes T dwarfs it). Measured against f × scale: every accepted pass
 fell by 1.0–23 T; every rejected pass that had a rise fell by only
 0.2–0.6 T, or reached the end of the scan before falling.</li>
 <li><strong>The margin explodes in dim light:</strong> f = <code>+0x4c</code>
@@ -892,6 +898,582 @@ first.
 pass's start instead of retracing it; at most about 300 ms on about 4 of 10
 presses. A wider start margin would cost about 100 ms on every press and save
 little on average.</p>
+<h2 id="auto-runs">Automated runs: the script presses the shutter (2026-11-17)</h2>
+<p>The A/B results above depend on hand presses: the user defocuses by
+pointing at a far target, half-presses 10–20 times, and the two arms are
+separate power-ons, so the light can drift between them. The engineering
+shell that the card script already reaches with <code>sendln</code> has
+commands for all of it (Read, 1.60 image). Smoke check 5 ran them on the
+camera (results at the end of this section).</p>
+<table>
+<thead><tr><th>Need</th><th>Command</th><th>Basis</th></tr></thead>
+<tbody>
+<tr><td>Half-press</td><td><code>SW_sws 1</code> / <code>SW_sws 0</code></td>
+<td>Handler <code>0x5303bda8</code>, help "emulate SwS switch [0:Off, 1:On]".
+It calls <code>0x536a7474</code>(key 0, state), which checks the value range
+and stores it in the per-key override table (<code>+0xac</code>, old state at
+<code>+0xc</code>). Inferred: the normal key poll reads that table, so the
+press takes the same UI path as the button. No debug gate found.</td></tr>
+<tr><td>Full press</td><td><code>SW_swr 1</code> / <code>SW_swr 0</code></td>
+<td>Handler <code>0x5303be6c</code>, "emulate SwR switch", key 1</td></tr>
+<tr><td>Same start point every run</td>
+<td><code>camctl_set_still_focus_mode inf</code>, then the test mode</td>
+<td>Handler <code>0x53010470</code>, modes
+autoarea/zone/select/pin/follow/cont/mf/snap/inf. Measured: the runs start
+from infinity (smoke check 5)</td></tr>
+<tr><td>Signal to the user</td><td><code>Af_Led_On</code> / <code>Af_Led_Off</code></td>
+<td>Handlers <code>0x53045a80</code> / <code>0x53045aa8</code>, no arguments</td></tr>
+<tr><td>Fallback trigger</td><td><code>camctl_af</code></td>
+<td>Handler <code>0x5300eb7c</code>, "execute auto focus" (the Wi-Fi app's
+AF, another code path; only if <code>SW_sws</code> does nothing)</td></tr>
+</tbody>
+</table>
+<p><code>tools/af_debug_card.py --auto</code> writes a card whose script,
+after the usual boot gate, runs per press: focus mode <code>inf</code>
+(800 ms), back to the test mode (700 ms), <code>ARM.SH</code>, re-arm the CSV,
+half-press for 2.5 s, release, 1.5 s pause. <code>ARM.SH</code> takes the next
+arm from <code>AUTO.SEQ</code> (one per line, each group of four a shuffled
+AABB), applies the patch (A) or restores stock (B; the patch binaries take
+any argument as "restore"), logs <code>run arm status uptime block</code>
+to <code>AUTO.LOG</code>; the script then waits 2 s (it logged 1.3 s after
+the call; a handshake file does not work, because Linux cannot recreate a file
+the RTOS deleted: "Input/output error", A/B session 1), so the patch never changes during a run. The two arms
+alternate under the same light. After each light block (default 24 presses)
+the AF lamp blinks for 30 s: change the light then. At the end there is one
+flush press (it writes the last CSV; the summary counts it as "outside any
+press") and the lamp stays on for 10 s. The tracer is switched on and sized
+for the session (3 × 24 presses: about 10 min, <code>TRACE.DAT</code> up to
+123 MB).</p>
+<pre><code>python3 tools/af_debug_card.py --auto-smoke --out work/af-card-smoke
+python3 tools/af_debug_card.py --auto --auto-patch SCALE75 --out work/af-card-auto
+#   --auto-mode select|zone|pin|autoarea|follow|cont   (default select)
+#   --auto-defocus inf|snap  --blocks 3  --per-block 24  --light-pause-s 30
+#   --hold-ms 2500  --gap-ms 1500  --full-press  --seed 1
+python3 tools/af_debug_card.py --trace-summary TRACE.DAT --auto-log AUTO.LOG</code></pre>
+<p>With <code>--auto-log</code>, the summary gives each AF run the
+<code>AUTO.LOG</code> entry of its press (set at most 4 s before the run
+started, <code>--join-window</code>; trace time is <code>CLOCK_MONOTONIC</code>, the log
+<code>/proc/uptime</code>) and prints totals per light block and arm, and
+the presses without an AF run.</p>
+<p><strong>Protocol.</strong> Camera on a tripod, a fixed target. Set the
+focus mode the card was made for (<code>--auto-mode</code>), the AF assist
+lamp off (it would light the target and look like the signal) and auto
+power-off off, and remove <code>AB.ON</code>. Each power-on is a new
+session: the script resets the run counter, the first press moves an older
+<code>AUTO.LOG</code> to the end of <code>AUTO.PREV</code>, and
+<code>PATCH.SH</code> starts a new <code>TRACE.DAT</code>, so copy the files
+off between sessions. Switch on and leave the
+camera. When the lamp blinks, change the light. When it stays on, switch off
+and copy <code>SCRIPT/AFDBG</code> and the card-root CSVs to
+<code>work/af-logs/&lt;session&gt;/</code>.</p>
+<p><strong>Smoke check first</strong> (<code>--auto-smoke</code>: 5 presses,
+no patch, about 2 min). It passes if <code>--trace-summary</code> shows 5
+runs that match presses 1–5 (plus the flush press), <code>af_csv.py</code>
+shows about the same, large phase defocus in every run (the lens started
+from infinity each time), and the camera is back in the test focus mode
+afterwards. If no run appears, the next step is <code>camctl_af</code> as the
+trigger; if the defocus differs run to run, <code>--auto-defocus snap</code>.</p>
+<h3 id="auto-smoke">Smoke checks (2026-11-17)</h3>
+<p><strong>Checks 1–4 failed because of a script bug, not the camera.</strong>
+Each script stopped silently at a line such as <code>run = 0</code> or
+<code>bare = 0</code>: a counter with the same name as a label
+(<code>:run</code>, <code>:bare</code>). Loops whose counter and label differ
+(<code>tries</code>/<code>:ready</code>) ran. As in Tera Term's macro
+language, a label seems to take the name. The trigger commands were never
+sent, so my explanations in between (commands sent too early; a
+<code>sendln</code> that waits for output) were wrong. The generator now
+refuses a script that assigns to a label name (<code>ttl_check()</code>).
+From check 2 on, a step log (<code>STEP.LOG</code>, one tiny
+<code>STEP_&lt;label&gt;.SH</code> per step, with <code>sync</code>) showed
+the last step reached. Evidence: <code>work/af-logs/auto-smoke1</code>–<code>4</code>.</p>
+<p><strong>Check 5 passed</strong> (<code>work/af-logs/auto-smoke5</code>,
+select mode, ordinary light). The script ran to the end: 3 bare
+half-presses, 5 runs with lens parking, the flush press, lamp on at 98.7 s.
+<code>SW_sws</code>, <code>camctl_set_still_focus_mode</code> and
+<code>Af_Led_On</code> all return. Every press gave an AF run in the trace
+(9 of 9). 7 locked (one of them reported as "done"), 2 ended without a lock
+or fail code (action 4, then 1; "abort" in the summary). AF times 120–350 ms, area-0 brightness
+113,000–130,000. Five of the six CSVs, each written at an AF start, give the
+lens position <code>166,667 mm</code> (infinity). The sixth gives
+<code>1,144 mm</code>, the subject. The sampled pulses span the whole range
+(0→63), so the runs did start from infinity. Not settled: whether the bare
+presses also started there (the camera may park the lens itself). Two fixes
+came from this check. The <code>ARM.OK</code> wait was replaced by a fixed 2 s (above). The
+summary now also starts a run on action 4 after idle (press 4 went straight
+to sampling, 120 ms, no pre-move), without changing any earlier session's
+count.</p>
+<h3 id="auto-ab">Automated A/B: SCALE75 against stock (2026-11-17)</h3>
+<p><strong>First try</strong> (<code>work/af-logs/auto-ab1</code>): the
+camera switched itself off after 19 presses (about 3 min) with Auto Power Off
+already off; not explained. The 19 runs did confirm the per-press switching:
+margin scale about 2.1 on every SCALE75 run, 2.7 on every stock run. Linux
+could not recreate <code>ARM.OK</code> after the RTOS deleted it
+("Input/output error"), so the handshake became a fixed 2 s wait.</p>
+<p><strong>Full session</strong> (<code>work/af-logs/auto-ab2</code>,
+<code>summary.txt</code>): 72 presses in 3 light blocks, 36 per arm, every
+patch switch exit 0 or 6, all 72 presses traced. The arms stay apart in every
+block (scale max, median: SCALE75 2.27 / 2.11 / 1.89, stock 3.01 / 2.72 /
+2.34). Blocks 1 and 2 ran at 100 fps, block 3 at 29 fps: the light did go
+down, enough to drop the AF frame rate. <strong>Correction:</strong> I first
+read block 3 as the brightest, from its area-0 brightness (510,000 against
+165,000–180,000). But that value is the AF signal per frame. It triples when
+the frame time triples, and auto exposure holds it near about 500,000 until
+the gain is at its ceiling. Dim light in the sense of the earlier sessions is
+29 fps <em>and</em> a signal far below that target (<code>dim-ab1</code>–<code>3</code>:
+85,000–132,000 at 29 fps). Block 3 was at the threshold, not below it.
+<code>--trace-summary</code> now prints the frame rate per run and group.</p>
+<table>
+<thead><tr><th>Block (AF frame rate, signal)</th><th>SCALE75</th><th>Stock</th></tr></thead>
+<tbody>
+<tr><td>1 (100 fps, 165,000)</td><td>12/12 locked, median 238 ms</td><td>12/12 locked, 290 ms</td></tr>
+<tr><td>2 (100 fps, 180,000)</td><td>12/12 locked, 271 ms</td><td>12/12 locked, 291 ms</td></tr>
+<tr><td>3 (29 fps, 510,000)</td><td>12/12 locked, 514 ms</td><td>12/12 locked, 521 ms</td></tr>
+<tr><td>All</td><td>36/36, 309 ms</td><td>36/36, 311 ms</td></tr>
+</tbody>
+</table>
+<p>The three "aborted" runs of the first count were locks: the accepted flag
+<code>+0xc470</code> went from 0 to 1 and area 0 was chosen, but the lock
+codes 8 and 128 fell between two 4 ms trace samples. The summary now counts
+these as locks (marked <code>*</code>). This changes 6 runs of the automated
+sessions and none of the earlier dim sessions. In this light SCALE75 costs
+nothing: no fails, no wrong locks, the same times. The 50 ms gap in block 1 (pre-move 75 against 154 ms) is too
+small a sample to count. Block 3 took about 0.5 s against 0.3 s because of
+the frame rate alone (9 frames at 29 fps: 292 ms of sampling, against 67–82 ms
+at 100 fps). Next: the same card in a dark room, with the
+light steps going down from there.</p>
+<h3 id="auto-arms">More arms per session: the detector's constants (2026-11-17)</h3>
+<p>Many of the contrast detector's decisions read plain constants from one
+table (<code>0x53c16bb0</code>–<code>0x53c16e50</code>), most with a single
+reader (Read). So some candidates are data patches, not code.</p>
+<table>
+<thead><tr><th>Address</th><th>Value</th><th>Reader</th><th>Use</th></tr></thead>
+<tbody>
+<tr><td><code>0x53c16bb0</code>…<code>bc4</code></td><td>569.22, 569.22, 574.5, 597.85, 563.3, 563.3</td><td><code>0x5340c59c</code></td><td>base b of the margin scale per mode (Read)</td></tr>
+<tr><td><code>0x53c16bd4</code></td><td>0.25</td><td><code>0x5340c5f8</code></td><td>floor of the bright-light branch (Read)</td></tr>
+<tr><td><code>0x53c16cc0</code></td><td>3</td><td><code>0x5340dcc0</code></td><td>falling samples needed before the fall is tested against T (Read): the "3 samples after the peak" of every CSV</td></tr>
+<tr><td><code>0x53c16c00</code>, <code>0x53c16cb4</code></td><td>5, 5</td><td><code>0x5340db4c</code></td><td>peak within the first 5 samples and at least 5 falls, then a ratio test with 0.5 (<code>0x53c16c40</code>): probably the wrong-side test; the turn decision itself (<code>0x53403808</code>) is not decoded</td></tr>
+<tr><td><code>0x53c16d14</code></td><td>8 bytes per mode: 0.02 / 0.04, 0.001 / 0.001, …</td><td><code>0x5340c450</code>, <code>0x5340c518</code></td><td>the absolute floor <code>+0x28</code> of the threshold, by detector mode (first column unless <code>+0x22</code>); see <a href="#rise-floor">the rise floor</a></td></tr>
+<tr><td><code>0x53c16c50</code>, <code>0x53c16d04</code>, <code>0x53c16e38</code></td><td>2, 3, 2</td><td><code>0x5340dd08</code>, <code>0x5340de84</code>, <code>0x5340de54</code></td><td>sample-index limits in the same detector; meaning not settled</td></tr>
+</tbody>
+</table>
+<p>New patches (all with the usual patcher: identity check, all sites stock
+or all patched, restore with any argument), checked in Unicorn on the 1.60
+image. The margin scale <code>0x5340c590</code> with each margin variant
+matches its formula in all six modes within 2·10<sup>-7</sup>. Each patcher
+gives 0 / 6 / 0 / 6 for apply / again / restore / again, 5 for an unknown word,
+and 3 for another build. A margin variant refuses (5, nothing written) while
+another one holds the shared words.</p>
+<table>
+<thead><tr><th>Patch</th><th>Change</th><th>Scale where stock gives 6 / 13 / 27 / 59</th></tr></thead>
+<tbody>
+<tr><td>SQRTNS (existing)</td><td>x<sup>0.5</sup></td><td>2.5 / 3.6 / 5.2 / 7.7</td></tr>
+<tr><td>SCALE75 (existing)</td><td>x<sup>0.75</sup></td><td>3.9 / 6.9 / 12.0 / 21.5</td></tr>
+<tr><td>X875</td><td>x<sup>0.875</sup> (x / x<sup>0.125</sup>, three <code>vsqrt</code> and a <code>vdiv</code>; same ten words)</td><td>4.8 / 9.5 / 18.1 / 35.9</td></tr>
+<tr><td>HALFB</td><td>base table halved (data, 6 words): half of stock below b/2, 0.7× stock above b</td><td>3.0 / 6.5 / 13.7 / 29.9</td></tr>
+<tr><td>FALLS2</td><td><code>0x53c16cc0</code> 3 → 2 (data, 1 word): accept one frame earlier (34 ms at 29 fps); the fall must still exceed T</td><td>unchanged</td></tr>
+</tbody>
+</table>
+<p><code>--auto-arms STOCK,SCALE75,SQRTNS,X875,HALFB,FALLS2,SCALE75+FALLS2</code>
+alternates any number of arms; each group holds every arm once, shuffled.
+<code>ARM.SH</code> first restores every patch of the session, then applies the
+arm's patches, and logs <code>run arm statuses t_start t_end block</code>.
+Checked on the Mac with stub patchers over 42 transitions. The script no
+longer deletes <code>RUN.N</code>: Linux cannot recreate a file the RTOS
+deleted, so a second power-on with the same card would have counted every
+run as run 1. <code>PATCH.SH</code> resets it instead.</p>
+<p><strong>Wrong locks are now counted.</strong> On a fixed target, the
+median final lens position of all locks is the reference. A lock more than
+150 pulses from it counts as wrong (<code>--wrong-pulses</code>). Good locks
+spread over 16 pulses on the tripod in bright light and up to about 180 in
+the handheld dim sessions. The SQRTNS false locks sat about 400 pulses off,
+at the near stop. On the old sessions the rule marks exactly those three and
+the one near-stop lock in <code>dim-ab1</code>, nothing else.</p>
+<h3 id="auto-multi1">Seven arms, 168 presses (2026-11-19)</h3>
+<p><code>work/af-logs/auto-multi1</code>: tripod, fixed target, focus mode
+Select, all 168 presses ran and were traced, every patch status 0. The card
+returned a read error for the last 13 KB of <code>TRACE.DAT</code>; the
+archive holds the first 379,484 records (16 records, 64 ms after the last
+press, lost). The file system checked clean afterwards.</p>
+<p>All presses at 29 fps. Block 1: signal about 500,000 (auto exposure still
+at its target); blocks 2 and 3: about 315,000 (gain at its ceiling). That is
+darker than the 2026-11-17 session, but still about 3× brighter than the
+handheld dim sessions where stock failed (85,000–132,000), and blocks 2 and 3
+had the same light.</p>
+<table>
+<thead><tr><th>Arm</th><th>Locked</th><th>Wrong</th><th>Failed</th><th>Median time</th><th>Margin scale (median)</th></tr></thead>
+<tbody>
+<tr><td>STOCK</td><td>23/24</td><td>1</td><td>0</td><td>549 ms</td><td>3.56</td></tr>
+<tr><td>SCALE75</td><td>24/24</td><td>0</td><td>0</td><td>548 ms</td><td>2.61</td></tr>
+<tr><td>SQRTNS</td><td>24/24</td><td>0</td><td>0</td><td>553 ms</td><td>1.90</td></tr>
+<tr><td>X875</td><td>24/24</td><td>0</td><td>0</td><td>544 ms</td><td>3.06</td></tr>
+<tr><td>HALFB</td><td>24/24</td><td>0</td><td>0</td><td>530 ms</td><td>1.76</td></tr>
+<tr><td>FALLS2</td><td>24/24</td><td>0</td><td>0</td><td>545 ms</td><td>3.53</td></tr>
+<tr><td>SCALE75+FALLS2</td><td>24/24</td><td>0</td><td>0</td><td>545 ms</td><td>2.58</td></tr>
+</tbody>
+</table>
+<p>The one wrong lock is stock run 98 (block 2): it swept on for 34 frames past
+the peak and stopped 249 pulses off, after 1.8 s. No arm failed, and the times
+match within the spread (interquartile ranges overlap by most of their width).
+FALLS2 shows no saved frame: the count of frames after the peak is 1–3 for
+every arm, so either the 3-fall rule is not what ends the sweep in this light
+or the trace cannot resolve it. Every variant, SQRTNS included, is safe in
+this light; it does not tell them apart. That needs light about 3× darker.</p>
+<h3 id="remote-nd1">Remote session over Wi-Fi, ND filter on (2026-11-19)</h3>
+<p>First session driven from the Mac (<code>tools/af_remote.py</code>, card
+<code>--remote</code>, see <a href="remote-control.html#6-camera-side-probe">remote control §6</a>):
+presses through <code>POST /v1/lens/focus</code>, defocus through <code>PUT
+/v1/params/lens focusSetting=inf</code>, arms through the card's endpoint, results
+from the trace tail. Evidence: <code>work/af-logs/remote-nd1</code>.</p>
+<p>The user's darkest daytime light gave 29 fps and margin scale 2.05 with ND off
+(stock locked in 0.9 s). With the built-in ND filter on (2 stops) the AF sees the
+filter: the scale rose to 2.5–2.8, while auto exposure held the AF signal near
+500,000–600,000. In that light <strong>40 of 42 presses failed</strong>, every arm
+(stock 0/6, SCALE75 1/6, HALFB 1/6, the others 0/6), each after a full sweep of
+4.2–4.8 s. The normalised contrast peak was about 0.0015, the same size as its
+frame-to-frame noise (0.0016), against 0.069 and 0.023 in the dim blocks of
+<code>auto-multi1</code>. There is no peak left to accept, so the margin cannot
+matter. The useful light lies between this and ND off: the next step is ND on
+with more light, until stock locks about half the time.</p>
+<h3 id="remote-nd2">ND on, at the edge (2026-11-19)</h3>
+<p>Same setup a few minutes later, camera on a USB power bank (the API then reports
+<code>battery</code> 100). The light had drifted brighter: stock locked 4/4 in test
+presses at margin scale 2.5. During the 42 presses it drifted darker again (stock
+scale 2.66 → 3.05, AF signal 460,000 → 390,000, so the gain was at its ceiling).
+Evidence: <code>work/af-logs/remote-nd2</code>.</p>
+<table>
+<thead><tr><th>Arm</th><th>Locked</th><th>Median time</th><th>Presses over 2 s</th><th>Passes</th></tr></thead>
+<tbody>
+<tr><td>STOCK</td><td>6/6</td><td>1650 ms</td><td>2</td><td>2,2,3,2,2,3</td></tr>
+<tr><td>X875</td><td>6/6</td><td>1605 ms</td><td>2</td><td>2,3,2,2,2,2</td></tr>
+<tr><td>FALLS2</td><td>6/6</td><td>1639 ms</td><td>2</td><td>2,2,2,2,2,3</td></tr>
+<tr><td>SCALE75</td><td>6/6</td><td>1443 ms</td><td>0</td><td>2,2,2,2,2,2</td></tr>
+<tr><td>SCALE75+FALLS2</td><td>6/6</td><td>1391 ms</td><td>0</td><td>2,2,2,2,2,1</td></tr>
+<tr><td>HALFB</td><td>6/6</td><td>1296 ms</td><td>0</td><td>2,2,2,1,2,2</td></tr>
+<tr><td>SQRTNS</td><td>5/6 (1 failed)</td><td>1262 ms</td><td>1 (the fail)</td><td>2,3,2,2,2,1</td></tr>
+</tbody>
+</table>
+<p>No wrong locks (all locks within 120 pulses of the in-focus position). Almost
+every press needed two passes: the first sweep turned without accepting a peak.
+The arms with a clearly lower margin (SCALE75, SCALE75+FALLS2, HALFB) had no press
+over 2 s; the arms with stock or nearly stock margin (STOCK, X875, FALLS2) had 6 of
+18, mostly a third pass. That split is significant on its own (Fisher two-sided
+p ≈ 0.02), but I chose the grouping after seeing the data and the counts are small:
+a hint to repeat with fewer arms, not a result. FALLS2 alone saved nothing.</p>
+<h2 id="rise-floor">Dim light: the phase grade and the rise floor (2026-11-19)</h2>
+<p>Why the first sweep in <a href="#remote-nd2">remote-nd2</a> was rejected
+in every arm, traced through the code and tested on the camera with patches
+uploaded over Wi-Fi (no card swap; see the endpoint in
+<code>tools/af_debug_card.py</code> <code>remote_files</code> and
+<code>tools/af_remote.py</code> <code>put</code> / <code>peek</code>).</p>
+<ul>
+<li><strong>The threshold has an absolute floor.</strong> A peak counts when its
+rise and fall exceed <code>+0x28</code> + T (T = <code>+0x4c</code> ×
+<code>+0x80</code>, the part the margin arms change). <code>0x5340c3c4</code>
+sets <code>+0x28</code> from the per-mode table <code>0x53c16d14</code>:
+<strong>0.02 in mode 0, 0.001 in mode 1</strong> (read live with
+<code>peek</code>; RISE10/RISE05 change the mode-0 value to 0.01/0.005).</li>
+<li><strong>The mode is the phase decision grade.</strong> The detector setup
+<code>0x533f893c</code> passes the byte at CAF <code>+0x43c1</code> + area,
+which the CSV writer prints as <code>[DicisionGrade]</code>
+(<code>0x53409654</code>). The setter <code>0x533f85dc</code> writes the same
+grade to every area. Grade 0 comes from <code>0x533f88c4</code> when the
+phase result is not usable (<code>0x533f87dc</code>) or one of two levels at
+<code>+0x41e4</code>/<code>+0x41e8</code> is at most 0x20000; otherwise 1 (2 on
+search path 2). The search start <code>0x53400e10</code> sets 1 in several
+branches, and <strong>every turn sets 0</strong> before the return sweep
+(<code>0x5340545c</code>).</li>
+<li><strong>So the camera is strictest exactly when phase detection gives
+up:</strong> without a confident phase result a peak must rise 20 times more
+before it counts. In remote-nd2 the grade was 0 throughout; the first sweeps
+rose 0.003–0.021 against about 0.025 and were rejected; the return sweeps rose
+about 0.027 and were accepted at the edge, the ones just below took a third
+sweep. Light alone does not set the grade: after re-aiming, the camera ran in
+grade 1 at the same light, and even at a margin scale of 16.</li>
+</ul>
+<p><strong>Test harness <code>FORCEG0</code></strong> (one word,
+<code>0x533f85ec</code> <code>mov r5, r1</code> → <code>mov r5, #0</code>):
+the setter always writes grade 0, so the dim-light case can be reproduced in
+any light. (<code>FORCEM0</code>, which only forced the detector mode, is not
+equivalent: other code reads the grade too.)</p>
+<h3 id="remote-g0">Forced grade 0 against the rise floor (2026-11-19)</h3>
+<p><code>work/af-logs/remote-g0</code>: tripod, ND on, the centre AF area on a
+clear edge, 29 fps, margin scale about 3.1; 32 presses in 8 shuffled groups;
+uploaded patches FORCEG0 (statuses 0). Every press locked on the first sweep;
+no wrong locks.</p>
+<table>
+<thead><tr><th>Arm</th><th>Median time</th><th>Range</th><th>Samples after the peak</th><th>Final position (median, spread)</th></tr></thead>
+<tbody>
+<tr><td>STOCK (grade 1)</td><td>518 ms</td><td>430–692</td><td>2 in all 8</td><td>−16313 (−16321…−16313)</td></tr>
+<tr><td>FORCEG0</td><td>715 ms</td><td>561–836</td><td>2, then 5–8</td><td>−16290 (−16297…−16259)</td></tr>
+<tr><td>FORCEG0+RISE10</td><td>652 ms</td><td>540–720</td><td>0–4</td><td>−16305 (−16313…−16297)</td></tr>
+<tr><td>FORCEG0+RISE05</td><td>581 ms</td><td>523–610</td><td>1–4</td><td>−16313 (−16321…−16305)</td></tr>
+</tbody>
+</table>
+<ul>
+<li>Grade 0 costs about 200 ms here (permutation test against stock
+p = 0.0005): the sweep runs 5–8 samples past the peak before the fall clears
+the floor, and the lock lands about 20 pulses short of stock's position
+(p = 0.0005 against RISE05).</li>
+<li>RISE05 gives back most of it: 581 ms against 715 (p = 0.003) and stock's
+position; RISE10 about half (p = 0.03).</li>
+<li>Not yet shown: that RISE05 rescues the rejected first sweeps of a real
+grade-0 scene like remote-nd2 (this edge was strong enough to pass the stock
+floor late), and that it adds no false locks in bright low-contrast scenes,
+where the floor matters most. Both are the next sessions. AF-C and the
+return sweep after every turn (grade 0) also use the patched floor.</li>
+</ul>
+<h3 id="remote-g0real">A real grade-0 scene without a usable peak (2026-11-19)</h3>
+<p>The live phase meter (<code>tools/af_remote.py meter</code>: a press every
+few seconds, reading the phase value <code>+0x14bac</code> and the grade
+during the AF; phase counts as usable from <code>[0x55012e74]</code> = 180)
+found a scene with phase value 0 and grade 0 on every pass: darker light, a weak
+target, margin scale 12–16. <code>work/af-logs/remote-g0real</code>, 24 presses,
+reference −16313:</p>
+<table>
+<thead><tr><th>Arm</th><th>Locked</th><th>Wrong (mostly the near stop −15897)</th><th>Failed / aborted</th></tr></thead>
+<tbody>
+<tr><td>STOCK</td><td>0</td><td>2</td><td>4</td></tr>
+<tr><td>RISE05</td><td>0</td><td>1</td><td>5</td></tr>
+<tr><td>SCALE75</td><td>0</td><td>5</td><td>1</td></tr>
+<tr><td>SCALE75+RISE05</td><td>0</td><td>6</td><td>0</td></tr>
+</tbody>
+</table>
+<ul>
+<li>The detector arrays show no peak at all: the normalised values stay
+negative and wander by about 0.01 over the whole travel. Nothing can lock
+here; as in <a href="#remote-nd1">remote-nd1</a>, this is past the limit of
+the signal.</li>
+<li><strong>Safety result:</strong> RISE05 adds no false locks in this scene
+(1 against stock's 2). SCALE75 turns honest fails into false locks at the near
+stop (5 of 6, 11 of 12 with RISE05), as SQRTNS did in
+<a href="#sqrtns-test">its camera test</a>: the margin variants need the
+near-stop guard before they are safe; the floor patch does not.</li>
+<li>Stock itself "locks" at the near stop in 2 of 6 presses here (and in 9 of
+14 meter presses): a near-stop guard would help stock too.</li>
+</ul>
+<h3 id="remote-g1dim">Dim scene with a peak, guards, start offset (2026-11-19)</h3>
+<p>Uploaded patches (all emulated 0/6/0/6/5/3 first; words in
+<code>tools/af_debug_card.py</code>): <code>OFFS4</code>/<code>OFFS2</code>
+(the phase-guided pre-move <code>0x534064e0</code> stops OFFSET short of the
+predicted peak, OFFSET between 2 and 4 drive steps; OFFS4 raises the lower
+clamp to 4 steps at <code>0x534065d4</code>, OFFS2 doubles OFFSET at
+<code>0x534065f8</code>/<code>fc</code>), <code>NOFB</code> (the area-1
+second-chance fallback <code>0x53400c50</code> returns 0) and
+<code>NOFO</code> (the fall-only accept <code>0x5340afc0</code> returns 0).</p>
+<ul>
+<li><strong>Dim scene with a real peak, phase grade 1</strong>
+(<code>work/af-logs/remote-g1dim</code>, margin scale about 24, 6 presses per
+arm): STOCK 5 locked / 1 failed, median 732 ms; SCALE75 6/6, 564 ms, all
+within 16 pulses of −16313; RISE05 6/6 (no effect expected at grade 1: the
+mode-1 floor is 0.001); forced grade 0 3 locked / 3 failed; forced grade 0 +
+RISE05 6/6. A repeat stopped after 12 presses because the tracer reached
+its 46-minute limit.</li>
+<li><strong>No-signal scene, guards</strong>
+(<code>work/af-logs/remote-guard</code>, 6 per arm): wrong locks STOCK 0,
+SCALE75 1, +NOFB 0, +NOFO 2, +NOFB+NOFO 2, NOFB+NOFO 0. Neither guard stops
+the false locks: they come from path-1 and path-2 passes accepted on area 0
+or 1 with the maximum at the first sample or a 3-sample rise of only
+0.006–0.008. A third suspected route (detector <code>+0xac</code> skipping the
+rise test) is ruled out: <code>+0xac</code> and CAF <code>+0x43c0</code> stay
+0 during these presses (read live). Not settled; the next step would be a
+tracer that also records the detector's own series.</li>
+<li><strong>Start offset, clear edge, phase grade 1</strong>
+(<code>work/af-logs/remote-offs</code>, margin scale about 2.2, 6 per arm,
+all locked, reference −16305):
+<table>
+<thead><tr><th>Arm</th><th>Median</th><th>Rising samples, first pass</th><th>Final positions</th></tr></thead>
+<tbody>
+<tr><td>STOCK</td><td>587 ms</td><td>5–7</td><td>−16313…−16297</td></tr>
+<tr><td>OFFS4</td><td>598 ms</td><td>4–6</td><td>−16313…−16305</td></tr>
+<tr><td>OFFS2</td><td>715 ms</td><td>8–10</td><td>−16282…−16274</td></tr>
+<tr><td>FORCEG0</td><td>727 ms</td><td>4–7</td><td>−16290…−16274</td></tr>
+<tr><td>FORCEG0+OFFS2</td><td>821 ms</td><td>8–10</td><td>−16259…−16243</td></tr>
+<tr><td>FORCEG0+RISE05</td><td>619 ms</td><td>5–6</td><td>−16305 in all 6</td></tr>
+<tr><td>FORCEG0+RISE05+OFFS2</td><td>714 ms</td><td>8–10</td><td>−16282…−16274</td></tr>
+</tbody></table>
+OFFS2 does what the decode predicts (twice the rising side) but costs about
+125 ms and moves the lock 25–60 pulses off. OFFS4 changes almost nothing
+(the lower clamp rarely binds). <strong>The lock position follows the sample
+balance around the peak:</strong> more samples on one side (OFFS2 before it,
+grade 0 after it) shift the final position, which points to a biased peak fit
+(<code>0x5340b4f8</code>, not decoded). FORCEG0+RISE05 again matches stock in
+time and position (third replication).</li>
+</ul>
+<h2 id="opt-study">Parameter search with Optuna (2026-11-19)</h2>
+<p><code>tools/af_optimize.py</code> treats the detector constants as a
+parameter space. Each trial builds one patch from the trial's values, uploads
+it over Wi-Fi (<code>put</code>, name OPT) and presses 4–5 times per
+condition. Cost per press, lower is better: AF time in s plus 0.01 per pulse
+off the reference; a failed press costs 5, a lock more than 150 pulses off
+costs 20. The trial's value is the mean. Sampler: TPE; the studies are in
+<code>work/af-logs/opt1</code>, <code>opt2</code>, <code>opt3</code>
+(<code>study.db</code>, <code>presses.jsonl</code>, stock controls in
+<code>controls.jsonl</code>). Same scene throughout: tripod, the centre AF
+area on a clear edge, reference −16305, 29 fps stock. Conditions: ND out
+("off", margin scale about 3.5), ND in ("on", about 12), and each with the
+forced phase grade 0 ("-g0", <a href="#rise-floor">FORCEG0</a>).</p>
+<table>
+<thead><tr><th>Knob</th><th>Patch</th><th>Stock</th><th>Range searched</th></tr></thead>
+<tbody>
+<tr><td>exponent</td><td>code variants X875, SCALE75, SQRTNS</td><td>1.0</td><td>1.0, 0.875, 0.75, 0.5</td></tr>
+<tr><td>kb</td><td>the six bases at <code>0x53c16bb0</code> × kb (HALFB = 0.5)</td><td>1.0</td><td>0.15–1.0</td></tr>
+<tr><td>rise</td><td><code>0x53c16d14</code>, mode-0 rise floor</td><td>0.02</td><td>0.002–0.02</td></tr>
+<tr><td>falls</td><td><code>0x53c16cc0</code></td><td>3</td><td>3, 2</td></tr>
+<tr><td>rise_run</td><td><code>0x53c16d04</code>: a new maximum latches only at index ≥ N (<code>0x5340de8c</code>)</td><td>3</td><td>3, 2</td></tr>
+<tr><td>grade_lim</td><td><code>cmp rX, #0x20000</code> at <code>0x533f88e8</code>, <code>0x533f88f4</code></td><td>0x20000</td><td>0x8000–0x20000</td></tr>
+<tr><td>scale_floor</td><td><code>0x53c16bd4</code></td><td>0.25</td><td>0.10–0.25</td></tr>
+<tr><td>step</td><td><code>0x533fc13c</code> <code>moveq r0, #8</code>: sweep pulses per frame (CAF <code>+0x43e6</code>, read back live)</td><td>8</td><td>5–14</td></tr>
+<tr><td>fps</td><td>card patches FORCE49 / FORCE100</td><td>auto (29 fps here)</td><td>auto, 49, 100</td></tr>
+</tbody></table>
+<h3 id="opt-results">Results</h3>
+<ul>
+<li><strong>Study 1</strong> (exponent, kb, rise, falls; off / on / on-g0; 34
+trials, 4 presses per condition): stock controls 2.0–2.5 (it fails nearly
+every on-g0 press), best settings 0.64–0.65. Every top trial has kb 0.28–0.37;
+fANOVA importance: kb 0.92, exponent 0.03, falls 0.03, rise 0.02. Within the
+plateau the scene cannot tell settings apart.</li>
+<li><strong>Study 2</strong> (plus rise_run, grade_lim, scale_floor, step):
+stopped at 11 trials for the live tests below; best 0.68; steps of 12–13
+scored 0.97.</li>
+<li><strong>Where the time goes</strong> (stock, about 590 ms, from the trace):
+wait before the sweep (action 2) about 200 ms, sweep (action 4) about 335 ms
+for 9–10 frames at 29 fps, accept and finish about 70 ms. The wait is the
+lens travelling to the start position: the two frame counters in
+<code>0x53406914</code> (<code>+0xc4ce</code> = 3 at <code>0x53406bd4</code>,
+<code>+0xc4cc</code> = 4 at <code>0x53406cc8</code>) are not active in this
+mode, and patching them changed nothing.</li>
+<li><strong>Frame rate.</strong> <code>0x533f4a70</code> lowers the AF frame
+rate while three values at <code>[CAF+0xfcc]</code> exceed 0x7ffff; here all
+three read about 0x80400 in both ND states (the gain is at its cap), so stock
+runs 29 fps. FORCE49 with the stock margin failed 3 of 3 ND-in presses; with
+kb 0.33 it locked 3 of 3 in 386–636 ms (29 fps: 605–653 ms).</li>
+<li><strong>Study 3</strong> (kb, exponent, falls, step, fps; rise fixed at
+0.014; ND out only, off and off-g0, because the shell relay had stalled; 60
+trials, 5 presses per condition; stock controls 0.72–0.80):
+<table>
+<thead><tr><th>Group</th><th>Presses</th><th>Failed</th><th>Median time off / off-g0</th><th>Sweep time</th><th>Largest position error</th></tr></thead>
+<tbody>
+<tr><td>stock control</td><td>100</td><td>0</td><td>604 / 703 ms</td><td>335 / 434 ms</td><td>31</td></tr>
+<tr><td>fps auto (6 trials)</td><td>60</td><td>0</td><td>587 / 637 ms</td><td>306 / 342 ms</td><td>50</td></tr>
+<tr><td>fps 49 (39 trials)</td><td>390</td><td>0</td><td>496 / 516 ms</td><td>202 / 227 ms</td><td>39</td></tr>
+<tr><td>fps 100 (15 trials)</td><td>150</td><td>7 (all off-g0)</td><td>382 / 403 ms</td><td>126 / 141 ms</td><td>127</td></tr>
+</tbody></table>
+Best values 0.52–0.54: 49 fps with kb 0.32–0.33 and step 7–8. Step 7–8 is
+the optimum (5–6 and 9–12 score worse); kb 0.25–0.4 as in study 1. 100 fps
+is faster still but fails and lands up to 127 pulses off.</li>
+<li><strong>Confirmation</strong> (<code>work/af-logs/remote-confirm49</code>,
+72 presses in 12 shuffled groups, all locked, none wrong): STOCK 622 ms,
+forced grade 0 688 ms; exponent 0.875 + kb 0.32 + falls 2 at 29 fps 608 / 633
+ms; the same at 49 fps <strong>486 / 514 ms</strong> (permutation test
+against stock p = 0.001, against the 29 fps setting p = 0.0003). Final
+positions −16322…−16290, stock −16321…−16305.</li>
+</ul>
+<h3 id="opt-dead">Candidates tested and dropped</h3>
+<ul>
+<li>Phase-usable threshold (RAM <code>0x55012e74</code> = 180): the firmware
+writes it back at every AF start.</li>
+<li>The 4.8 constant at <code>0x533fc160</code>: no effect on the sweep step.</li>
+<li>Smoothing off (the series is (b0 + 2·b4 + b8)/4, <code>0x5340cb00</code>;
+4 words): much worse, up to 3 s and 100 pulses off.</li>
+<li>Second accept count <code>0x53c16c4c</code> 3 → 2: no effect.</li>
+<li>Shape tests in the accept function <code>0x5340d100</code> (symmetry
+0.5–2.0 at <code>0x53c16ce4</code>, raw ratio 1.5 at <code>0x53c16cb8</code>):
+the reject flag <code>+0x23</code> is set in none of about 290 recorded
+passes.</li>
+</ul>
+<h3 id="opt-bright">Bright scene and the NO29 patch</h3>
+<p>Second scene (more light, several objects in the AF area; reference
+−16294 from stock presses; stock runs 100 fps, Y about 630 000; ND out; two
+shuffled sessions, <code>work/af-logs/remote-bright</code> and
+<code>remote-bright2</code>, 132 presses, all locked):</p>
+<table>
+<thead><tr><th>Arm</th><th>Presses</th><th>Median time</th><th>Median position error</th><th>More than 100 pulses off</th></tr></thead>
+<tbody>
+<tr><td>STOCK</td><td>27</td><td>322–327 ms</td><td>20–31</td><td>0</td></tr>
+<tr><td>FORCEG0</td><td>12</td><td>539 ms</td><td>94</td><td>5 (one wrong, 177 off)</td></tr>
+<tr><td>kb 0.32, exponent 0.875, falls 2 (29/auto fps)</td><td>27</td><td>292–310 ms</td><td>26–30</td><td>2 (118, 130)</td></tr>
+<tr><td>the same + NO29</td><td>15</td><td>315 ms</td><td>15</td><td>0</td></tr>
+<tr><td>the same + FORCEG0</td><td>27</td><td>323–358 ms</td><td>14–21</td><td>2 (95 and 126 in two presses)</td></tr>
+<tr><td>the same + FORCE49</td><td>24</td><td>460–466 ms</td><td>24–27</td><td>0</td></tr>
+</tbody></table>
+<ul>
+<li>FORCE49 costs about 140 ms in bright light, as expected (it forces 49
+fps where stock uses 100). Not usable as is.</li>
+<li><strong>NO29</strong> (<code>NO29_SITES</code>): in <code>0x533f4a70</code>
+the level-3 store <code>movhi r3, #3</code> at <code>0x533f4b10</code> becomes
+<code>#2</code>, so light that gives 29 fps gives 49 fps instead and
+brighter light is unchanged. Live: the level byte <code>+0x1022</code> stays
+1 (100 fps) here; with the ND filter in it gives 49 fps
+(<a href="#opt-no29">below</a>).</li>
+<li>The lowered margin locks on the second object (about −16150 to −16190)
+in 2 of 42 presses; stock did not in 27 (Fisher p ≈ 0.5, not significant
+yet). Stock with forced grade 0 does it in 5 of 12.</li>
+</ul>
+<h3 id="opt-no29">NO29 in the 29 fps light</h3>
+<p>Same scene with the ND filter in (stock drops to 29 fps; Y per frame
+about 740 000 at 29 fps, so brighter than the afternoon's dim scene). Card
+repaired and rewritten first (<code>FORCEG0.BIN</code> held foreign data
+again; the file system itself checked clean). Two shuffled sessions,
+<code>work/af-logs/remote-ndin-no29</code> and <code>remote-ndin-no29b</code>:</p>
+<table>
+<thead><tr><th>Arm</th><th>Presses</th><th>fps</th><th>Median time (IQR)</th><th>Position error median / max</th></tr></thead>
+<tbody>
+<tr><td>STOCK</td><td>24</td><td>29</td><td>575 ms (522–609)</td><td>11 / 27</td></tr>
+<tr><td>kb 0.32, exponent 0.875, falls 2</td><td>24</td><td>29</td><td>555 ms (523–614)</td><td>11 / 27</td></tr>
+<tr><td><strong>the same + NO29</strong></td><td>24</td><td>49</td><td><strong>440 ms (419–511)</strong></td><td>11 / 50</td></tr>
+<tr><td>NO29 alone (stock margin)</td><td>12</td><td>49</td><td>571 ms</td><td>35 / 58</td></tr>
+<tr><td>FORCEG0</td><td>12</td><td>29</td><td>1695 ms</td><td>108 / 171, one wrong</td></tr>
+<tr><td>margin + NO29 + FORCEG0</td><td>12</td><td>49</td><td>657 ms</td><td>79 / 170, one wrong</td></tr>
+</tbody></table>
+<p>All presses locked. Margin + NO29 against stock: −135 ms (−23 %),
+permutation test p &lt; 0.001; against the margin alone p = 0.0001. NO29 needs
+the lower margin: alone it samples twice as many frames (shorter
+integration, more noise) and gains nothing. NO29 sets the level byte itself,
+so the trace and the press record show 49 fps, unlike FORCE49.</p>
+<h3 id="opt-obj2">Second-object check</h3>
+<p>Same bright scene, ND out, 100 fps, Y about 356 000; 50 shuffled pairs of
+STOCK and margin + NO29 (<code>work/af-logs/remote-obj2</code>). All 100
+locked, none wrong; median 337 ms (stock) and 302 ms. Locks more than 100
+pulses from −16294 (the second object, −16160 to −16200): 0 of 48 stock, 1
+of 46 candidate (presses with a read-back position). Pooled with
+<a href="#opt-bright">the two earlier bright sessions</a> (without forced
+grade 0): stock 0 of 73, lowered margin 3 of 85, about 3.5 %; one-sided
+Fisher p = 0.15. On the main object stock lands mostly at −16280…−16261,
+the candidate about half at −16320…−16301: about 30 pulses nearer, within
+the spread seen before; which is sharper was not measured.</p>
+<h3 id="opt-dim">Dim light</h3>
+<p>Same scene, light dimmed by the user (ND out: Y about 280 000 at 29 fps;
+ND in: about 85 000 at 29 fps, 36 000 at 49 fps). Shuffled groups,
+<code>work/af-logs/remote-dim2</code> (ND blocks; stopped after 24 presses
+when the relay stalled) and <code>remote-dim-ndin2</code> (ND in):</p>
+<table>
+<thead><tr><th>ND</th><th>Arm</th><th>Presses</th><th>Failed / wrong</th><th>Median time (IQR)</th><th>Position error median / max</th></tr></thead>
+<tbody>
+<tr><td>out</td><td>STOCK</td><td>4</td><td>0 / 0</td><td>620 ms</td><td>4 / 12</td></tr>
+<tr><td>out</td><td>margin</td><td>4</td><td>0 / 0</td><td>619 ms</td><td>4 / 4</td></tr>
+<tr><td>out</td><td>margin + NO29</td><td>4</td><td>0 / 0</td><td>479 ms</td><td>4 / 11</td></tr>
+<tr><td>in</td><td>STOCK</td><td>12</td><td>0 / 1 (second object, 1483 ms)</td><td>676 ms (601–757)</td><td>4 / 20</td></tr>
+<tr><td>in</td><td>margin</td><td>12</td><td>0 / 0</td><td>679 ms (667–719)</td><td>4 / 12</td></tr>
+<tr><td>in</td><td><strong>margin + NO29</strong></td><td>12</td><td>0 / 0</td><td><strong>520 ms (501–634)</strong></td><td>12 / 51</td></tr>
+</tbody></table>
+<p>ND in, margin + NO29 against stock and against the margin alone:
+permutation p = 0.0007 each. The position spread at 49 fps is wider (max 51
+pulses against 12–20). In the darkest setting tried (Y about 13 000 at 29
+fps, <code>work/af-logs/remote-dark</code>) every press of both stock and the
+candidate failed; the candidate claimed no lock (8 presses).</p>
+<p><strong>Relay.</strong> Stall 5 (19:10, ND in → out): unlike stall 4 the
+heartbeat kept coming, so the RTOS loop ran but did not act on new
+<code>RELAY.TTL</code> files (seq 9–11). It is consistent with the RTOS
+reading a stale copy, for example through a cached directory entry to the
+clusters the <code>mv</code> released. Untested fix: write the file in place
+at a fixed size instead of replacing it.</p>
+<p><strong>Not shown yet.</strong> Study 3 and the confirmation ran with ND
+out only. 49 fps with the lowered margin in ND-in light has 3 presses so far.
+No setting has been validated for false locks in the no-signal scene or on a
+bright weak target, and FORCE49 also forces 49 fps in bright light, where
+stock uses 200 fps: a usable patch must change the limit, not force the
+level. The light drifted about 20 % darker over the afternoon; the stock
+controls track that.</p>
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>

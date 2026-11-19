@@ -15,7 +15,7 @@ The procedure, what the camera writes and how to recover are in
 docs/af-debug-log.html. GR IIIx 1.60 only. Nothing here is firmware: the
 camera writes nothing to flash, and the log setting is lost at power-off.
 """
-import argparse, sys
+import argparse, re, sys
 from pathlib import Path
 
 # ModeSet file (ModeSetOperation.cpp): the camera reads C:\%08ld.%03ld, the
@@ -64,7 +64,17 @@ ARM_CSV = "sendln 'CAF_Debug SaveDebugFile on'"
 CAF_POINTER = 0x5506c874
 
 
-def startup_ttl(flags):
+def ttl_check(lines):
+    """A counter must not share its name with a label (smoke checks 1-4)."""
+    labels = {l[1:] for l in lines if l.startswith(":")}
+    assigned = {m.group(1) for l in lines for m in [re.match(r"(\w+) = ", l)] if m}
+    clash = labels & assigned
+    if clash:
+        sys.exit(f"script assigns to label name(s): {', '.join(sorted(clash))}")
+    return lines
+
+
+def startup_ttl(flags, auto=None):
     # The 3 s wait comes first: GRKit found that the RTOS builds its host
     # command tables after the script starts, and lcmd_resp faults until they
     # exist (crates/grkit-core/src/runtime/loader.rs). GRKit waits 2 s.
@@ -87,6 +97,12 @@ def startup_ttl(flags):
         "goto done",
         ":probe",
         "sendln 'lcmd sh /media/storage1/SCRIPT/AFDBG/PATCH.SH'",
+    ]
+    if auto:
+        lines += auto_ttl_lines(auto)
+        ttl_check(lines)
+        return ("\r\n".join(lines) + "\r\n").encode("ascii")
+    lines += [
         "ticks = 0",
         "countdown = 0",
         ":tick",
@@ -106,6 +122,298 @@ def startup_ttl(flags):
         "end",
     ]
     return ("\r\n".join(lines) + "\r\n").encode("ascii")
+
+
+# Automated runs (--auto): the script presses the shutter itself, so the user
+# only changes the light. Engineering-shell commands in the 1.60 image:
+#   SW_sws 0|1  (0x5303bda8) "emulate SwS switch" = half-press. It calls
+#               0x536a7474(key 0, state), which stores the state in the
+#               per-key override table (+0xac) that the normal key poll reads,
+#               so the press takes the same UI path as the real button.
+#   SW_swr 0|1  (0x5303be6c) the same for SwR, the full press (key 1).
+#   camctl_set_still_focus_mode autoarea|zone|select|pin|follow|cont|mf|snap|inf
+#               (0x53010470): used to park the lens at infinity (or the snap
+#               distance) before every run, like the hand protocol's "point
+#               at the far target first".
+#   Af_Led_On / Af_Led_Off (0x53045a80 / 0x53045aa8, no arguments): the AF
+#               lamp blinks while the user should change the light.
+# Per run: defocus, focus mode back, ARM.SH (applies or restores the patch for
+# this run and logs it to AUTO.LOG), re-arm the CSV, half-press for hold_ms,
+# release, wait gap_ms. Light blocks of `per_block` runs with a blinking pause
+# between them. A/B order: AUTO.SEQ, one arm per line, balanced in blocks of 4.
+AUTO_DIR = "/media/storage1/SCRIPT/AFDBG"
+AUTO_TARGET_MODES = ("autoarea", "zone", "select", "pin", "follow", "cont")
+AUTO_DEFOCUS_MODES = ("none", "inf", "snap")
+# Smoke checks 1-4 (2026-11-17, work/af-logs/auto-smoke1..4): every script
+# stopped silently at "run = 0" or "bare = 0", each a counter with the same
+# name as a label (":run", ":bare"); loops whose counter and label differ
+# (tries/:ready) ran. As in Tera Term's macro language, a label seems to
+# occupy the name. The trigger commands after those lines were never sent, so
+# SW_sws, camctl_set_still_focus_mode and camctl_af are all still untested.
+# ttl_check() refuses a script that assigns to a label name.
+AUTO_TRIGGERS = ("sw", "camctl_af")
+AUTO_DEFAULTS = dict(mode="select", defocus="inf", trigger="sw", blocks=3, per_block=24,
+                     pause_s=30, hold_ms=2500, gap_ms=1500, full=False, patch=None, seed=1, arms=None)
+AUTO_SMOKE = dict(AUTO_DEFAULTS, blocks=1, per_block=5, steps=True, bare=3, probe_get=True)
+# USB / HTTP probe: PROBE.SH stages after CAF.OK, then 3 normal presses.
+AUTO_PROBE = dict(AUTO_DEFAULTS, blocks=1, per_block=3, probe_sh=True)
+# Remote mode: no scripted presses. After CAF.OK the card starts a small web
+# endpoint (busybox httpd + CGI) for the Mac (tools/af_remote.py); the Mac
+# presses through the camera's own API (POST /v1/lens/focus, the same AF as a
+# half-press, usb-probe4) over the camera's Wi-Fi.
+AUTO_REMOTE = dict(AUTO_DEFAULTS, blocks=1, per_block=1, remote=True, remote_min=45)
+REMOTE_PORT = 8080
+# The smoke card (1) presses `bare` times with the trigger alone before any
+# focus-mode command and (2) logs a step after each command
+# (STEP_<label>.SH: uptime and label to STEP.LOG, then sync, so a forced
+# power-off keeps what was written).
+AUTO_DEFOCUS_MS, AUTO_SETTLE_MS = 800, 700
+# After ARM.SH, a fixed wait instead of a handshake file: Linux cannot
+# recreate a file the RTOS deleted (A/B session 1, work/af-logs/auto-ab1:
+# "can't create ARM.OK: Input/output error" on every run but the first, like
+# mv). ARM.SH logs its arm before that line and did so 1.3 s after the call.
+AUTO_ARM_WAIT_MS = 2500       # ARM.SH: 1.3 s with one patch; up to 7 restores now
+AUTO_READY_WAIT_MS = 10000
+
+
+def auto_arm_list(auto):
+    """The session's arms: --auto-arms, or STOCK and the --auto-patch patch,
+    or ['-'] (no patch, smoke check)."""
+    if auto.get("arms"):
+        return list(auto["arms"])
+    if auto.get("patch"):
+        return [auto["patch"], "STOCK"]
+    return ["-"]
+
+
+def auto_patch_names(auto):
+    """Every patch any arm of the session uses, in a fixed order."""
+    names = []
+    for arm in auto_arm_list(auto):
+        for p in arm.split("+"):
+            if p not in ("STOCK", "-") and p not in names:
+                names.append(p)
+    return names
+
+
+def auto_seq(auto):
+    """Arm per run. Each group holds every arm once in shuffled order, so the
+    arms alternate closely and share the light of a block evenly."""
+    import random
+    arms = auto_arm_list(auto)
+    n = auto["blocks"] * auto["per_block"]
+    if arms == ["-"]:
+        return ["-"] * n
+    rng, seq = random.Random(auto["seed"]), []
+    while len(seq) < n:
+        group = list(arms)
+        rng.shuffle(group)
+        seq += group
+    return seq[:n]
+
+
+def auto_session_s(auto):
+    """Upper estimate of the session length from power-on, for the tracer."""
+    if auto.get("remote"):
+        return 60 + auto["remote_min"] * 60
+    per_run = (AUTO_DEFOCUS_MS + AUTO_SETTLE_MS + AUTO_ARM_WAIT_MS + auto["hold_ms"] + auto["gap_ms"]
+               + (1000 if auto["full"] else 0)) / 1000
+    runs = auto["blocks"] * auto["per_block"] + 1
+    return 60 + (sum(w for _, w in PROBE_STAGES) / 1000 if auto.get("probe_sh") else 0) + AUTO_READY_WAIT_MS / 1000 + runs * per_run + (auto["blocks"] - 1) * auto["pause_s"] + 30
+
+
+# Step labels: STEP_<label>.SH logs "<uptime> <label>" after that command.
+AUTO_STEP_LABELS = ("START", "READY", "WAITED", "GET", "AFON", "AFOFF", "DEFOCUS", "MODE", "ARMOK", "END")
+
+
+def auto_ttl_lines(auto):
+    d = "C:\\SCRIPT\\AFDBG"
+
+    def mark(label):
+        if not auto.get("steps"):
+            return []
+        assert label in AUTO_STEP_LABELS
+        return [f"sendln 'lcmd sh {AUTO_DIR}/STEP_{label}.SH'", "mpause 300"]
+
+    on, off = (("camctl_af cam start", "camctl_af cam stop") if auto["trigger"] == "camctl_af"
+               else ("SW_sws 1", "SW_sws 0"))
+    press = [
+        f"sendln '{on}'",
+        *mark("AFON"),
+        f"mpause {auto['hold_ms']}",
+    ]
+    if auto["full"]:
+        press += ["sendln 'SW_swr 1'", "mpause 300", "sendln 'SW_swr 0'"]
+    press += [f"sendln '{off}'", *mark("AFOFF"),
+              f"mpause {auto['gap_ms'] + (700 if auto['full'] else 0)}"]
+    defocus = [] if auto["defocus"] == "none" else [
+        f"sendln 'camctl_set_still_focus_mode {auto['defocus']}'",
+        *mark("DEFOCUS"),
+        f"mpause {AUTO_DEFOCUS_MS}",
+        f"sendln 'camctl_set_still_focus_mode {auto['mode']}'",
+        *mark("MODE"),
+        f"mpause {AUTO_SETTLE_MS}",
+    ]
+    # Wait for CAF.OK (MEM.SH every 2 s, at most 60 s), then
+    # AUTO_READY_WAIT_MS more, before the first press: the hand protocol
+    # always waited 15 s, and the CSV can only be armed after CAF.OK.
+    ready = [
+        "tries = 0",
+        ":ready",
+        f"filesearch '{d}\\CAF.OK'",
+        "if result != 0 goto isready",
+        f"sendln 'lcmd sh {AUTO_DIR}/MEM.SH'",
+        "mpause 2000",
+        "tries = tries + 1",
+        "if tries < 30 goto ready",
+        ":isready",
+        *mark("READY"),
+        f"mpause {AUTO_READY_WAIT_MS}",
+        *mark("WAITED"),
+    ]
+    if auto.get("probe_get"):
+        # A read-only camctl command first: does any camctl call return?
+        ready += ["sendln 'camctl_get_focus_state'", *mark("GET")]
+    if auto.get("probe_sh"):
+        for stage, wait in PROBE_STAGES:
+            ready += [f"sendln 'lcmd sh {AUTO_DIR}/PROBE.SH {stage}'", f"mpause {wait}"]
+    bare = []
+    if auto.get("bare"):
+        # Half-presses with no defocus, no arm and no CSV: does SW_sws alone
+        # start AF?
+        bare = [*mark("START"), "nbare = 0", ":bare", *press,
+                "nbare = nbare + 1", f"if nbare < {auto['bare']} goto bare"]
+    if auto.get("remote"):
+        # The endpoint daemonises itself; if it is not running 4 s later
+        # (HTTPD.DEAD, which REMOTE.SH removes at start), start it in the
+        # foreground instead. Then two lamp flashes: ready for the Mac.
+        return [
+            *ready,
+            f"sendln 'lcmd sh {AUTO_DIR}/REMOTE.SH start'",
+            "mpause 4000",
+            f"sendln 'lcmd sh {AUTO_DIR}/REMOTE.SH check'",
+            "mpause 2000",
+            f"filesearch '{d}\\HTTPD.DEAD'",
+            "if result = 0 goto served",
+            f"sendln 'lcmd sh {AUTO_DIR}/REMOTE.SH fg'",
+            "mpause 2000",
+            ":served",
+            "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'", "mpause 500",
+            "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'",
+            # Shell relay: the Mac's shell CGI writes RELAY.TTL (a sequence
+            # number, engineering-shell lines from an allowlist, an ack through
+            # RACK.SH); this loop includes it, and the sequence guard inside
+            # skips a file it has already run. Every 50 rounds (about 20 s) a
+            # heartbeat through RACK.SH hb shows that the loop still runs
+            # (status relay_hb), to tell a dead loop from a file it misses.
+            "rdone = 0",
+            "rn = 0",
+            ":relay",
+            f"filesearch '{d}\\RELAY.TTL'",
+            "if result = 0 goto rwait",
+            f"include '{d}\\RELAY.TTL'",
+            ":rwait",
+            "mpause 400",
+            "rn = rn + 1",
+            "if rn < 50 goto relay",
+            "rn = 0",
+            f"sendln 'lcmd sh {AUTO_DIR}/RACK.SH hb'",
+            "goto relay",
+        ]
+    lines = [
+        *ready,
+        *bare,
+        "nrun = 0",
+        "inblock = 0",
+        "block = 0",
+        ":run",
+        *defocus,
+        # ARM.SH sets the arm of this run; wait so the patch state never
+        # changes during an AF run.
+        f"sendln 'lcmd sh {AUTO_DIR}/ARM.SH'",
+        f"mpause {AUTO_ARM_WAIT_MS}",
+        *mark("ARMOK"),
+        # Until MEMRD.BIN has seen the contrast AF object (CAF.OK) the CSV
+        # cannot be armed; take a snapshot instead, which writes CAF.OK.
+        f"filesearch '{d}\\CAF.OK'",
+        "if result != 0 goto csv",
+        f"sendln 'lcmd sh {AUTO_DIR}/MEM.SH'",
+        "goto press",
+        ":csv",
+        ARM_CSV,
+        ":press",
+        *press,
+        "nrun = nrun + 1",
+        "inblock = inblock + 1",
+        f"if inblock < {auto['per_block']} goto run",
+        "inblock = 0",
+        "block = block + 1",
+        f"if block >= {auto['blocks']} goto finish",
+        # Blink the AF lamp for pause_s: change the light now.
+        "blinks = 0",
+        ":blink",
+        "sendln 'Af_Led_On'",
+        "mpause 500",
+        "sendln 'Af_Led_Off'",
+        "mpause 500",
+        "blinks = blinks + 1",
+        f"if blinks < {auto['pause_s']} goto blink",
+        "goto run",
+        ":finish",
+        # One more AF start writes the last run's CSV; the lamp stays on 10 s
+        # to say the session is over.
+        ARM_CSV,
+        *press,
+        "sendln 'Af_Led_On'",
+        *mark("END"),
+        "mpause 10000",
+        "sendln 'Af_Led_Off'",
+        ":done",
+        "end",
+    ]
+    return lines
+
+
+def arm_sh(auto):
+    """ARM.SH, once per run: next run number from RUN.N, its arm from
+    AUTO.SEQ. First every patch of the session is restored (exit 0 restored,
+    6 already stock, 5 = another variant holds the shared margin words, which
+    its own restore then clears; anything else is logged as R<patch>:<code>),
+    then the arm's patches (names joined by '+') are applied. Logs
+    'run arm statuses t_start t_end block' to AUTO.LOG (statuses: the apply
+    exits joined by ',', '-' for none). PATCH.SH resets RUN.N at power-on
+    (from Linux: Linux cannot recreate a file the RTOS deleted); run 1 moves
+    an older AUTO.LOG to the end of AUTO.PREV."""
+    patches = " ".join(auto_patch_names(auto))
+    return (
+        f"d={AUTO_DIR}\n"
+        "exec 2>>$d/MEM.LOG\n"
+        "read t0 _ </proc/uptime\n"
+        "n=$(cat $d/RUN.N 2>/dev/null); n=$((${n:-0} + 1)); echo $n >$d/RUN.N\n"
+        'if [ $n = 1 ] && [ -f $d/AUTO.LOG ]; then cat $d/AUTO.LOG >>$d/AUTO.PREV; rm -f $d/AUTO.LOG; fi\n'
+        "set -- $(cat $d/AUTO.SEQ)\n"
+        'if [ $n -le $# ]; then shift $((n - 1)); a=$1; else a=-; fi\n'
+        "s=\n"
+        + (f"for p in {patches}; do $d/$p.BIN restore; r=$?; "
+           'case $r in 0|5|6) ;; *) s="${s}R$p:$r," ;; esac; done\n' if patches else "")
+        + 'if [ "$a" != STOCK ] && [ "$a" != - ]; then\n'
+        " o=$IFS; IFS=+; for p in $a; do IFS=$o; $d/$p.BIN; s=\"$s$?,\"; IFS=+; done; IFS=$o\n"
+        "fi\n"
+        's=${s%,}; s=${s:--}\n'
+        "read t _ </proc/uptime\n"
+        f'echo "$n $a $s $t0 $t $(( (n - 1) / {auto["per_block"]} ))" >>$d/AUTO.LOG\n'
+        "exit 0\n"
+    ).encode("ascii")
+
+
+def step_sh(label):
+    return (
+        f"d={AUTO_DIR}\n"
+        "read t _ </proc/uptime\n"
+        f'echo "$t {label}" >>$d/STEP.LOG\n'
+        "sync\n"
+        "exit 0\n"
+    ).encode("ascii")
 
 
 def mark_sh(flags):
@@ -232,6 +540,123 @@ def memrd_bin():
     return arm_elf(MEMRD_S.replace("{page:#x}", f"{PROBE_PAGE // 4096:#x}")
                    .replace("{size}", str(PROBE_PAGES * 4096))
                    .replace("{caf_offset}", f"{CAF_POINTER - PROBE_PAGE:#x}"))
+
+
+# PEEK.BIN ADDR COUNT (both hex, no prefix): open /dev/mem read-only and write
+# COUNT 32-bit words from ADDR to stdout, raw. Only word-aligned addresses in
+# 0x53000000..0x5fefffff (RTOS image and heap) and at most 0x800 words, so a
+# typo cannot read device registers. Exit status 0 done, 1 open, 2 mmap,
+# 4 short write, 8 bad arguments, 9 out of range. For the remote endpoint.
+PEEK_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    ldr     r0, [sp]                @ argc
+    cmp     r0, #3
+    movne   r0, #8
+    bne     quit
+    ldr     r0, [sp, #8]            @ argv[1]
+    adr     lr, got1                @ no bl: it leaves a relocation
+    b       hex
+got1:
+    cmp     r1, #0
+    moveq   r0, #8
+    beq     quit
+    mov     r6, r0                  @ address
+    ldr     r0, [sp, #12]           @ argv[2]
+    adr     lr, got2
+    b       hex
+got2:
+    cmp     r1, #0
+    moveq   r0, #8
+    beq     quit
+    mov     r8, r0                  @ word count
+    cmp     r8, #0
+    moveq   r0, #9
+    beq     quit
+    cmp     r8, #0x800
+    movhi   r0, #9
+    bhi     quit
+    tst     r6, #3
+    movne   r0, #9
+    bne     quit
+    ldr     r1, =0x53000000
+    cmp     r6, r1
+    movlo   r0, #9
+    blo     quit
+    ldr     r1, =0x5ff00000
+    cmp     r6, r1
+    movhs   r0, #9
+    bhs     quit
+    adr     r0, dev
+    ldr     r1, =0x101000           @ O_RDONLY | O_SYNC
+    mov     r7, #5                  @ open
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0
+    mov     r0, #0
+    mov     r1, #16384              @ offset < 4096 plus at most 8192 bytes
+    mov     r2, #1                  @ PROT_READ
+    mov     r3, #1                  @ MAP_SHARED
+    lsr     r5, r6, #12
+    mov     r7, #192                @ mmap2
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, =0xfff
+    and     r1, r6, r1
+    add     r1, r0, r1
+    mov     r0, #1                  @ stdout
+    lsl     r2, r8, #2
+    mov     r9, r2
+    mov     r7, #4                  @ write
+    svc     #0
+    cmp     r0, r9
+    movne   r0, #4
+    moveq   r0, #0
+quit:
+    mov     r7, #1                  @ exit
+    svc     #0
+hex:                                @ r0 string -> r0 value, r1 = digits (0 = bad)
+    mov     r2, #0
+    mov     r1, #0
+1:
+    ldrb    r3, [r0], #1
+    cmp     r3, #0
+    beq     3f
+    sub     r12, r3, #48            @ '0'
+    cmp     r12, #10
+    blo     2f
+    orr     r12, r3, #0x20
+    sub     r12, r12, #97           @ 'a'
+    cmp     r12, #6
+    bhs     4f
+    add     r12, r12, #10
+2:
+    add     r1, r1, #1
+    cmp     r1, #8
+    bhi     4f
+    orr     r2, r12, r2, lsl #4
+    b       1b
+3:
+    mov     r0, r2
+    bx      lr
+4:
+    mov     r1, #0
+    bx      lr
+dev:
+    .asciz  "/dev/mem"
+    .balign 4
+    .ltorg
+"""
+
+
+def peek_bin():
+    return arm_elf(PEEK_S)
 
 
 def arm_elf(source):
@@ -698,6 +1123,147 @@ SCALE75_SITES = tuple(zip(range(0x5340C5F0, 0x5340C618, 4), (
     0x8EB17AC0, 0x8EF16AC7, 0x8E270A26, 0x8A000005, 0xEEF57A00,
     0xEEB40AE7, 0xEEF1FA10, 0x4EB00A67, 0xEEB10AC0, 0xE1A00000)))
 
+# X875: x^0.875 (x / x^0.125: three vsqrt and a vdiv), a milder step than
+# SCALE75; same ten words, same bright-light branch:
+#   vsqrthi s14, s0; vsqrthi s14, s14; vsqrthi s14, s14; vdivhi s0, s0, s14
+#   bhi 0x5340c618; vmov s15, #0.25; vcmpe s0, s15; vmrs; vmovmi s0, s15
+#   vsqrt s0, s0
+# Scale 6 -> 4.8, 13 -> 9.4, 27 -> 17.9, 59 -> 35.
+X875_SITES = tuple(zip(range(0x5340C5F0, 0x5340C618, 4), (w for _, w, _ in SCALE75_SITES), (
+    0x8EB17AC0, 0x8EB17AC7, 0x8EB17AC7, 0x8E800A07, 0x8A000004,
+    0xEEF57A00, 0xEEB40AE7, 0xEEF1FA10, 0x4EB00A67, 0xEEB10AC0)))
+
+# HALFB (data only): the per-mode base b of 0x5340c590 (six floats at
+# 0x53c16bb0: 569.22, 569.22, 574.5, 597.85, 563.3, 563.3) halved. Below b/2
+# the scale is half of stock (6 -> 3, 13 -> 6.5, 27 -> 13.5, 59 -> 29.5);
+# between b/2 and b it is sqrt(b/2y) (0.7..1) instead of b/y (1..2); above b
+# it is 0.7 x stock, down to the same 0.5 floor. Against SCALE75 it eases mild
+# dim light more and deep dim light less.
+HALFB_SITES = (
+    (0x53C16BB0, 0x440E4E14, 0x438E4E14),
+    (0x53C16BB4, 0x440E4E14, 0x438E4E14),
+    (0x53C16BB8, 0x440FA000, 0x438FA000),
+    (0x53C16BBC, 0x44157666, 0x43957666),
+    (0x53C16BC0, 0x440CD333, 0x438CD333),
+    (0x53C16BC4, 0x440CD333, 0x438CD333),
+)
+
+# FALLS2 (data only): the detector accepts a peak when the falling run after
+# it has reached N samples and the fall exceeds T (0x5340dcc0..0x5340dd00:
+# N = [0x53c16cc0] = 3, the "stops exactly 3 samples after the peak" of the
+# CSVs). 2 accepts one frame earlier (34 ms at 29 fps) and needs a shorter
+# run of falls in noisy dim light. The fall must still exceed T.
+FALLS2_SITES = (
+    (0x53C16CC0, 0x00000003, 0x00000002),
+)
+
+# RISE10 / RISE05 (data only): the absolute floor of the detector threshold.
+# 0x5340c3c4 sets +0x28 (and the copies +0x2c, +0x30) from the per-mode table
+# 0x53c16d14 (8 bytes per mode; the first float unless +0x22 is set). AF-S
+# runs in mode 0, where it is 0.02 (x 0.25 = 0.005 when +0xac is set). A peak
+# counts when its rise exceeds +0x28 + T (T = +0x4c x +0x80), so at the edge
+# of dim light, where T is only about 0.005, the floor decides: the first
+# sweep starts about 4 samples before the peak and rises only 0.003-0.021,
+# so it is rejected, and the camera turns and accepts on the way back
+# (remote-nd2: 37 of 37 first sweeps). The table is read only there.
+RISE10_SITES = (
+    (0x53C16D14, 0x3CA3D70A, 0x3C23D70A),   # 0.02 -> 0.01
+)
+RISE05_SITES = (
+    (0x53C16D14, 0x3CA3D70A, 0x3BA3D70A),   # 0.02 -> 0.005
+)
+
+# FORCEM0 (test harness, not a fix): the detector mode for every AF area
+# comes from the bytes at CAF +0x43c1 + area, loaded in 0x533f893c for the
+# horizontal (0x533f8a34) and vertical (0x533f8ad4) detector setups. In dim
+# light the camera sets them to 0 (rise floor 0.02, its own margin factor and
+# base); otherwise 1 (floor 0.001). The writer is not decoded. Loading 0
+# instead reproduces the dim-light mode in any light, so the rise floor can
+# be tested without chasing the light level.
+FORCEM0_SITES = (
+    (0x533F8A34, 0xE5D9A000, 0xE3A0A000),   # ldrb sl, [sb] -> mov sl, #0
+    (0x533F8AD4, 0xE5D91000, 0xE3A01000),   # ldrb r1, [sb] -> mov r1, #0
+)
+
+# FORCEG0 (test harness, not a fix): 0x533f85dc(obj, grade) writes the phase
+# decision grade of every AF area (CAF +0x43c1 + area, the [DicisionGrade] of
+# the CSV). 0x533f88c4 gives 0 when the phase result is not usable or a level
+# at +0x41e4/+0x41e8 is at most 0x20000, else 1 (2 on search path 2); the
+# search start 0x53400e10 sets 1 in several branches; the turn in 0x53404b28
+# (0x5340545c) sets 0 before the return pass. Grade 0 makes the contrast
+# detectors use mode 0 (rise floor 0.02 instead of 0.001). Forcing the grade
+# to 0 at the setter reproduces the dim-light case in any light, for testing
+# RISE10/RISE05 against it. Unlike FORCEM0 it also changes everything else
+# that reads the grade.
+FORCEG0_SITES = (
+    (0x533F85EC, 0xE1A05001, 0xE3A05000),   # mov r5, r1 -> mov r5, #0
+)
+
+# Phase-guided start of the first sweep (path 0). 0x534064e0 pre-moves the
+# lens toward the phase-predicted peak but stops OFFSET pulses short of it:
+# OFFSET = max(clamp(X, 2s, 4s), min(4s, 2 FULL)) plus a correction when the
+# defocus is large (s = drive step from 0x533fc0c0; the firmware's own debug
+# text calls these "OFFSET (FULL/AVE/LIMIT/CORRECTION)"). The window still
+# ends at a fixed distance past the predicted peak (0x5340523c), so a larger
+# OFFSET lengthens only the rising side of the first sweep. In dim light the
+# first sweep starts about 4 samples before the peak, too few for the rise to
+# clear the threshold.
+OFFS4_SITES = (
+    (0x534065D4, 0xE1A0108A, 0xE1A0110A),   # lower clamp 2s -> 4s
+)
+OFFS2_SITES = (
+    (0x534065F8, 0xA1A03002, 0xA1A03082),   # OFFSET x2 (movge r3,r2 -> lslge r3,r2,#1)
+    (0x534065FC, 0xB1A03000, 0xB1A03080),   # (movlt r3,r0 -> lsllt r3,r0,#1)
+)
+
+# Near-stop guard candidates. In a scene without a real peak, stock sometimes
+# reports a lock at the near stop, on area 1 with no rise-then-fall in area 0.
+# Two code paths can do that:
+# NOFB: the second chance after a failed path-1 pass (0x53404878 re-runs the
+#   pass decision as path 2, then calls 0x53400c50). 0x53400c50 picks the
+#   first area, starting at area 1, whose state byte +0x14bb8+area is 3 and
+#   sets it to 4 (lens placed by 0x5340d838, not by the peak fit). With the
+#   patch it always returns 0: that pass ends 0x40 -> 0x80 (fail) instead.
+#   Also used at the end of the path-2 return pass (0x53405120).
+# NOFO: the fall-only accept 0x5340afc0 (via 0x5340ced4 in the detector
+#   wrapper 0x5340e0b8) returns 1 with no rise test (a fall of floor + 2T
+#   10-20 samples after the maximum). With the patch it never accepts. Meant
+#   for subjects at the near limit, probably: those would fail instead.
+NOFB_SITES = (
+    (0x53400D74, 0xE0872004, 0xEAFFFFFC),   # add r2,r7,r4 -> b 0x53400d6c (return 0)
+)
+NOFO_SITES = (
+    (0x5340B15C, 0xE3A00001, 0xE3A00000),   # mov r0,#1 -> mov r0,#0
+)
+
+# Patches a session can switch per run (--auto-arms). The margin variants
+# share the words at 0x5340c5f0, the rise floors the word at 0x53c16d14, so
+# only one of each group can be on at a time.
+AUTO_PATCHES = {"SCALE75": None, "SQRTNS": None, "X875": None, "HALFB": None, "FALLS2": None,
+                "FORCE49": None, "FORCE100": None, "RISE10": None, "RISE05": None,
+                "FORCEM0": None, "FORCEG0": None, "OFFS4": None, "OFFS2": None, "NOFB": None, "NOFO": None,
+                "NO29": None}
+AUTO_EXCLUSIVE = ("SCALE75", "SQRTNS", "X875")
+AUTO_EXCLUSIVE_GROUPS = (AUTO_EXCLUSIVE, ("RISE10", "RISE05"))
+
+
+def arm_conflict(parts):
+    """The first exclusive group an arm uses twice, or None."""
+    for group in AUTO_EXCLUSIVE_GROUPS:
+        if sum(p in group for p in parts) > 1:
+            return group
+    return None
+
+# NO29: 0x533f4a70 picks the drive level from three values at [CAF+0xfcc]
+# (each above 0x7ffff lowers it; in dim light all three sit at about 0x80400,
+# the gain cap). Its level-3 store "movhi r3, #3" becomes #2, so light that
+# would give 29 fps gives 49 fps; brighter light (levels 0-2) is unchanged.
+# Live 2026-11-19: level stays 1 (100 fps) in a bright scene. Unlike FORCE49
+# the level byte itself changes, so the trace shows the rate.
+# 2026-11-19: with the ND filter in it gives 49 fps; with kb 0.32 it cut a
+# press from 575 to 440 ms (docs af-debug-log.html#opt-no29).
+NO29_SITES = ((0x533F4B10, 0x83A03003, 0x83A03002),)
+
 # The same five sites forced to drive level 2 (49 fps) instead of 1 (100 fps):
 # for testing the faster sampling with the milder margin (SCALE75). Like
 # FORCE100 it also forces the level in bright light, where stock uses 200 fps.
@@ -1052,7 +1618,7 @@ offsets:
 """
 
 
-def trace_bin():
+def trace_bin(records=TRACE_RECORDS):
     offsets = "\n".join(f"    .word   {o:#x}" for o in TRACE_OFFSETS)
     rec = 8 + 4 * len(TRACE_OFFSETS) + 16 * TRACE_ARRAY_WORDS
     return arm_elf(TRACE_S.replace("{map_len}", f"{TRACE_MAP:#x}")
@@ -1061,7 +1627,7 @@ def trace_bin():
                    .replace("{map_page}", f"{(CAF_OBJECT & ~0xfff) >> 12:#x}")
                    .replace("{obj_offset}", f"{CAF_OBJECT & 0xfff:#x}")
                    .replace("{chunk_bytes}", f"{rec * TRACE_CHUNK:#x}")
-                   .replace("{records}", str(TRACE_RECORDS))
+                   .replace("{records}", str(records))
                    .replace("{nfields}", str(len(TRACE_OFFSETS)))
                    .replace("{chunk}", str(TRACE_CHUNK))
                    .replace("{period_ns}", str(TRACE_PERIOD_NS))
@@ -1166,23 +1732,76 @@ def trace_passes(path):
         prev = (t, w)
 
 
-def trace_summary(path):
-    """One line per AF run: start, time from half-press to done, the
-    pre-move (action 2 to the first action 4), passes, outcome (lock = action
-    8, fail = 64, abort = released before a result), the final lens position
-    (+0xc434 at action 128; about -15,900 is the near stop), the scale
-    +0x80 and the area-0 brightness (median during the search, a light level
-    that does not depend on a patch). Then totals."""
-    import statistics, struct
+RISE_FLOOR = 0.02   # +0x28 in AF-S (mode 0), table 0x53c16d14
+
+
+def pass_features(path):
+    """One dict per pass (action 4 to anything else) of a v3 trace, area 0:
+    path, next action and area index, sample count, peak index, the rise of
+    the rising run that ends at the peak, the fall after it, samples after
+    the peak, the margin T = +0x4c x +0x80, and the drive level."""
+    import struct
+    records = trace_records(path)
+    n = len(TRACE_OFFSETS)
+    if len(records[0][1]) < n + 4 * TRACE_ARRAY_WORDS:
+        sys.exit(f"{path}: recorded without the detector arrays")
+    f32 = lambda x: struct.unpack("<f", struct.pack("<I", x))[0]
+    signed = lambda x: x - (1 << 32) if x >> 31 else x
+    out, prev = [], None
+    for t, w in records:
+        act = w[0] & 0xffff
+        if prev is not None and prev[1][0] & 0xffff == 4 and act != 4:
+            pt, pw = prev
+            count = min(pw[29], TRACE_ARRAY_WORDS)
+            val = [f32(x) for x in pw[n + TRACE_ARRAY_WORDS:][:count]]
+            if count > 2:
+                k = max(range(count), key=lambda i: val[i])
+                j = k
+                while j > 0 and val[j - 1] < val[j]:
+                    j -= 1
+                out.append(dict(t=pt, path=(pw[1] >> 16) & 0xff, act=act, area=signed(w[5]), n=pw[29],
+                                peak_i=k, run=k - j, rise=val[k] - val[j], fall=val[k] - min(val[k:]),
+                                after=count - 1 - k, T=f32(pw[21]) * f32(pw[22]),
+                                level=(pw[10] >> 16) & 0xff))
+        prev = (t, w)
+    return out
+
+
+def pass_table(path, floor=RISE_FLOOR):
+    """Print pass_features with the rise against floor + T (the rule that
+    decides at the edge of dim light) and whether the pass was accepted."""
+    t0 = None
+    for p in pass_features(path):
+        t0 = p["t"] if t0 is None else t0
+        acc = p["act"] in (8, 128)
+        need = floor + p["T"]
+        print(f"{p['t'] - t0:8.3f} path {p['path']} {'ACCEPT' if acc else 'reject'} (action {p['act']:3d}) "
+              f"n {p['n']:3d} peak@{p['peak_i']:2d} run {p['run']:2d} rise {p['rise']:.4f} "
+              f"{'>' if p['rise'] > need else '<'} {need:.4f} (floor+T)  fall {p['fall']:.4f}  "
+              f"T {p['T']:.4f}  after {p['after']:2d}  {AF_FPS.get(p['level'], '?')} fps")
+
+
+def trace_presses(path):
+    """One dict per AF run (half-press) in a TRACE.DAT: t (start, s), ms (half-press
+    to done, None if the trace ends first), pre (action 2 to the first action 4,
+    s), passes, outcome (lock = action 8, fail = 64, abort = released before a
+    result), final (lens position +0xc434 at action 128; about -15,900 is the
+    near stop), scale (+0x80 per sampling record) and y (area-0 brightness per
+    sampling record; both empty without contrast fields)."""
+    import struct
     f32 = lambda x: struct.unpack("<f", struct.pack("<I", x))[0]
     signed = lambda x: x - (1 << 32) if x >> 31 else x
     records = trace_records(path)
     has_contrast = len(records[0][1]) >= 29
-    runs, cur, last, t0 = [], None, None, records[0][0]
+    runs, cur, last = [], None, None
     for t, w in records:
         act = w[0] & 0xffff
-        if act == 2 and last in (1, None):
-            cur = {"t": t, "acts": [], "final": None, "scale": [], "y": []}
+        # A run starts with action 2 (pre-move), or straight with 4 (sampling)
+        # when the lens needs no pre-move (smoke check 5, run 4); a 4 at the
+        # first record is a run already under way when the trace began.
+        if (act == 2 and last in (1, None)) or (act == 4 and last == 1):
+            cur = {"t": t, "acts": [], "final": None, "scale": [], "y": [], "levels": [],
+                   "acc0": w[3] & 0xff, "c434": None, "modes": []}
             runs.append(cur)
         if cur is not None and "end" not in cur:
             if not cur["acts"] or cur["acts"][-1] != act:
@@ -1191,27 +1810,162 @@ def trace_summary(path):
                     cur["pre"] = t - cur["t"]
             if act == 128 and signed(w[6]):
                 cur["final"] = signed(w[6])
+            if act == 4 and signed(w[6]):
+                cur["c434"] = signed(w[6])
+            if act == 4:
+                cur["levels"].append((w[10] >> 16) & 0xff)
             if act == 4 and has_contrast:
                 cur["scale"].append(f32(w[22]))
                 cur["y"].append(w[17])
+            # Area-0 detector mode (+0x102c +0x20; 0 in dim light, then the
+            # rise floor +0x28 is 0.02, else 0.001). v3 traces only.
+            if act == 4 and len(w) > 32:
+                cur["modes"].append(w[32] & 0xff)
             if act == 1 and len(cur["acts"]) > 1:
                 cur["end"] = t
+                cur["acc_end"], cur["area_end"] = w[3] & 0xff, signed(w[5])
         last = act
-    outcome = lambda r: "lock" if 8 in r["acts"] else "fail" if 64 in r["acts"] else \
-        "done" if 128 in r["acts"] else "abort"
+    for r in runs:
+        r["outcome"] = "lock" if 8 in r["acts"] else "fail" if 64 in r["acts"] else \
+            "done" if 128 in r["acts"] else "abort"
+        # Locks whose actions 8 and 128 fell between two trace samples (auto-ab2
+        # runs 25, 26, 29: 4, then straight to 1): the accepted flag +0xc470
+        # went from 0 to 1 during the run and an area was chosen. The final
+        # position is then the last sweep position +0xc434 seen.
+        if (r["outcome"] == "abort" and r.get("acc_end") == 1 and r["acc0"] == 0
+                and r.get("area_end", -1) >= 0):
+            r["outcome"], r["inferred"] = "lock", True
+            r["final"] = r["final"] if r["final"] is not None else r["c434"]
+        # Drive level during sampling (0..3 = 200/100/49/29 fps): the AF
+        # signal Y is per frame, so it only compares at the same level.
+        r["level"] = max(set(r["levels"]), key=r["levels"].count) if r["levels"] else None
+        r["ms"] = 1000 * (r["end"] - r["t"]) if "end" in r else None
+        r["passes"] = r["acts"].count(4)
+        r["mode"] = "".join(str(m) for i, m in enumerate(r["modes"]) if i == 0 or m != r["modes"][i - 1]) or None
+    return records[0][0], runs
+
+
+AF_FPS = {0: 200, 1: 100, 2: 49, 3: 29}    # drive level +0x1022 -> contrast-AF frame rate
+
+
+def read_auto_log(path):
+    """AUTO.LOG of an automated session: one dict per run (n, arm, status,
+    t = uptime when ARM.SH started, t_end = when it was done, block). Reads
+    both the 5-field A/B format and the 6-field multi-arm one."""
+    out = []
+    for line in Path(path).read_text().split("\n"):
+        f = line.split()
+        if len(f) == 5:
+            out.append({"n": int(f[0]), "arm": f[1], "status": f[2], "t": float(f[3]),
+                        "t_end": float(f[3]), "block": int(f[4])})
+        elif len(f) == 6:
+            out.append({"n": int(f[0]), "arm": f[1], "status": f[2], "t": float(f[3]),
+                        "t_end": float(f[4]), "block": int(f[5])})
+    return out
+
+
+def join_auto_log(runs, log, window=4.0):
+    """Give each AF run the AUTO.LOG entry of its press: the last entry set at
+    most 0.5 s after the run started and at most `window` s before (TRACE.DAT uses
+    CLOCK_MONOTONIC, AUTO.LOG /proc/uptime; both count from boot). A second
+    run on the same entry is marked extra (an AF start the script did not
+    press). Returns the entries no run was found for."""
+    used = set()
+    for r in runs:
+        entry = None
+        for e in log:
+            if e["t"] <= r["t"] + 0.5:
+                entry = e
+        if entry is not None and r["t"] - entry["t"] < window:
+            r["auto"] = entry
+            r["extra"] = entry["n"] in used
+            used.add(entry["n"])
+    return [e for e in log if e["n"] not in used]
+
+
+def trace_summary(path, auto_log=None, window=4.0, wrong_pulses=150):
+    """Print trace_presses() one line per AF run (start, time, pre-move,
+    passes, outcome, final lens position, scale max and
+    median area-0 brightness, a light level that does not depend on a patch),
+    then totals. With an AUTO.LOG: the run number, arm and light block of
+    each run, and totals per block and arm."""
+    import statistics
+    t0, runs = trace_presses(path)
+    missed = join_auto_log(runs, read_auto_log(auto_log), window) if auto_log else []
+    # A fixed target gives one reference lens position: the median final
+    # position of all locks. A lock more than wrong_pulses from it is a wrong
+    # lock. Spread of good locks: 16 pulses on the tripod in bright light
+    # (auto-ab2), up to about 180 in the handheld dim sessions; the SQRTNS
+    # false locks sat at the near stop, about 400 pulses off.
+    finals = [r["final"] for r in runs if r["outcome"] in ("lock", "done") and r["final"] is not None]
+    ref = statistics.median(finals) if finals else None
+    for r in runs:
+        r["wrong"] = (ref is not None and r["outcome"] in ("lock", "done") and r["final"] is not None
+                      and abs(r["final"] - ref) > wrong_pulses)
+    if auto_log:
+        late = [e for e in read_auto_log(auto_log)
+                if any(r.get("auto") is e for r in runs) and
+                any(r.get("auto") is e and r["t"] < e["t_end"] for r in runs)]
+        if late:
+            print("warning: AF started before ARM.SH finished in runs "
+                  + " ".join(str(e["n"]) for e in late))
+        bad = [e for e in read_auto_log(auto_log)
+               if e["status"] != "-" and any(c not in ("0", "6") for c in e["status"].split(","))]
+        if bad:
+            print("warning: patch status not 0/6 in runs "
+                  + " ".join(f"{e['n']}({e['status']})" for e in bad))
     for r in runs:
         ms = 1000 * (r.get("end", r["t"]) - r["t"])
         extra = (f"  scale max {max(r['scale']):5.2f}  Y {statistics.median(r['y']):8.0f}"
                  if r["scale"] else "")
-        print(f"{r['t'] - t0:7.2f} s {ms:5.0f} ms  pre-move {1000 * r.get('pre', 0):4.0f} ms  "
-              f"passes {r['acts'].count(4)}  {outcome(r):5s}  final {r['final']!s:>6s}{extra}")
+        tag = ""
+        if auto_log:
+            e = r.get("auto")
+            tag = (f"run {e['n']:3d} {e['arm']} blk {e['block']}{' extra' if r['extra'] else ''}  "
+                   if e else "run   ? ? blk ?  ")
+        print(f"{tag}{r['t'] - t0:7.2f} s {ms:5.0f} ms  pre-move {1000 * r.get('pre', 0):4.0f} ms  "
+              f"{AF_FPS.get(r['level'], '?'):>3} fps  "
+              f"passes {r['passes']}  {r['outcome']:5s}{'*' if r.get('inferred') else ' '}{' WRONG' if r['wrong'] else '      '}  "
+              f"final {r['final']!s:>6s}{extra}")
     if runs:
-        ok = [r for r in runs if outcome(r) in ("lock", "done")]
-        near = [r for r in ok if r["final"] is not None and r["final"] > -16000]
-        times = [1000 * (r["end"] - r["t"]) for r in runs if "end" in r]
-        print(f"\n{len(runs)} runs: {len(ok)} locked ({len(near)} of them at the near stop, final > -16000), "
-              f"{sum(outcome(r) == 'fail' for r in runs)} failed, {sum(outcome(r) == 'abort' for r in runs)} aborted; "
-              f"time median {statistics.median(times):.0f} ms" if times else "")
+        print(f"\nreference lens position (median of all locks): {ref}; wrong lock = more than "
+              f"{wrong_pulses} pulses from it; * = lock seen only by the accepted flag (codes 8/128 "
+              "fell between two trace samples). Y is the AF signal per frame: it only compares at "
+              "the same fps, and auto exposure holds it near about 500,000 until the gain is at "
+              "its ceiling; dim light = 29 fps and Y far below that (earlier dim sessions 85,000-132,000).")
+        groups = {"all": runs}
+        if auto_log:
+            keyed = [r for r in runs if r.get("auto") and not r["extra"]]
+            groups = {}
+            for r in sorted(keyed, key=lambda r: (r["auto"]["block"], r["auto"]["arm"])):
+                groups.setdefault(f"block {r['auto']['block']} arm {r['auto']['arm']}", []).append(r)
+            for arm in sorted({r["auto"]["arm"] for r in keyed}):
+                groups[f"all blocks arm {arm}"] = [r for r in keyed if r["auto"]["arm"] == arm]
+        for name, rs in groups.items():
+            print(f"{name}: " + summary_line(rs))
+        if auto_log:
+            print(f"\n{len(missed)} press(es) without an AF run in the trace"
+                  + (": runs " + " ".join(str(e["n"]) for e in missed) if missed else "")
+                  + f"; {sum(1 for r in runs if not r.get('auto'))} run(s) outside any press, "
+                  f"{sum(1 for r in runs if r.get('extra'))} extra")
+
+
+def summary_line(runs):
+    import statistics
+    ok = [r for r in runs if r["outcome"] in ("lock", "done") and not r.get("wrong")]
+    wrong = [r for r in runs if r.get("wrong")]
+    scales = [max(r["scale"]) for r in runs if r["scale"]]
+    near = [r for r in ok if r["final"] is not None and r["final"] > -16000]
+    times = [r["ms"] for r in runs if r["ms"] is not None]
+    ys = [statistics.median(r["y"]) for r in runs if r["y"]]
+    return (f"{len(runs)} runs: {len(ok)} locked ({len(near)} of them at the near stop, final > -16000), "
+            f"{len(wrong)} wrong, "
+            f"{sum(r['outcome'] == 'fail' for r in runs)} failed, {sum(r['outcome'] == 'abort' for r in runs)} aborted"
+            + (f"; time median {statistics.median(times):.0f} ms" if times else "")
+            + (f"; Y median {statistics.median(ys):.0f}" if ys else "")
+            + (f"; scale max median {statistics.median(scales):.2f}" if scales else "")
+            + "; fps " + "/".join(f"{AF_FPS[l]}:{sum(r['level'] == l for r in runs)}"
+                                  for l in sorted({r['level'] for r in runs if r['level'] is not None})))
 
 
 def trace_runs(path):
@@ -1315,11 +2069,11 @@ def read_mem(path):
             print(f"scan window           end +c438 {u32(caf + 0xc438)}  in focus +c43c {u32(caf + 0xc43c)}  start +c434 {u32(caf + 0xc434)}")
 
 
-def card_roots(flags):
-    return {
+def card_roots(flags, auto=None):
+    roots = {
         "enable": {MODESET_FILE: SCRIPTS_ON, "DEVELOP.MOD": DEVELOP_MOD},
         "log": {
-            "SCRIPT/STARTUP.TTL": startup_ttl(flags),
+            "SCRIPT/STARTUP.TTL": startup_ttl(flags, auto),
             "SCRIPT/AFDBG/MARK.SH": mark_sh(flags),
             "SCRIPT/AFDBG/MEM.SH": mem_sh(),
             "SCRIPT/AFDBG/MEMRD.BIN": memrd_bin(),
@@ -1331,10 +2085,340 @@ def card_roots(flags):
             "SCRIPT/AFDBG/SQRTNS.BIN": multipatch_bin(SQRTNS_SITES),
             "SCRIPT/AFDBG/SCALE75.BIN": multipatch_bin(SCALE75_SITES),
             "SCRIPT/AFDBG/FORCE49.BIN": multipatch_bin(FORCE49_SITES),
+            "SCRIPT/AFDBG/X875.BIN": multipatch_bin(X875_SITES),
+            "SCRIPT/AFDBG/HALFB.BIN": multipatch_bin(HALFB_SITES),
+            "SCRIPT/AFDBG/FALLS2.BIN": multipatch_bin(FALLS2_SITES),
+            "SCRIPT/AFDBG/RISE10.BIN": multipatch_bin(RISE10_SITES),
+            "SCRIPT/AFDBG/RISE05.BIN": multipatch_bin(RISE05_SITES),
+            "SCRIPT/AFDBG/PEEK.BIN": peek_bin(),
+            "SCRIPT/AFDBG/FORCEM0.BIN": multipatch_bin(FORCEM0_SITES),
+            "SCRIPT/AFDBG/FORCEG0.BIN": multipatch_bin(FORCEG0_SITES),
+            "SCRIPT/AFDBG/NO29.BIN": multipatch_bin(NO29_SITES),
+            "SCRIPT/AFDBG/OFFS4.BIN": multipatch_bin(OFFS4_SITES),
+            "SCRIPT/AFDBG/OFFS2.BIN": multipatch_bin(OFFS2_SITES),
+            "SCRIPT/AFDBG/NOFB.BIN": multipatch_bin(NOFB_SITES),
+            "SCRIPT/AFDBG/NOFO.BIN": multipatch_bin(NOFO_SITES),
             "SCRIPT/AFDBG/TRACE.BIN": trace_bin(),
         },
         "disable": {MODESET_FILE: SCRIPTS_OFF, "DEVELOP.MOD": DEVELOP_MOD},
     }
+    if auto:
+        # The run outcomes come from the tracer, so it is switched on and made
+        # long enough for the whole session.
+        log = roots["log"]
+        log["SCRIPT/AFDBG/TRACE.BIN"] = trace_bin(auto_trace_records(auto))
+        log["SCRIPT/AFDBG/TRACE.ON"] = b"on\n"
+        log["SCRIPT/AFDBG/ARM.SH"] = arm_sh(auto)
+        # New session at every power-on: ARM.SH counts runs from 1 again. Reset
+        # from Linux (overwrite, no delete): Linux cannot recreate a file the
+        # RTOS deleted, so the script must not delete RUN.N.
+        log["SCRIPT/AFDBG/PATCH.SH"] = patch_sh().replace(
+            b"exec 2>>$d/MEM.LOG\n", b"exec 2>>$d/MEM.LOG\necho 0 >$d/RUN.N\n", 1)
+        log["SCRIPT/AFDBG/AUTO.SEQ"] = ("\n".join(auto_seq(auto)) + "\n").encode("ascii")
+        if auto.get("steps"):
+            for label in AUTO_STEP_LABELS:
+                log[f"SCRIPT/AFDBG/STEP_{label}.SH"] = step_sh(label)
+        if auto.get("probe_sh"):
+            log["SCRIPT/AFDBG/PROBE.SH"] = probe_sh()
+        if auto.get("remote"):
+            log.update(remote_files())
+    return roots
+
+
+# Engineering-shell commands the relay passes on (names from the shell's text
+# table in the 1.60 image; usage strings read from each handler). Arguments are
+# limited to [A-Za-z0-9 ._-].
+SHELL_ALLOW = (
+    "ND_open", "ND_close",                     # ND filter in / out ("ND-OPEN.", "ND-CLOSE.")
+    "SW_md",                                   # mode dial 0 P, 1 Av, 2 Tv, 3 M, 4-6 U3-U1
+    "SW_cd",                                   # control dial, -4..4 clicks
+    "SW_sws", "SW_swr",                        # half / full press 0|1
+    "camctl_set_expmode",                      # p / tv / av / m
+    "camctl_set_aperture", "camctl_set_iso", "camctl_set_shutter",   # APEX values
+    "camctl_set_exp_comp", "camctl_set_iso_auto",
+    "camctl_set_still_focus_mode", "camctl_set_still_metering_mode",
+    "camctl_af",                               # AF with setting, ctrl, pos x, y
+    "AF_hp", "AF_drive",                       # focus motor: home, dir + pulses
+    "Af_Led_On", "Af_Led_Off",
+)
+
+
+def remote_files():
+    """REMOTE.SH (start / check / fg the endpoint) and the CGI scripts under
+    /tmp/afwww/cgi-bin, served by busybox httpd on REMOTE_PORT:
+      uptime        /proc/uptime (the trace's clock)
+      arm?A+B       restore every patch (card and uploaded), apply the arm's
+                    patches (an uploaded one wins over the card's); logs to REMOTE.LOG
+      tail?N        the last N trace records (raw TRACE.DAT bytes)
+      ls            the AFDBG folder and the card root
+      file?NAME     a file from AFDBG or the card root ([A-Za-z0-9._] names)
+      put?NAME[+tool]  POST body -> RAM (/tmp/afwww/up/patch or tool/NAME.BIN,
+                    at most 256 KB); a patch is usable in arm, a tool in run
+      rm?NAME       restore and delete an uploaded patch, delete an uploaded tool
+      run?NAME+ARGS an uploaded tool with ARGS (split on +), 30 s limit;
+                    "exit N", then its output
+      peek?ADDR+N   N words at ADDR (hex) via PEEK.BIN, raw; header X-Exit
+      status        uptime, current arm, trace size, card and memory free, uploads
+      log?N         the last N lines of REMOTE.LOG
+    Uploads live in RAM and are gone at power-off. Anyone on the camera's
+    Wi-Fi (WPA2, the user's key) can use them, so the endpoint only runs from
+    the test card. busybox applets are called as 'busybox x': several have no
+    command link."""
+    d = AUTO_DIR
+    rec = 8 + 4 * len(TRACE_OFFSETS) + 16 * TRACE_ARRAY_WORDS
+    head = "#!/bin/sh\n" f"d={d}\n" "exec 2>>$d/MEM.LOG\n"
+    text = "printf 'Content-Type: text/plain\\r\\n\\r\\n'\n"
+    binary = "printf 'Content-Type: application/octet-stream\\r\\n\\r\\n'\n"
+    patches = " ".join(AUTO_PATCHES)
+    www = "/tmp/afwww"
+    cgi = {
+        "uptime": head + text + "cat /proc/uptime\n",
+        "arm": head + (
+            'a=$QUERY_STRING\n'
+            'case "$a" in ""|*[!A-Z0-9+]*) ' + text.strip() + '; echo "bad arm"; exit 0 ;; esac\n'
+            f"pf() {{ if [ -f {www}/up/patch/$1.BIN ]; then echo {www}/up/patch/$1.BIN; else echo $d/$1.BIN; fi; }}\n"
+            f"ups=; for f in {www}/up/patch/*.BIN; do [ -f \"$f\" ] && {{ f=${{f##*/}}; ups=\"$ups ${{f%.BIN}}\"; }}; done\n"
+            "read t0 _ </proc/uptime; s=\n"
+            f"for p in {patches}; do $d/$p.BIN restore; r=$?; "
+            'case $r in 0|5|6) ;; *) s="${s}R$p:$r," ;; esac; done\n'
+            f"for p in $ups; do {www}/up/patch/$p.BIN restore; r=$?; "
+            'case $r in 0|5|6) ;; *) s="${s}R$p:$r," ;; esac; done\n'
+            'if [ "$a" != STOCK ]; then\n'
+            " o=$IFS; IFS=+; for p in $a; do IFS=$o; f=$(pf $p)\n"
+            '  if [ -f $f ]; then $f; s="$s$?,"; else s="${s}missing:$p,"; fi\n'
+            "  IFS=+; done; IFS=$o\n"
+            "fi\n"
+            "s=${s%,}; s=${s:--}; read t _ </proc/uptime\n"
+            'echo "arm $a $s $t0 $t" >>$d/REMOTE.LOG\n'
+            f'echo "$a $s $t" >{www}/ARM.NOW\n'
+            + text + 'echo "$a $s $t0 $t"\n'),
+        "tail": head + (
+            "n=${QUERY_STRING:-750}; case $n in *[!0-9]*) n=750 ;; esac\n"
+            "f=$d/TRACE.DAT; sz=$(ls -ln $f 2>/dev/null | awk '{print $5}')\n"
+            f"r=$((${{sz:-0}} / {rec})); s=$((r - n)); [ $s -lt 0 ] && s=0\n"
+            + binary +
+            f"busybox dd if=$f bs={rec} skip=$s count=$n 2>/dev/null\n"),
+        "ls": head + text + "ls -ln $d; echo; ls -ln /media/storage1\n",
+        "file": head + (
+            "f=$QUERY_STRING\n"
+            'case "$f" in ""|.*|*[!A-Za-z0-9._]*) ' + text.strip() + '; echo "bad name"; exit 0 ;; esac\n'
+            "[ -f $d/$f ] || f=../../$f\n"
+            + binary + "cat $d/$f\n"),
+        "put": head + (
+            "q=$QUERY_STRING; n=${q%%+*}; k=patch; [ \"$q\" = \"$n+tool\" ] && k=tool\n"
+            "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
+            'case "$n" in ""|*[!A-Z0-9]*) no bad name ;; esac; [ ${#n} -le 12 ] || no name too long\n'
+            '[ "$q" = "$n" ] || [ "$k" = tool ] || no bad kind\n'
+            '[ "$REQUEST_METHOD" = POST ] || no POST only\n'
+            "l=${CONTENT_LENGTH:-0}; case $l in *[!0-9]*) l=0 ;; esac\n"
+            "[ $l -gt 0 ] && [ $l -le 262144 ] || no bad length $l\n"
+            f"busybox mkdir -p {www}/up/$k; f={www}/up/$k/$n.BIN\n"
+            # A new version of an uploaded patch: put the old one's words back first.
+            '[ $k = patch ] && [ -f $f ] && $f restore\n'
+            "busybox dd of=$f bs=1 count=$l 2>/dev/null; busybox chmod 755 $f\n"
+            "z=$(ls -ln $f | awk '{print $5}'); m=$(busybox md5sum $f | awk '{print $1}')\n"
+            '[ "$z" = "$l" ] || { rm -f $f; no short $z of $l; }\n'
+            "read t _ </proc/uptime\n"
+            'echo "put $k $n $z $m $t" >>$d/REMOTE.LOG\n'
+            + text + 'echo "$k $n $z $m"\n'),
+        "rm": head + (
+            "n=$QUERY_STRING\n"
+            'case "$n" in ""|*[!A-Z0-9]*) ' + text.strip() + '; echo "bad name"; exit 0 ;; esac\n'
+            "r=-\n"
+            f"if [ -f {www}/up/patch/$n.BIN ]; then {www}/up/patch/$n.BIN restore; r=$?; rm -f {www}/up/patch/$n.BIN; fi\n"
+            f"rm -f {www}/up/tool/$n.BIN\n"
+            f"[ \"$r\" = - ] || echo \"unknown: $n restored and removed\" >{www}/ARM.NOW\n"
+            "read t _ </proc/uptime\n"
+            'echo "rm $n $r $t" >>$d/REMOTE.LOG\n'
+            + text + 'echo "rm $n restore $r"\n'),
+        "run": head + (
+            "q=$QUERY_STRING; n=${q%%+*}; a=; [ \"$q\" = \"$n\" ] || a=${q#*+}\n"
+            "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
+            'case "$n" in ""|*[!A-Z0-9]*) no bad name ;; esac\n'
+            'case "$a" in *[!A-Za-z0-9+._-]*) no bad arguments ;; esac\n'
+            f"f={www}/up/tool/$n.BIN; [ -f $f ] || no no uploaded tool $n\n"
+            f"o={www}/run.out; read t0 _ </proc/uptime\n"
+            "x=$IFS; IFS=+; set -- $a; IFS=$x\n"
+            "$f \"$@\" >$o 2>&1 & k=$!\n"
+            "i=0; while kill -0 $k 2>/dev/null; do i=$((i + 1)); "
+            "[ $i -gt 150 ] && { kill $k; break; }; busybox usleep 200000; done\n"
+            "wait $k; r=$?; read t _ </proc/uptime\n"
+            'echo "run $n $a $r $t0 $t" >>$d/REMOTE.LOG\n'
+            + text + 'echo "exit $r"; cat $o\n'),
+        "peek": head + (
+            "q=$QUERY_STRING; ad=${q%%+*}; c=${q#*+}\n"
+            'case "$q" in *+*) ;; *) c=1 ;; esac\n'
+            'case "$ad$c" in ""|*[!0-9A-Fa-f]*) ' + text.strip() + '; echo "bad address"; exit 0 ;; esac\n'
+            f"$d/PEEK.BIN $ad $c >{www}/peek.out; r=$?\n"
+            "printf 'Content-Type: application/octet-stream\\r\\nX-Exit: %d\\r\\n\\r\\n' $r\n"
+            f"cat {www}/peek.out\n"),
+        "status": head + text + (
+            "read u _ </proc/uptime; echo \"uptime $u\"\n"
+            f"echo \"arm $(cat {www}/ARM.NOW 2>/dev/null)\"\n"
+            "echo \"trace_bytes $(ls -ln $d/TRACE.DAT 2>/dev/null | awk '{print $5}')\"\n"
+            "busybox df -k /media/storage1 | awk 'NR > 1 {print \"card_free_kb\", $4}'\n"
+            "busybox free | awk '/Mem/ {print \"mem_free_kb\", $4}'\n"
+            f"echo \"relay_seq $(cat {www}/relay.seq 2>/dev/null)\"\n"
+            f"echo \"relay_ack $(cat {www}/relay.ack 2>/dev/null)\"\n"
+            f"echo \"relay_hb $(cat {www}/relay.hb 2>/dev/null)\"\n"
+            "for k in patch tool; do for f in " f"{www}" "/up/$k/*.BIN; do [ -f \"$f\" ] || continue\n"
+            " echo \"up $k ${f##*/} $(ls -ln $f | awk '{print $5}') $(busybox md5sum $f | awk '{print $1}')\"\n"
+            "done; done\n"),
+        "shell": head + (
+            "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
+            '[ "$REQUEST_METHOD" = POST ] || no POST only\n'
+            "l=${CONTENT_LENGTH:-0}; case $l in *[!0-9]*) l=0 ;; esac\n"
+            "[ $l -gt 0 ] && [ $l -le 2048 ] || no bad length $l\n"
+            f"b={www}/shell.in; busybox dd of=$b bs=1 count=$l 2>/dev/null\n"
+            f"q=$(cat {www}/relay.seq 2>/dev/null); q=$((${{q:-0}} + 1))\n"
+            f"o={www}/relay.tmp; echo \"rseq = $q\" >$o; echo \"if rseq = rdone goto rskip$q\" >>$o\n"
+            "n=0; while read -r c x || [ -n \"$c\" ]; do [ -n \"$c\" ] || continue; n=$((n + 1))\n"
+            ' case " ' + " ".join(SHELL_ALLOW) + ' " in *" $c "*) ;; *) no not allowed: $c ;; esac\n'
+            ' case "$x" in *[!A-Za-z0-9\\ ._-]*) no bad arguments: $x ;; esac\n'
+            " echo \"sendln '$c $x'\" >>$o; echo 'mpause 300' >>$o\n"
+            "done <$b\n"
+            "[ $n -gt 0 ] && [ $n -le 8 ] || no 1 to 8 commands, got $n\n"
+            "echo 'rdone = rseq' >>$o\n"
+            f"echo \"sendln 'lcmd sh {d}/RACK.SH $q'\" >>$o; echo \":rskip$q\" >>$o\n"
+            # In place, one sector: replacing the file (mv) let the RTOS keep
+            # reading the released clusters (stall 5, 2026-11-19).
+            f"{RELAY_PAD_SH}"
+            f"echo $q >{www}/relay.seq; busybox dd if=$o of=$d/RELAY.TTL bs={RELAY_SIZE} count=1 conv=notrunc 2>/dev/null; sync\n"
+            "read t _ </proc/uptime\n"
+            'echo "shell $q $(busybox tr \"\\n\" \";\" <$b) $t" >>$d/REMOTE.LOG\n'
+            + text + 'echo "queued $q"\n'),
+        "log": head + (
+            "n=${QUERY_STRING:-20}; case $n in *[!0-9]*) n=20 ;; esac\n"
+            + text + "busybox tail -n $n $d/REMOTE.LOG\n"),
+    }
+    # REMOTE.SH writes the CGI scripts to the RAM disk from here-documents: the
+    # camera's Linux side sees card names in capitals and httpd only runs scripts
+    # under a lowercase /cgi-bin/; copying them off the card matched nothing
+    # (remote-try2, 2026-11-19). diag.txt and selftest.txt are served as plain
+    # files, so a broken endpoint can still be read over Wi-Fi.
+    here = "".join(f"cat >{www}/cgi-bin/{k} <<'END_{k.upper()}'\n{v}END_{k.upper()}\n" for k, v in cgi.items())
+    files = {}
+    files["SCRIPT/AFDBG/RACK.SH"] = (
+        "read t _ </proc/uptime\n"
+        f"if [ \"$1\" = hb ]; then echo \"$t\" >{www}/relay.hb; exit 0; fi\n"
+        f"echo \"$1 $t\" >{www}/relay.ack\n"
+        f"echo \"ack $1 $t\" >>{d}/REMOTE.LOG\n").encode()
+    files["SCRIPT/AFDBG/REMOTE.SH"] = (
+        f"d={d}\n"
+        "exec 2>>$d/MEM.LOG\n"
+        "read u _ </proc/uptime\n"
+        "setup() {\n"
+        f"busybox mkdir -p {www}/cgi-bin\n"
+        # RELAY.TTL is created once and then only overwritten in place.
+        f"o={www}/relay.idle; echo 'rseq = 0' >$o\n"
+        f"{RELAY_PAD_SH}"
+        f"busybox dd if=$o of=$d/RELAY.TTL bs={RELAY_SIZE} count=1 conv=notrunc 2>/dev/null; sync\n"
+        + here +
+        f"busybox chmod 755 {www}/cgi-bin/*\n"
+        f"echo 'AF remote endpoint: /cgi-bin/uptime arm tail ls file put rm run peek status log shell; /diag.txt /selftest.txt' >{www}/index.html\n"
+        f"{{ date; ls -lR {www}; echo; ls -l $d $d/WWW; echo; ps; }} >{www}/diag.txt 2>&1\n"
+        f"{{ for c in uptime ls status; do echo \"== $c\"; {www}/cgi-bin/$c; done; "
+        f"QUERY_STRING=5 {www}/cgi-bin/tail | busybox wc -c; "
+        f"echo '== peek identity'; QUERY_STRING=53002038+1 {www}/cgi-bin/peek | busybox hexdump -C; }} >{www}/selftest.txt 2>&1\n"
+        f"cat {www}/diag.txt {www}/selftest.txt >>$d/REMOTE.LOG\n"
+        "}\n"
+        "case $1 in\n"
+        f"start) rm -f $d/HTTPD.DEAD; setup; busybox httpd -p {REMOTE_PORT} -h {www}; echo \"$u start $?\" >>$d/REMOTE.LOG ;;\n"
+        # By port, not by name: the daemon may run as "busybox".
+        f"check) if netstat -ltn | grep -q ':{REMOTE_PORT} '; then echo \"$u up\" >>$d/REMOTE.LOG; "
+        "else echo dead >$d/HTTPD.DEAD; echo \"$u dead\" >>$d/REMOTE.LOG; fi\n"
+        "  netstat -ltn >>$d/REMOTE.LOG ;;\n"
+        f"fg) echo \"$u fg\" >>$d/REMOTE.LOG; sync; busybox httpd -f -p {REMOTE_PORT} -h {www} ;;\n"
+        "esac\n"
+        "sync\n"
+    ).encode("ascii")
+    return files
+
+
+# The shell relay's RELAY.TTL has a fixed size and is written in place.
+# RELAY_PAD_SH pads the file $o to RELAY_SIZE bytes with assignment lines
+# (the TTL interpreter is only known to accept statements, not blank lines or
+# comments): "rpad = 0" lines, then one "rq...q = 0" line of the exact rest.
+RELAY_SIZE = 512
+RELAY_PAD_SH = (
+    "l=$(busybox wc -c <$o); [ $l -le $((RELAY_SIZE - 7)) ] || no relay file too long: $l\n"
+    "while [ $((RELAY_SIZE - l)) -gt 16 ]; do echo 'rpad = 0' >>$o; l=$((l + 9)); done\n"
+    "v=r; k=$((RELAY_SIZE - l - 6)); while [ $k -gt 0 ]; do v=${v}q; k=$((k - 1)); done; echo \"$v = 0\" >>$o\n"
+).replace("RELAY_SIZE", str(RELAY_SIZE))
+
+
+PROBE_STAGES = ((1, 6000), (2, 6000), (3, 16000), (4, 16000))   # stage, TTL wait (ms)
+
+
+def probe_sh():
+    """PROBE.SH <stage>: what the camera's Linux side offers for a link to
+    the Mac. Run as short separate lcmd calls (the 2026-11-19 version that
+    forked itself into the background and wrote into a new folder left no
+    trace at all). Every stage first appends a line to PROBE.LOG, as STEP.SH
+    does, and writes P<boot>_<stage>.TXT into the existing AFDBG folder.
+    1 inventory, 2 gadget functions (in a throw-away gadget that is never
+    bound to the USB controller), 3 which port answers HTTP, 4 the phone-app
+    API on localhost: props and two AF calls."""
+    return (
+        f"d={AUTO_DIR}\n"
+        "read u _ </proc/uptime; echo \"$u stage $1 start\" >>$d/PROBE.LOG; sync\n"
+        'if [ "$1" = 1 ]; then b=$(cat $d/PBOOT.N 2>/dev/null); echo $((${b:-0} + 1)) >$d/PBOOT.N; fi\n'
+        "b=$(cat $d/PBOOT.N 2>/dev/null); o=$d/P${b:-0}_$1.TXT\n"
+        "t() { read u _ </proc/uptime; echo \"== $u $*\"; }\n"
+        "req() {  # port method path body\n"
+        ' { printf "%s %s HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\nContent-Type: application/x-www-form-urlencoded\\r\\n'
+        'Content-Length: %d\\r\\n\\r\\n%s" "$2" "$3" ${#4} "$4"; sleep 3; } | busybox nc 127.0.0.1 $1 &\n'
+        " k=$!; sleep 4; kill $k 2>/dev/null; echo\n"   # not $p: the caller loops over p
+        "}\n"
+        "{\n"
+        "t stage $1; cat /tmp/startup_mode; cat /sys/class/udc/*/state\n"
+        "case $1 in\n"
+        "1)\n"
+        " for c in 'uname -a' 'cat /proc/cmdline' 'ps' 'lsmod' 'netstat -ltnu' 'ifconfig -a' 'ls /dev' "
+        "'cat /proc/filesystems' 'ls -R /lib/modules' 'busybox' 'ls -l /sys/class/udc' "
+        "'cat /sys/class/udc/*/current_speed' 'mount' 'ls -lR /sys/kernel/config/usb_gadget' "
+        "'cat /sys/kernel/config/usb_gadget/*/UDC'; do t \"$c\"; sh -c \"$c\"; done\n"
+        # nc, sort and tr are busybox applets without a command link on the
+        # camera (2026-11-19): list every applet that has none.
+        " t unlinked applets; for a in $(busybox --list); do busybox which $a >/dev/null || printf '%s ' $a; done; echo\n"
+        " t config.gz; [ -f /proc/config.gz ] && zcat /proc/config.gz | grep -E 'USB|GADGET|CONFIGFS|_FS|NET|ETHER|IKCONFIG' | grep -v '^#'\n"
+        " ;;\n"
+        "2)\n"
+        # 2026-11-19: a second gadget fails (ENOMEM) and the kernel has only the
+        # MTP function (CONFIG_USB_F_MTP). Keep the whole config instead, for
+        # the own-kernel-module route.
+        " zcat /proc/config.gz >$d/P${b:-0}_CFG.TXT\n"
+        " grep -E 'MODULE|KALLSYMS|DEVMEM|USB_F_|USB_CONFIGFS|FUNCTIONFS' $d/P${b:-0}_CFG.TXT\n"
+        " cat /proc/sys/kernel/modules_disabled /proc/sys/kernel/kptr_restrict\n"
+        " ;;\n"
+        "3)\n"
+        " rm -f $d/PAPI.N\n"
+        # sort, tr and head -3 are not linked or not supported on the camera: awk only.
+        " ports=$(netstat -ltn 2>/dev/null | awk 'NR>2 {sub(/.*:/, \"\", $4); print $4}')\n"
+        ' echo "ports: $ports"\n'
+        " for p in $(echo 80 $ports | awk '{for (i = 1; i <= NF; i++) if (!s[$i]++ && ++n <= 3) print $i}'); do\n"
+        '  t "GET /v1/ping :$p"; r=$(req $p GET /v1/ping \'\'); echo "$r"\n'
+        '  case "$r" in HTTP*) echo $p >$d/PAPI.N; break ;; esac\n'
+        " done\n"
+        " ;;\n"
+        "4)\n"
+        " api=$(cat $d/PAPI.N 2>/dev/null); echo \"api port: ${api:-none}\"\n"
+        ' if [ -n "$api" ]; then\n'
+        "  t GET /v1/props; req $api GET /v1/props ''\n"
+        "  t POST /v1/lens/focus; req $api POST /v1/lens/focus ''\n"
+        "  t POST /v1/lens/focus pos; req $api POST /v1/lens/focus 'pos=50,50'\n"
+        "  t done\n"
+        " fi\n"
+        " ;;\n"
+        "esac\n"
+        "t end\n"
+        "} >$o 2>&1\n"
+        "read u _ </proc/uptime; echo \"$u stage $1 end\" >>$d/PROBE.LOG; sync\n"
+    ).encode("ascii")
+
+
+def auto_trace_records(auto):
+    return int(auto_session_s(auto) * 1e9 / TRACE_PERIOD_NS)
 
 
 def main():
@@ -1347,7 +2431,45 @@ def main():
     parser.add_argument("--trace-runs", metavar="TRACE.DAT", help="summarise an AF state trace per AF run")
     parser.add_argument("--trace-summary", metavar="TRACE.DAT", help="one line per AF run with outcome and light level")
     parser.add_argument("--trace-passes", metavar="TRACE.DAT", help="print the detector arrays at the end of each pass")
+    parser.add_argument("--pass-table", metavar="TRACE.DAT", help="one line per pass: rise against the floor + T, accepted or not")
+    parser.add_argument("--rise-floor", type=float, default=RISE_FLOOR, help="floor for --pass-table (stock 0.02; RISE10 0.01, RISE05 0.005)")
     parser.add_argument("--trace-contrast", metavar="TRACE.DAT", help="print the per-frame contrast of an AF state trace")
+    parser.add_argument("--auto-log", metavar="AUTO.LOG", help="with --trace-summary: arm and light block per run, totals per block and arm")
+    parser.add_argument("--wrong-pulses", type=int, default=150,
+                        help="with --trace-summary: a lock this far from the median lock position is wrong (default %(default)s)")
+    parser.add_argument("--join-window", type=float, default=4.0,
+                        help="with --auto-log: longest time from the arm log entry to the AF start (default %(default)s s)")
+    auto = parser.add_argument_group("automated runs (the script presses the shutter; see docs/af-debug-log.html)")
+    auto.add_argument("--auto", action="store_true", help="light blocks of automated half-presses")
+    auto.add_argument("--auto-smoke", action="store_true", help="smoke check: 5 automated half-presses, no patch")
+    auto.add_argument("--remote", action="store_true",
+                      help="remote mode: no scripted presses; after CAF.OK a web endpoint on port "
+                           f"{REMOTE_PORT} for tools/af_remote.py (camera Wi-Fi), trace on")
+    auto.add_argument("--remote-min", type=int, default=45, metavar="MIN",
+                      help="with --remote: trace length in minutes (default %(default)s)")
+    auto.add_argument("--probe", action="store_true",
+                      help="USB/HTTP probe: PROBE.SH lists what Linux offers (gadget functions, ports, "
+                           "localhost API with two AF calls), then 3 automated presses; no patch")
+    auto.add_argument("--auto-arms", metavar="A,B,...",
+                      help="arms to alternate per run: STOCK or patch names joined by '+', e.g. "
+                           "STOCK,SCALE75,X875,HALFB,FALLS2,SCALE75+FALLS2 (patches: "
+                           + ", ".join(AUTO_PATCHES) + ")")
+    auto.add_argument("--auto-patch", metavar="NAME", choices=tuple(AUTO_PATCHES),
+                      help="A/B per run: A = NAME.BIN applied, B = stock (default: no patch)")
+    auto.add_argument("--auto-mode", choices=AUTO_TARGET_MODES, default=AUTO_DEFAULTS["mode"],
+                      help="focus mode of the runs, restored after each defocus (default %(default)s; set the camera to it)")
+    auto.add_argument("--auto-defocus", choices=AUTO_DEFOCUS_MODES, default=AUTO_DEFAULTS["defocus"],
+                      help="focus mode that parks the lens before each run (default %(default)s)")
+    auto.add_argument("--auto-trigger", choices=AUTO_TRIGGERS, default=AUTO_DEFAULTS["trigger"],
+                      help="sw = SW_sws 1/0, the half-press (default); camctl_af = camctl_af cam start/stop")
+    auto.add_argument("--blocks", type=int, help=f"light blocks (default {AUTO_DEFAULTS['blocks']})")
+    auto.add_argument("--per-block", type=int, help=f"runs per block (default {AUTO_DEFAULTS['per_block']})")
+    auto.add_argument("--light-pause-s", type=int, default=AUTO_DEFAULTS["pause_s"],
+                      help="lamp-blinking pause between blocks (default %(default)s s)")
+    auto.add_argument("--hold-ms", type=int, default=AUTO_DEFAULTS["hold_ms"], help="half-press time (default %(default)s)")
+    auto.add_argument("--gap-ms", type=int, default=AUTO_DEFAULTS["gap_ms"], help="wait after release (default %(default)s)")
+    auto.add_argument("--full-press", action="store_true", help="take a photo at the end of each half-press")
+    auto.add_argument("--seed", type=int, default=AUTO_DEFAULTS["seed"], help="A/B order seed (default %(default)s)")
     args = parser.parse_args()
     if args.read_mem:
         read_mem(args.read_mem)
@@ -1362,7 +2484,10 @@ def main():
         trace_runs(args.trace_runs)
         return
     if args.trace_summary:
-        trace_summary(args.trace_summary)
+        trace_summary(args.trace_summary, args.auto_log, args.join_window, args.wrong_pulses)
+        return
+    if args.pass_table:
+        pass_table(args.pass_table, args.rise_floor)
         return
     if args.trace_passes:
         trace_passes(args.trace_passes)
@@ -1373,14 +2498,60 @@ def main():
     flags = args.flags.upper()
     if not flags or any(c not in FLAGS for c in flags) or len(set(flags)) != len(flags):
         sys.exit(f"--flags must be letters from {FLAGS}, each at most once")
+    run = None
+    if args.auto + args.auto_smoke + args.probe + args.remote > 1:
+        sys.exit("--auto, --auto-smoke, --probe and --remote exclude each other")
+    if args.auto or args.auto_smoke or args.probe or args.remote:
+        run = dict(AUTO_SMOKE if args.auto_smoke else AUTO_PROBE if args.probe
+                   else dict(AUTO_REMOTE, remote_min=args.remote_min) if args.remote else AUTO_DEFAULTS)
+        run.update(mode=args.auto_mode, defocus=args.auto_defocus, trigger=args.auto_trigger,
+                   pause_s=args.light_pause_s,
+                   hold_ms=args.hold_ms, gap_ms=args.gap_ms, full=args.full_press,
+                   patch=None if args.auto_smoke or args.probe or args.remote else args.auto_patch, seed=args.seed,
+                   arms=None if args.auto_smoke or args.probe or args.remote or not args.auto_arms
+                   else args.auto_arms.split(","))
+        if run["arms"] and run["patch"]:
+            sys.exit("--auto-arms and --auto-patch exclude each other")
+        for arm in auto_arm_list(run):
+            parts = [] if arm in ("STOCK", "-") else arm.split("+")
+            bad = [p for p in parts if p not in AUTO_PATCHES]
+            if bad:
+                sys.exit(f"unknown patch in arm {arm}: {', '.join(bad)}")
+            group = arm_conflict(parts)
+            if group:
+                sys.exit(f"arm {arm}: {', '.join(group)} share the same words, use one at a time")
+        if len(set(auto_arm_list(run))) != len(auto_arm_list(run)):
+            sys.exit("an arm is listed twice")
+        if args.blocks is not None:
+            run["blocks"] = args.blocks
+        if args.per_block is not None:
+            run["per_block"] = args.per_block
+        if run["blocks"] < 1 or run["per_block"] < 1:
+            sys.exit("--blocks and --per-block must be at least 1")
+        if run["full"] and run["trigger"] != "sw":
+            sys.exit("--full-press needs --auto-trigger sw")
+        k = len(auto_arm_list(run))
+        if run["per_block"] % k:
+            sys.exit(f"--per-block must be a multiple of the number of arms ({k})")
+    elif args.auto_patch or args.auto_arms or args.full_press:
+        sys.exit("--auto-patch, --auto-arms and --full-press need --auto")
     if args.out.exists():
         sys.exit(f"{args.out} exists; remove it or pick another --out (this tool never overwrites)")
-    for root, files in card_roots(flags).items():
+    for root, files in card_roots(flags, run).items():
         for name, data in files.items():
             path = args.out / root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             print(f"wrote {path} ({len(data)} bytes)")
+    if run:
+        rec = 8 + 4 * len(TRACE_OFFSETS) + 16 * TRACE_ARRAY_WORDS
+        n = run["blocks"] * run["per_block"]
+        seq = auto_seq(run)
+        print(f"\nautomated: {run['blocks']} block(s) x {run['per_block']} runs = {n}"
+              + (" (" + ", ".join(f"{seq.count(a)} {a}" for a in auto_arm_list(run)) + ")"
+                 if auto_arm_list(run) != ["-"] else ", no patch")
+              + f", trigger {run['trigger']}, focus mode {run['mode']}, defocus {run['defocus']}; about {auto_session_s(run) / 60:.0f} min; "
+              f"TRACE.DAT up to {auto_trace_records(run) * rec / 1e6:.0f} MB")
     print(f"\nNext: follow docs/af-debug-log.html. Copy the contents of {args.out}/enable to the card root first.")
 
 

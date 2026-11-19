@@ -75,6 +75,10 @@ id="toc-4-the-factory-channel-0x90900x9095">4. The factory channel
 <li><a href="#5-what-a-recipe-manager-can-do-on-a-gr-iiix"
 id="toc-5-what-a-recipe-manager-can-do-on-a-gr-iiix">5. What a recipe
 manager can do on a GR IIIx</a></li>
+<li><a href="#6-camera-side-probe" id="toc-6-camera-side-probe">6. From inside
+the camera: USB and the HTTP API</a></li>
+<li><a href="#7-remote-test-controls" id="toc-7-remote-test-controls">7. Remote
+test controls for AF sessions</a></li>
 </ul></li>
 </ul>
 </nav>
@@ -342,6 +346,84 @@ stored</td>
 </tr>
 </tbody>
 </table>
+<h2 id="6-camera-side-probe">6. From inside the camera: USB and the HTTP API (measured, 2026-11-19)</h2>
+<p>An SD-card probe (<code>tools/af_debug_card.py --probe</code>, Linux side via
+<code>lcmd</code>) listed what the camera offers for a link to a computer. Evidence
+in <code>work/af-logs/usb-probe2</code>–<code>4</code>.</p>
+<ul>
+<li><strong>USB gadget:</strong> configfs gadget <code>mtp</code> on UDC
+<code>19c00000.dwc3</code>, one function <code>mtp.usb0</code>. The kernel
+(4.4.15, <code>/proc/config.gz</code>) has only the MTP function
+(<code>CONFIG_USB_F_MTP=m</code>); ACM, ECM, NCM, RNDIS, EEM, mass storage and
+FunctionFS are all off. A second gadget cannot be created (ENOMEM).</li>
+<li><strong>Kernel modules:</strong> <code>CONFIG_MODULES=y</code>, no module
+signing, <code>KALLSYMS_ALL</code>, no <code>STRICT_DEVMEM</code>,
+<code>modules_disabled</code> = 0. A module built for this kernel could add a
+USB network function.</li>
+<li><strong>MTP view:</strong> the SD storage is "Camera layout (DCIM)": the stock
+mtpd shows only photos, not <code>SCRIPT/</code>.</li>
+<li><strong>USB and shooting:</strong> switched on with the cable attached, the
+camera first showed the USB screen (lens closed). After off and on it went to
+shooting mode with the UDC "configured", and the scripted AF presses worked.</li>
+<li><strong>busybox</strong> 1.24.1: <code>nc</code>, <code>sort</code>,
+<code>tr</code> and others are applets without a command link; call them as
+<code>busybox nc</code> etc.</li>
+<li><strong>webapid</strong> listens on <code>0.0.0.0:80</code> with Wi-Fi off and
+answers on <code>127.0.0.1</code>: <code>GET /v1/ping</code>, <code>GET
+/v1/props</code> (all settings, <code>focusSetting</code> "spot" for the
+Select mode, <code>focused</code>, battery; also the Wi-Fi SSID and key, so the
+probe output stays local). <code>POST /v1/lens/focus</code> answers
+<code>{"errCode":200,"captureId":n}</code> and starts AF 40 ms later.</li>
+</ul>
+<p><strong>The API AF is the half-press AF.</strong> In the trace the call
+without a position ran exactly like the three scripted half-presses after it:
+pre-move, one sampling pass at 200 fps, lock (actions 8, 128), area 0, final
+position −16317 (the presses: −16309 to −16317), 260 ms. With
+<code>pos=50,50</code> it used area 1, needed two passes at 100 fps and 492 ms,
+so a position selects another AF area.</p>
+<p>Consequence: the card's Linux script can start AF itself through
+<code>127.0.0.1</code>, and a computer on the camera's Wi-Fi can do the same.
+Arm switching and file access over the network need a small endpoint of our own
+on the Linux side (for example <code>busybox httpd</code> with CGI scripts).</p>
+<h2 id="7-remote-test-controls">7. Remote test controls for AF sessions (measured, 2026-11-19)</h2>
+<p>What a computer on the camera's Wi-Fi can change during an AF session, and
+whether it changes the light the AF sees (AF brightness Y and the margin scale
+of the contrast detector, one press each, same scene).</p>
+<p><strong>Shell relay (test card only).</strong> The remote card's startup
+script no longer ends after starting the endpoint. It loops: every 0.4 s it
+looks for <code>SCRIPT/AFDBG/RELAY.TTL</code> and includes it. The
+<code>shell</code> CGI (POST, 1 to 8 lines) writes that file: a sequence
+number, one <code>sendln</code> per line, and a call to <code>RACK.SH</code>,
+which writes the acknowledgement that <code>status</code> shows as
+<code>relay_ack</code>. A guard inside the file skips a sequence number the
+script has already run. Only commands in <code>SHELL_ALLOW</code>
+(<code>tools/af_debug_card.py</code>) pass, with arguments from
+<code>[A-Za-z0-9 ._-]</code>; the Mac checks the same list. The acknowledgement
+takes about 0.5 s. Client: <code>tools/af_remote.py shell 'LINE' …</code> and
+<code>nd on|off</code>. Once, the relay stopped after its second command, before
+a press and <code>ND_open</code>; after a power cycle the same sequence ran
+without a problem (cause unknown). Every call reports whether it was
+acknowledged.</p>
+<p>The engineering shell has 584 commands (a text table in the 1.60 image: name and
+handler address). The ones useful here, with the usage text each handler
+prints:</p>
+<table>
+<thead><tr><th>Control</th><th>How</th><th>Effect on the AF light</th></tr></thead>
+<tbody>
+<tr><td>ND filter</td><td>relay <code>ND_close</code> (in) / <code>ND_open</code> (out)</td><td><strong>Yes</strong>: Y 357 k → 109 k (×0.30, about 1.7 stops), margin scale 3.3 → 11.3; stays set across presses</td></tr>
+<tr><td>Mode dial</td><td>relay <code>SW_md 0..6</code> (P, Av, Tv, M, U3, U2, U1)</td><td>none by itself; the API then reports the new mode and its <code>avList</code></td></tr>
+<tr><td>Aperture</td><td>relay <code>camctl_set_aperture</code> APEX (3 = f/2.8, 5 = f/5.6, 8 = f/16), in Av or M</td><td>none (f/2.8 to f/16: same Y and scale; the AF runs wide open)</td></tr>
+<tr><td>ISO</td><td>relay <code>camctl_set_iso</code> APEX, or API <code>sv</code></td><td>none</td></tr>
+<tr><td>Exposure compensation</td><td>relay <code>camctl_set_exp_comp</code>, or API <code>PUT /v1/params/camera</code> form <code>xv=+0.3</code> (unencoded plus sign; <code>%2B</code> and JSON are refused)</td><td>none</td></tr>
+<tr><td>AF area mode</td><td>API <code>PUT /v1/params/lens</code> <code>focusSetting=</code> (spot, inf, snap, multiauto, pinpoint, …)</td><td>defocus between presses</td></tr>
+<tr><td>AF point</td><td>API <code>POST /v1/lens/focus</code> body <code>pos=x,y</code>; <code>af_remote.py --pos x,y</code></td><td>no visible change in spot mode at 25/50/75 % (same Y, scale and lock position); not verified that it moves the point</td></tr>
+<tr><td>Focus motor</td><td>relay <code>AF_hp</code>, <code>AF_drive dir pulses</code> ("Dir %d, Pulse %d")</td><td>not tried</td></tr>
+<tr><td>Buttons</td><td><code>SW_up</code>, <code>SW_down</code>, <code>SW_left</code>, <code>SW_right</code>, <code>SW_ok</code>, <code>SW_menu</code>, <code>SW_fn</code>, <code>SW_cd</code> … (only <code>SW_md</code>, <code>SW_cd</code>, <code>SW_sws</code>, <code>SW_swr</code> are in the allowlist)</td><td>not tried; would move the AF point in Select mode</td></tr>
+</tbody></table>
+<p>So the only remote dimmer is the ND filter, one step of about 1.7 stops; the
+lamp still sets the light level otherwise. The allowlist lives in the CGI on
+the RAM disk, so it can be widened over Wi-Fi without a card swap (an uploaded
+tool can rewrite <code>/tmp/afwww/cgi-bin/shell</code> until the next power-on).</p>
 </main>
 </div>
 <script>
