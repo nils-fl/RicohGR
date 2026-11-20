@@ -1,0 +1,68 @@
+# GR Blog and others: Negative Film settings and a Kodak Portra recipe
+#
+# From Ricoh's GR Blog (grblog.jp) and a recipe gist.
+# Read on 2026-11-20. Values as published, not checked on a camera.
+#
+# How the published values were turned into settings:
+# - An exposure range ("-1/3 to +1/3") becomes its middle, rounded toward 0 to a
+#   third of a stop; the note keeps the range as published.
+# - "ISO up to 6400" is iso_max (the auto-ISO upper limit); a single ISO is iso.
+# - "Medium" is mid. A setting the page leaves out stays out of the recipe.
+# - Values the GR IIIx firmware has no setting for are left out; the note says so.
+# Check: python3 tools/recipes.py recipes/gr-blog.txt
+
+format 2
+
+[Negative Film (factory)]
+control = negative_film
+saturation = 0
+hue = 0
+key = +2
+contrast = 0
+contrast_highlight = 0
+contrast_shadow = -1
+sharpness = 0
+shading = 0
+clarity = 0
+author = Ricoh (OKUBO, product planner)
+source = https://www.grblog.jp/en/article/6509/
+note = Ricoh's own Negative Film settings as listed on the GR Blog; white balance and shooting settings not given.
+
+[Asakura Negative Film]
+control = negative_film
+saturation = -2
+hue = 0
+key = 0
+contrast = +3
+contrast_highlight = +4
+contrast_shadow = -4
+sharpness = 0
+shading = 0
+clarity = 0
+wb = multi_auto
+wb_shift_ab = b5
+wb_shift_gm = 0
+author = Asakura (GR Blog)
+source = https://www.grblog.jp/en/article/7151/
+note = Sharpness and everything else at the default. Built from the author's Positive Film customisation.
+
+[Real Analog Kodak Portra]
+control = positive_film
+saturation = +1
+hue = -4
+key = +3
+contrast = -3
+contrast_highlight = -4
+contrast_shadow = +4
+sharpness = 0
+shading = 0
+clarity = 0
+wb = shade
+wb_shift_ab = a14
+wb_shift_gm = 0
+highlight_correction = auto
+shadow_correction = auto
+peripheral_correction = on
+high_iso_nr = auto
+source = https://gist.github.com/rey/b1d5d580738f28f95dac53e6d6af3c85
+note = Published in the gist as 'My Kodak Portra Settings' for the GR III; it credits realanalogfilm.com/photography-blog/ricoh-gr-iii-kodak-portra-400-recipe.html.

@@ -49,6 +49,11 @@ file format</a>
 <ul>
 <li><a href="#file-layout" id="toc-file-layout">File layout</a></li>
 <li><a href="#keys" id="toc-keys">Keys</a></li>
+<li><a href="#format-2" id="toc-format-2">Format 2: shooting settings and
+recipe information</a></li>
+<li><a href="#firmware-values" id="toc-firmware-values">Value sets from
+the firmware</a></li>
+<li><a href="#community" id="toc-community">Community recipes</a></li>
 <li><a href="#checking-a-file" id="toc-checking-a-file">Checking a
 file</a></li>
 </ul></li>
@@ -71,15 +76,19 @@ feasibility</a> §4.3-4.4).</p>
 <h2 id="file-layout">File layout</h2>
 <ul>
 <li>UTF-8 text in the card root, named <code>RECIPES.TXT</code>.</li>
-<li>First non-blank line: <code>format 1</code>.</li>
+<li>First non-blank line: <code>format 1</code>, or <code>format 2</code>
+when the file uses a <a href="#format-2">format-2 setting</a>. Format 2
+is a superset; a format-1 file stays valid.</li>
 <li>Each recipe is a <code>[Name]</code> header followed by
 <code>key = value</code> lines.</li>
 <li><code>#</code> starts a comment. Blank lines are ignored. Names are
 case-insensitive for keys and values; recipe names keep their case.</li>
 <li>A setting that is left out is simply not dialled in; it is not
-forced to 0.</li>
-<li>At most 32 recipes; names at most 16 characters (one screen
-line).</li>
+forced to 0. That matters: the camera's defaults are not 0 for every
+control (Negative Film starts at High/Low Key +2, Contrast (Shadow) −1,
+per the <a href="https://www.grblog.jp/en/article/6509/">GR Blog</a>).</li>
+<li>At most 64 recipes; names at most 32 characters. (The camera cannot
+name a Custom slot, so the name only lives in the file and the app.)</li>
 </ul>
 <div class="sourceCode" id="cb1"><pre
 class="sourceCode ini"><code class="sourceCode ini"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># GR recipes, format 1</span></span>
@@ -129,9 +138,12 @@ class="sourceCode ini"><code class="sourceCode ini"><span id="cb1-1"><a href="#c
 <td><code>toning</code></td>
 <td>monotone controls: <code>none</code>, <code>sepia</code>,
 <code>red</code>, <code>green</code>, <code>blue</code>,
-<code>purple</code>; bleach bypass / retro / HDR tone:
-<code>none</code>, <code>1</code>, <code>2</code>, <code>3</code>; cross
-process: <code>basic</code>, <code>magenta</code>, <code>yellow</code></td>
+<code>purple</code>; bleach bypass: <code>none</code>,
+<code>cool</code>, <code>warm</code> (the menu's --, C, W); retro:
+<code>-4</code>..<code>+4</code> (written <code>-1</code>, <code>0</code>,
+<code>+1</code>); HDR tone: <code>none</code>, <code>bw</code>,
+<code>sepia</code>; cross process: <code>basic</code>,
+<code>magenta</code>, <code>yellow</code></td>
 <td>meaning depends on the control</td>
 </tr>
 <tr>
@@ -143,12 +155,12 @@ process: <code>basic</code>, <code>magenta</code>, <code>yellow</code></td>
 <tr>
 <td><code>grain</code></td>
 <td><code>0</code>..<code>3</code></td>
-<td>0 = off</td>
+<td>0 = off; 1–3 = Low, Mid, High</td>
 </tr>
 <tr>
 <td><code>hdr_strength</code></td>
-<td><code>0</code>..<code>3</code></td>
-<td>HDR Tone only</td>
+<td><code>1</code>..<code>3</code></td>
+<td>HDR Tone only; Low, Mid, High</td>
 </tr>
 </tbody>
 </table>
@@ -156,7 +168,170 @@ process: <code>basic</code>, <code>magenta</code>, <code>yellow</code></td>
 parameter the control does not have (for example <code>saturation</code>
 on a monotone control, or <code>clarity</code> on Soft Monotone). The
 supported sets follow the camera's capability table (<a
-href="firmware-mod-feasibility.html">feasibility doc</a> §4.4).</p>
+href="firmware-mod-feasibility.html">feasibility doc</a> §4.4). Cross
+Process, added in firmware 1.30, has every colour parameter
+(saturation through clarity) plus toning: its <code>UserData</code>
+names list them all.</p>
+<h2 id="format-2">Format 2: shooting settings and recipe information</h2>
+<p>Published recipes also set white balance, exposure and the
+corrections. Format 2 adds these keys. They suit every control. In a
+<code>format 1</code> file they are an error
+(<code>line 4: 'wb' needs 'format 2'</code>).</p>
+<table>
+<thead><tr><th>Key</th><th>Values</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>wb</code></td><td><code>auto</code>, <code>multi_auto</code>,
+<code>daylight</code>, <code>shade</code>, <code>cloudy</code>,
+<code>fluorescent_d</code>, <code>fluorescent_n</code>,
+<code>fluorescent_w</code>, <code>fluorescent_l</code>,
+<code>tungsten</code>, <code>cte</code>, <code>kelvin</code></td>
+<td>fluorescent D/N/W/L = daylight colour, daylight white, cool white,
+warm white</td></tr>
+<tr><td><code>wb_kelvin</code></td><td><code>2500</code>..<code>10000</code></td>
+<td>needed with <code>wb = kelvin</code>, and only then</td></tr>
+<tr><td><code>wb_shift_ab</code></td><td><code>b14</code>..<code>b1</code>,
+<code>0</code>, <code>a1</code>..<code>a14</code></td><td>blue / amber</td></tr>
+<tr><td><code>wb_shift_gm</code></td><td><code>g14</code>..<code>g1</code>,
+<code>0</code>, <code>m1</code>..<code>m14</code></td><td>green / magenta</td></tr>
+<tr><td><code>exposure</code></td><td><code>-5.0</code>..<code>+5.0</code>
+in thirds: <code>-0.3</code>, <code>0.0</code>, <code>+0.3</code>,
+<code>+0.7</code>, <code>+1.0</code> …</td><td>the Wi-Fi API spelling</td></tr>
+<tr><td><code>iso</code>, <code>iso_max</code></td><td><code>100</code>,
+<code>200</code>, <code>400</code> … <code>102400</code> (full stops)</td>
+<td>fixed ISO, or the auto-ISO upper limit; not both</td></tr>
+<tr><td><code>highlight_correction</code></td><td><code>auto</code>,
+<code>on</code>, <code>off</code></td><td></td></tr>
+<tr><td><code>shadow_correction</code></td><td><code>auto</code>,
+<code>low</code>, <code>mid</code>, <code>high</code>, <code>off</code></td>
+<td></td></tr>
+<tr><td><code>peripheral_correction</code></td><td><code>on</code>,
+<code>off</code></td><td>peripheral illumination correction</td></tr>
+<tr><td><code>high_iso_nr</code></td><td><code>auto</code>,
+<code>low</code>, <code>mid</code>, <code>high</code>, <code>off</code></td>
+<td>the camera's per-ISO custom mode is not offered</td></tr>
+<tr><td><code>author</code>, <code>source</code>, <code>note</code></td>
+<td>free text, at most 300 characters</td><td>case kept; no <code>#</code>
+(it starts a comment) and no line break</td></tr>
+</tbody>
+</table>
+<p>The checker writes <code>format 1</code> whenever no recipe uses a
+format-2 key, so format-1 files keep their exact form. The Android app
+(<code>android/</code>) reads the same rules from
+<code>assets/recipe-schema.json</code>, which
+<code>tools/tests/test_recipes.py --regen</code> generates. Shared test
+cases (<code>tools/recipe-vectors.json</code>) keep the two checkers
+identical, messages included.</p>
+
+<h2 id="firmware-values">Value sets from the firmware</h2>
+<p>The engineering shell command <code>UserData Set &lt;name&gt;
+&lt;value&gt;</code> (<code>0x53008038</code>, parser
+<code>0x5334688c</code>; see <a href="gr-mod-landscape.html">GR mod
+landscape</a> §7) compares the setting name, then calls one matcher per
+name. Each matcher compares the value text against a fixed list and
+passes a code to a setter. Reading those lists (Read; GR IIIx 1.60)
+gives the value sets above:</p>
+<table>
+<thead><tr><th>UserData name (Custom 1 shown)</th><th>Value texts → code</th></tr></thead>
+<tbody>
+<tr><td><code>StillImageControlNo1Param&lt;Control&gt;Saturation</code> and the other nine-step parameters</td>
+<td><code>M4</code>…<code>M1</code>, <code>OFF</code>,
+<code>P1</code>…<code>P4</code> → 0..8 (matcher e.g. <code>0x532f2ccc</code>)</td></tr>
+<tr><td><code>…MonotoneGRColorToneMonotone</code> (all four monotone controls)</td>
+<td><code>OFF</code>, <code>Sepia</code>, <code>Red</code>,
+<code>Green</code>, <code>Blue</code>, <code>Purple</code> → 0..5</td></tr>
+<tr><td><code>…BleechBypass_GRColorToneBleechBypass</code> (<code>0x532f9a10</code>)</td>
+<td><code>Normal</code> 1, <code>Cool</code> 2, <code>Warm</code> 3; the menu shows
+them as --, C, W, so Normal is the plain look and there is no separate Off</td></tr>
+<tr><td><code>…RetroColorToneRetro</code></td><td><code>M4</code>…<code>P4</code>: a nine-step scale</td></tr>
+<tr><td><code>…HdrCuisineColorToneHdrIntense</code>, <code>…HdrCuisineHdrIntense</code></td>
+<td><code>OFF</code>, <code>BW</code>, <code>Sepia</code>; <code>Low</code> 1, <code>Mid</code> 2, <code>High</code> 3</td></tr>
+<tr><td><code>StillFwupImageControlNo1ParamCrossProcessColorToneCrossProcess</code></td>
+<td><code>Basic</code>, <code>Magenta</code>, <code>Yellow</code></td></tr>
+<tr><td><code>…Particle</code> (grain; monotone family and
+<code>AfterRelease…NegativeFilmParticle</code>)</td>
+<td><code>Off</code> 0, <code>Low</code> 3, <code>Mid</code> 2, <code>High</code> 1</td></tr>
+<tr><td><code>…FilterEffectCustom</code></td><td><code>OFF</code>,
+<code>Custom1</code>…<code>Custom4</code>; each custom filter has R/G/B
+mix values (<code>FilterEffectRCustom1</code> …)</td></tr>
+<tr><td><code>StillWhiteBalance</code> (<code>0x532df1bc</code>)</td>
+<td><code>Auto</code> 0, <code>Multi</code> 1, <code>Daylight</code> 2,
+<code>Shade</code> 3, <code>Cloudiness</code> 4, <code>Flu_D</code>
+5, <code>Flu_N</code> 6, <code>Flu_W</code> 7, <code>Flu_L</code> 8,
+<code>Tungsten</code> 9, <code>Cte</code> 17, <code>Manual1</code> 11,
+<code>ColorTemp1</code> 14, <code>Custom1</code>–<code>3</code></td></tr>
+<tr><td><code>StillWhiteBalanceColorTemp</code></td><td>a number (Kelvin), parsed with strtol</td></tr>
+<tr><td><code>StillWhiteBalance&lt;Mode&gt;AdjustBA</code> / <code>…AdjustGM</code>, one pair per mode</td>
+<td><code>B14</code>…<code>B1</code>, <code>NORMAL</code>,
+<code>A1</code>…<code>A14</code> → 0..28; <code>G14</code>…<code>NORMAL</code>…<code>M14</code></td></tr>
+<tr><td><code>CommonXv</code></td><td>a float (EV), parsed with strtof</td></tr>
+<tr><td><code>StillHighlightCorrect</code></td><td><code>Auto</code>, <code>On</code>, <code>Off</code></td></tr>
+<tr><td><code>StillShadowCorrect</code></td><td><code>Auto</code>, <code>Low</code>, <code>Mid</code>, <code>High</code>, <code>Off</code></td></tr>
+<tr><td><code>StillLensShadingCorrection</code></td><td><code>On</code>, <code>Off</code> (peripheral illumination correction)</td></tr>
+<tr><td><code>StillHighIsoNR</code></td><td><code>Auto</code>, <code>Low</code>, <code>Mid</code>, <code>High</code>, <code>Custom</code>, <code>Off</code></td></tr>
+</tbody>
+</table>
+<p>Not settled by these lists (Not verified on a camera):</p>
+<ul>
+<li>The Kelvin step (published recipes use 5250K, so at most 50K) and
+the exact exposure and ISO limits.</li>
+<li>Whether any of these writes survive a power cycle. <code>UserData
+Set</code> has never been run on this camera.</li>
+</ul>
+<p>The recipe name is the one part of a recipe the camera has no setting
+for.</p>
+<h3 id="camera-check">Checked on the camera</h3>
+<p>In-camera RAW developments of R0006328 on 2026-11-20 (R0006333–6336),
+read from the maker notes (Read):</p>
+<ul>
+<li>Bleach Bypass toning "C" is stored as 2 in tag 0x0247 slot 14, so
+"--" is Normal (1) and W is Warm (3).</li>
+<li>Retro toning +3 is stored as 3 in tag 0x0247 slot 8, a signed
+scale.</li>
+<li>White balance Daylight with shift A3 G2 is stored as
+<code>WBShiftAB</code> −3, <code>WBShiftGM</code> +2: in the maker note
+blue and green count positive. The file format uses the camera's letters
+(<code>a3</code>, <code>g2</code>), so it is not affected.</li>
+<li>Maker note <code>ImageTone</code> codes: 256 Standard, 262 Positive
+Film, 263 Bleach Bypass, 264 Retro, 267 Negative Film.</li>
+</ul>
+
+<h2 id="community">Community recipes</h2>
+<p>Three files in <code>recipes/</code> hold recipes published for the GR
+III / GR IIIx, read on 2026-11-20, with author and source link for each.
+The Android app ships them as its starting collections. The values are as
+published; none were checked on a camera.</p>
+<table>
+<thead><tr><th>File</th><th>Source</th><th>Recipes</th></tr></thead>
+<tbody>
+<tr><td><code>recipes/luke-taylor.txt</code></td><td>Luke Taylor's <a
+href="https://seadragon-triangle-j7sg.squarespace.com/blog/category/Ricoh+GR+III">blog,
+category Ricoh GR III</a></td><td>24</td></tr>
+<tr><td><code>recipes/ricoh-recipes.txt</code></td><td>Ritchie Roesch's <a
+href="https://ricohrecipes.com/ricoh-gr-iii-recipes/">Ricoh Recipes</a>,
+the free ones from all eight collections; the 7 patron-only recipes are
+left out</td><td>38</td></tr>
+<tr><td><code>recipes/gr-blog.txt</code></td><td>Ricoh's <a
+href="https://www.grblog.jp/en/article/6509/">GR Blog</a> (factory
+Negative Film values; <a href="https://www.grblog.jp/en/article/7151/">Asakura's
+Negative Film</a>) and a <a
+href="https://gist.github.com/rey/b1d5d580738f28f95dac53e6d6af3c85">Kodak
+Portra gist</a></td><td>3</td></tr>
+</tbody>
+</table>
+<p>How the published values were turned into settings:</p>
+<ul>
+<li>An exposure range ("−1/3 to +1/3, typically") becomes its middle,
+rounded toward 0 to a third of a stop. The note keeps the range.</li>
+<li>"ISO up to 6400" is <code>iso_max</code>; a single ISO is
+<code>iso</code>.</li>
+<li>Luke Taylor's Bleach Bypass toning "White" (Ricoh Superia Summer) is
+read as the menu's W, Warm; the note says so.</li>
+<li>Values the firmware has no setting for are left out, with a note:
+Bleach Bypass toning "Red" (Vintage Fade Film) and Cross Process colour
+tone "Blue" (Xpro Teal).</li>
+<li>A setting the page does not give stays out. Ricoh's factory Negative
+Film values come without white balance.</li>
+</ul>
 <h2 id="checking-a-file">Checking a file</h2>
 <div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/recipes.py RECIPES.TXT</span></code></pre></div>
 <ul>
@@ -166,8 +341,8 @@ href="firmware-mod-feasibility.html">feasibility doc</a> §4.4).</p>
 1, for example
 <code>Street Mono: Contrast +9 out of range (-4..+4)</code>.</li>
 </ul>
-<p>White balance is not part of a recipe: the camera keeps it outside
-the image-control settings. A later format version could add it.</p>
+<p>The same check runs for every file in <code>recipes/</code> in
+<code>python3 -m pytest tools/tests</code> and in the app's unit tests.</p>
 </main>
 </div>
 <script>
