@@ -1011,6 +1011,8 @@ def main():
     n_lock = Counter(p["variant"] for p in ps)
     cd = cand_data()
     n_cmp = sum(len(d["stock"]) + len(d["cand"]) for d in cd)
+    n_s = sum(len(d["stock"]) for d in cd)
+    n_c = sum(len(d["cand"]) for d in cd)
     slow = [d for d in cd if d["fps"] == "29 fps"]
     fast = [d for d in cd if d["fps"] != "29 fps"]
     rng = lambda ds: (f'{100 * min(d["change"] for d in ds):+.0f} to {100 * max(d["change"] for d in ds):+.0f} %'
@@ -1038,8 +1040,8 @@ def main():
             (gain, f"less AF time where the camera drops to 29 fps (dim light), in {len(slow)} scene and "
                    f"light combinations on two days"),
             (rng(fast), "change in AF time in good light (100–200 fps): no slower"),
-            (str(bad_c), f"failed presses or wrong focus with the patch, in {n_cmp} compared presses "
-                         f"(stock: {bad_s})"),
+            (str(bad_c), f"failed presses or wrong focus in {n_c} patched presses "
+                         f"(stock: {bad_s} in {n_s})"),
         ])
         + glossary()
         + f'<details class="more"><summary>About the data</summary><p>Drawn from the raw logs, not copied: '
