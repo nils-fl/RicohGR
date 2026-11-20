@@ -59,8 +59,8 @@ shadow_correction = mid
 peripheral_correction = on
 high_iso_nr = off
 author = Reggie Ballesteros
-source = https://ricohrecipes.com/the-analog-collection/
-note = Exposure as published: -1/3 to +1/3. Analog Collection, published by Ritchie Roesch.
+source = https://reggiebphotography.com/blog/The-Most-Versatile-Ricoh-GR-III-GR-IIIx-Film-Simulation-Recipe-Reggies-Color-Negative
+note = Reggie's own page (2023-12-29) gives the image settings and WB. Exposure (-1/3 to +1/3), ISO limit and peripheral correction from Ritchie Roesch's Analog Collection.
 
 [EktaColor]
 control = negative_film
