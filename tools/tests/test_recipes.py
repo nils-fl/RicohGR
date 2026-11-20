@@ -1,28 +1,17 @@
-"""Tests for tools/recipes.py and the files the Android app takes from it.
+"""Tests for tools/recipes.py (run: pytest tools/tests).
 
-Two generated files are checked in, and these tests fail when either is stale:
-- tools/recipe-vectors.json: shared test cases; the Android port runs the same
-  cases (android/app/src/test/.../RecipeVectorsTest.kt) and must give the same
-  results, error messages included.
-- android/app/src/main/assets/recipe-schema.json: the editor's schema. The app
-  moved to its own repository (its own repository) with a copy of this file;
-  here the schema is only checked and written when android/ exists.
-
-Regenerate both after changing recipes.py:
-    python3 tools/tests/test_recipes.py --regen
+A companion app has a copy of recipes.py with the same rules; its
+repository owns the shared test vectors and the app's schema asset.
 """
-import json
+import re
 import sys
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import recipes as r  # noqa: E402
 
-VECTORS = ROOT / "tools" / "recipe-vectors.json"
-SCHEMA = ROOT / "android" / "app" / "src" / "main" / "assets" / "recipe-schema.json"
 
 H = "format 1\n"
 NINE = [("saturation", "+4"), ("hue", "-4"), ("key", "+1"), ("contrast", "-1"), ("contrast_highlight", "+2"),
@@ -110,23 +99,23 @@ def evaluate(text):
     return out
 
 
-def vectors_json():
-    data = {
-        "about": "Shared test vectors for tools/recipes.py and its Android port. 'expect' is what "
-                 "recipes.py gives. Regenerate with: python3 tools/tests/test_recipes.py --regen",
-        "cases": [{"name": n, "text": t, "expect": evaluate(t)} for n, t in CASES],
-    }
-    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+def test_every_case_evaluates():
+    for name, text in CASES:
+        assert evaluate(text), name
 
 
-def test_vectors_file_is_current():
-    assert VECTORS.read_text() == vectors_json(), "stale: run python3 tools/tests/test_recipes.py --regen"
-
-
-def test_schema_asset_is_current():
-    if not SCHEMA.parent.exists():
-        pytest.skip("no android/ here: the app lives in its own repository")
-    assert SCHEMA.read_text() == r.schema_json(), "stale: run python3 tools/tests/test_recipes.py --regen"
+def test_userdata_lines_pass_the_recipe_card_relay():
+    """Every line must get through recipe_card's shell CGI: allowed command,
+    argument characters [A-Za-z0-9 ._-], and one relay batch per line at most."""
+    import recipe_card as rc
+    for name, text in CASES:
+        out = evaluate(text)
+        for u in out.get("userdata", []):
+            for line in u["lines"]:
+                cmd, _, args = line.partition(" ")
+                assert cmd in rc.ALLOW, line
+                assert re.fullmatch(r"[A-Za-z0-9 ._-]+", args), line
+            assert [l for b in rc.batches(u["lines"]) for l in b] == u["lines"]
 
 
 def test_canonical_round_trip():
@@ -212,13 +201,3 @@ def test_check_name():
     assert r.check_name(" lead")
     assert r.check_name("tab\there")
     assert r.check_name("")
-
-
-if __name__ == "__main__":
-    if sys.argv[1:] != ["--regen"]:
-        raise SystemExit("usage: test_recipes.py --regen   (run the tests with pytest)")
-    VECTORS.write_text(vectors_json())
-    print(f"wrote {VECTORS.relative_to(ROOT)}")
-    if SCHEMA.parent.exists():
-        SCHEMA.write_text(r.schema_json())
-        print(f"wrote {SCHEMA.relative_to(ROOT)}")

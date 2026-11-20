@@ -1,6 +1,20 @@
+# Firmware and everything derived from it: download it yourself (tools/fetch_firmware.py)
 firmware/
 work/
-__pycache__/
-.DS_Store
-site/.wrangler/
 /build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Editors and macOS
+.DS_Store
+._*
+.idea/
+.vscode/
+
+# Site deploy state (wrangler)
+site/.wrangler/

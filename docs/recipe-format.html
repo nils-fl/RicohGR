@@ -215,14 +215,7 @@ in thirds: <code>-0.3</code>, <code>0.0</code>, <code>+0.3</code>,
 </tbody>
 </table>
 <p>The checker writes <code>format 1</code> whenever no recipe uses a
-format-2 key, so format-1 files keep their exact form. The the companion app Android app
-(own repository since 2026-11-20, <a href="https://github.com/its own repository">its own repository</a>)
-carries a copy of this checker and reads the same rules from its
-<code>assets/recipe-schema.json</code>, which its
-<code>tools/tests/test_recipes.py --regen</code> generates. Change the rules in
-both repositories. Shared test
-cases (<code>tools/recipe-vectors.json</code>) keep the two checkers
-identical, messages included.</p>
+format-2 key, so format-1 files keep their exact form.</p>
 
 <h2 id="firmware-values">Value sets from the firmware</h2>
 <p>The engineering shell command <code>UserData Set &lt;name&gt;
@@ -341,17 +334,11 @@ the photo's maker notes and compares them with the recipe.</li>
 <li>Power-cycle without the card and check again: do the values
 stay?</li>
 </ol>
-<p>the companion app shows <b>Send to the camera</b> (Custom 1 / Custom 2) in the
-recipe editor only while this card's endpoint answers. Its Kotlin port of
-the mapping is checked against the same test vectors.</p>
 
 <h2 id="community">Community recipes</h2>
 <p>Three files in <code>recipes/</code> hold recipes published for the GR
 III / GR IIIx, read on 2026-11-20, with author and source link for each.
-The the companion app app (own repository) bundles a copy and adds them to its single recipe list, which can be filtered by
-image control, with favorites pinned on top. Older app versions made one
-collection per file; the app removes those collections once (library version 2)
-and keeps the recipes. The values are as published; none were checked on a
+The values are as published; none were checked on a
 camera. Reggie's Color Negative links to Reggie Ballesteros' own page
 (2023-12-29), which matches the bundled values for every setting it lists.</p>
 <table>

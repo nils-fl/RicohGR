@@ -238,7 +238,7 @@ def recipe_from(file: Path, name: str):
 
 # ---- verify ------------------------------------------------------------------------
 
-# Maker-note decoding as in the companion app's tools/grcal/engine.py (settings_of).
+# Maker-note decoding: tag 0x0247 slots and ImageTone codes, docs/recipe-format.html#camera-check.
 TONE = {256: "standard", 257: "vivid", 258: "monotone", 262: "positive_film", 263: "bleach_bypass",
         264: "retro", 267: "negative_film"}
 SLOTS = {0: "saturation", 1: "hue", 2: "key", 3: "contrast", 4: "contrast_highlight", 5: "contrast_shadow",

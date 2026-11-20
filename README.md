@@ -1,80 +1,80 @@
-# Ricoh GR IIIx firmware: offline AF analysis
+# Ricoh GR IIIx firmware: AF study and camera tools
 
 [![Documentation](https://img.shields.io/badge/docs-index-9a3412)](docs/index.html)
 
-A personal, read-only study of how the Ricoh GR IIIx autofocus works, built
-from the official firmware package.
+A study of how the Ricoh GR IIIx autofocus works, read from the official
+firmware 1.60, and the tools built on it:
 
-**Scope**
-- Everything here is **offline analysis**, with one exception:
-  `tools/af_debug_card.py` writes card files that turn on the camera's own AF
-  debug log ([`docs/af-debug-log.html`](docs/af-debug-log.html)). They change a
-  camera setting (SD scripts) and nothing in flash. No tool talks to a camera
-  or writes to a card directly.
-- `tools/gr_repack.py` can write a firmware file that would pass the camera's
-  update checks. Nothing in this repository has been flashed. A modified
-  firmware that fails to boot is likely unrecoverable; read
-  [`docs/firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html)
-  first.
-- The repository **does not contain firmware**. `firmware/` and `work/` are
-  git-ignored. Download the firmware yourself from Ricoh's official support
-  page; the tools below do that for you.
+- **Offline analysis**: unpack the update file, map its regions, disassemble
+  the RTOS, index names by subsystem.
+- **SD-card setups** that use the camera's own script and engineering-shell
+  features: the built-in AF debug log, a Wi-Fi test bench for AF patches in
+  RAM, and a card that writes recipes into the Custom 1/2 image-control slots.
+- **A firmware build** with a tested dim-light AF setting
+  (`tools/af_firmware.py`), flashed on the maintainer's camera on 2026-11-20.
 
-## Documents
+Everything is for the **GR IIIx with firmware 1.60** only. Other models and
+versions are refused by the tools or simply not covered.
 
-Open [`docs/index.html`](docs/index.html) in a browser to read them.
+> **Read this before using anything on a camera.**
+> - The SD-card setups change no firmware. A power-off undoes everything they
+>   do in RAM, and without the card the camera starts as before.
+> - Flashing a modified update file is different. If a modified RTOS crashed
+>   before the update check, the camera could not reach its own updater
+>   again, and no recovery path is known
+>   ([`docs/firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) §2).
+>   The AF build changes only contrast-AF code, which the update start-up
+>   mode does not run, and the official 1.60 file can be flashed back over it.
+>   It is still at your own risk.
+> - Use a separate card, formatted in the camera, with a full battery.
 
-| Document | Content |
+## Repository layout
+
+| Path | What |
 | --- | --- |
-| [`docs/af-subsystem.html`](docs/af-subsystem.html) | How the GR IIIx autofocus works: phase detection, contrast detection, how the two are combined, lens calibration, continuous AF, where the time goes (§9), and software levers with practical tips (§10) |
-| [`docs/caf-search-state-machine.html`](docs/caf-search-state-machine.html) | Outline of the per-frame contrast-AF search: action codes, search paths, reversal cap, peak checks. Partial decode with unresolved points listed. |
-| [`docs/remote-control.html`](docs/remote-control.html) | What the Wi-Fi API and USB (MTP, Pentax vendor mode, factory channel) can set, for a recipe manager |
-| [`docs/firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) | Whether a modified firmware would be accepted (checksum and version rule, no signature) and what happens if it fails (no recovery found) |
-| [`docs/recipe-format.html`](docs/recipe-format.html) | The plain-text `RECIPES.TXT` format for a recipe library and the offline checker; needs no firmware change |
-| [`docs/gr3x-vs-gr4.html`](docs/gr3x-vs-gr4.html) | GR IIIx vs GR IV firmware comparison: container, platform, subsystem diff, and an address-level comparison of the AF code (§5) |
-| [`docs/af-debug-log.html`](docs/af-debug-log.html) | Camera procedure (untested): turn on SD scripts and the built-in AF debug log, shooting sessions, recovery |
-| [`docs/gr-mod-landscape.html`](docs/gr-mod-landscape.html) | Community mods for the GR IIIx (GRKit, GR Mod, others) and how our AF work could build on GRKit; built-in AF debug logging; recipes via `UserData Set` |
+| `docs/` | The documents, as HTML. Start at [`docs/index.html`](docs/index.html) |
+| `tools/` | Python tools (table below); `tools/tests/` for pytest |
+| `recipes/`, `RECIPES.TXT.example` | Community recipes and the recipe file format |
+| `site/` | Static summary page (Cloudflare Workers assets); the maintainer's deployment |
+| `firmware/` | *Ignored.* Official update files, downloaded by `tools/fetch_firmware.py` |
+| `work/` | *Ignored.* Everything generated: decoded images, caches, card files, camera logs |
 
-Statements in the documents are labelled **Read** (taken from the code or
-data), **Structural** (from names, strings and dependencies) or **Inferred**
-(interpreted). No timings were measured.
+The repository contains no firmware and none of its decoded content. Each
+developer downloads the official file from Ricoh.
 
-## Tools
+## Setup
 
-Requirements: Python 3. `tools/rtos_analysis.py` also needs
-[Capstone](https://www.capstone-engine.org/) (`pip install capstone`).
+Requirements:
+- Python 3.10 or newer;
+- `pip install -r requirements.txt` (Capstone for the RTOS tools, Optuna for
+  the parameter search, pytest);
+- `exiftool` for `recipe_card.py verify`;
+- macOS was used throughout. Card and Wi-Fi steps assume it, the Python tools
+  do not.
 
 ```sh
-# 1. Download the official GR IIIx 1.60 package and extract the .bin into firmware/
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+
+# Download the official GR IIIx 1.60 package and extract the .bin into firmware/
 python3 tools/fetch_firmware.py
 
-# 2. Decode the container into work/ and print header, version and checksum
+# Decode the container into work/ and print header, version and checksum
 python3 tools/gr_unpack.py firmware/fwdc243b-v160.bin
 
-# 3. Map the regions of the decoded payload (parameter blocks, RTOS, kernel, device tree, rootfs)
+# Map the payload regions, index names by subsystem
 python3 tools/segments.py work/fwdc243b-v160.decoded.bin
-
-# 4. Index source-file names, C++ class names and AF log strings by subsystem
 python3 tools/strings_index.py work/fwdc243b-v160.decoded.bin
+
+pytest tools/tests
 ```
 
-| Tool | Purpose |
-| --- | --- |
-| `tools/fetch_firmware.py` | Downloads an official package from Ricoh (`--package gr3x_v160.zip` by default) and records its SHA-256 |
-| `tools/gr_unpack.py` | Decodes the firmware container for analysis |
-| `tools/segments.py` | Lists payload regions and device-tree properties; `--split` writes them to `work/segments/` |
-| `tools/strings_index.py` | Writes `work/index.json`, grouping names by subsystem (AF, lens, AE, stabilisation, …) |
-| `tools/af_debug_card.py` | Writes the SD-card files that turn SD scripts on and off, enable the camera's AF debug log, snapshot AF state, and optionally apply the AF-C fast-drive RAM patch (into `work/af-debug-card/`; see `docs/af-debug-log.html`) |
-| `tools/af_csv.py` | Summarises the contrast-AF debug CSVs from the camera: one row per run with phase result, samples, peak and samples after the peak |
-| `tools/af_light.py` | Light, noise and peak margin of each logged contrast-AF sweep, by sensor mode (why dim-light AF needs light) |
-| `tools/af_timing_tally.py` | Summarises AF timings you measured from high-speed video (offline arithmetic on your own CSV; see `docs/af-subsystem.html` §10.6) |
-| `tools/initramfs.py` | Lists or extracts files from the Linux initramfs (e.g. `webapid`, `mtpd`) into `work/initramfs/` |
-| `tools/gr_repack.py` | Rebuilds a container from a decoded payload and re-runs the camera's update checks (offline; writes a file, installs nothing) |
-| `tools/patch_guard.py` | Allows payload changes only in RAW-development code and data, keeping the updater and start-up untouched (run by `gr_repack.py`) |
-| `tools/recipes.py` | Validates a `RECIPES.TXT` recipe library against the camera capability table and prints each recipe as a dial-in list |
-| `tools/rtos_analysis.py` | Interactive helpers for reading the RTOS image (disassembly, cross-references, vtables) |
+Check the reference values for 1.60:
+- model `GR IIIx`, version `1.60.11.17`;
+- package SHA-256 `708e79f3…31c7`;
+- decoded payload 59,718,388 bytes.
 
-Using `tools/rtos_analysis.py` from Python:
+Reading the RTOS from Python:
 
 ```python
 import sys; sys.path.insert(0, "tools")
@@ -84,27 +84,153 @@ vtables_for("ZafCorrelation")        # find a class's virtual methods
 ```
 
 The first cross-reference build takes a few minutes and is cached in
-`work/xrefs-w16.pkl` (GR IIIx only; `build_xrefs()` refuses other firmware).
+`work/xrefs-w16.pkl`.
 
-Verified reference values for GR IIIx 1.60:
-- model `GR IIIx`, version `1.60.11.17`;
-- package SHA-256 `708e79f3…31c7`;
-- decoded payload 59,718,388 bytes.
+## Camera setups
+
+Every card tool writes files into `work/`, never to a card directly. Copy
+the folder's contents to the card root yourself. On a Mac, remove the `._*`
+files macOS leaves on exFAT cards before ejecting (`dot_clean -m /Volumes/<card>`).
+
+### 1. Turn SD scripts on (once)
+
+```sh
+python3 tools/af_debug_card.py      # writes work/af-debug-card/{enable,log,disable}
+```
+
+1. Copy the contents of `work/af-debug-card/enable/` to the card root.
+2. Hold MENU and switch on. The camera shows "Mode Set Command", then
+   "Complete", and switches itself off.
+3. Delete the two enable files from the card.
+
+From now on the camera runs `SCRIPT/STARTUP.TTL` from the card at each
+power-on. `disable/` turns this off again the same way. Full procedure and
+what to do if the camera shows something else:
+[`docs/af-debug-log.html`](docs/af-debug-log.html) §2–3 and §7.
+
+Only one setup can be on a card at a time, since each brings its own
+`SCRIPT/STARTUP.TTL`.
+
+### 2. AF debug log
+
+Copy `work/af-debug-card/log/SCRIPT` to the card. At each power-on it turns
+on the camera's own contrast-AF CSV log. Analyse the CSVs with
+`tools/af_csv.py` and `tools/af_light.py`; `tools/af_charts.py` rebuilds
+[`docs/af-charts.html`](docs/af-charts.html) from your logs in
+`work/af-logs/`. Procedure, sessions and results:
+[`docs/af-debug-log.html`](docs/af-debug-log.html).
+
+### 3. Wi-Fi AF test bench (stock firmware only)
+
+`python3 tools/af_debug_card.py --remote` writes a card that serves a small
+endpoint on port 8080. With it `tools/af_remote.py` presses AF through the
+camera's Wi-Fi API, switches RAM patches ("arms") and reads the AF trace.
+`tools/af_optimize.py` runs the Optuna parameter search on top of it.
+
+- Join the camera's Wi-Fi on the Mac. Requests are pinned to `--iface`
+  (default `en0`) in case the wired network uses the same 192.168.0.x range.
+- Patches live in RAM and are gone at power-off.
+- **Not on a camera with the AF build flashed.** The bench expects stock
+  words at every patch site, and `arm STOCK` writes stock words into RAM,
+  which mixes the flashed setting with stock code until the next power-on.
+
+### 4. Recipes into Custom 1 / Custom 2 (test, not yet run on a camera)
+
+```sh
+python3 tools/recipe_card.py card                      # writes work/recipe-card/
+python3 tools/recipe_card.py lines recipes/ricoh-recipes.txt "Reggie's Color Negative" --slot 1
+```
+
+Copy `work/recipe-card/*` to the card root, switch on (the AF lamp flashes
+twice when ready) and join the camera's Wi-Fi. `check`, then `send … --slot N`
+writes the recipe with the engineering shell's `UserData Set`. The relay on
+this card accepts only `UserData` and the AF lamp. Test plan and the
+settings that are not sent yet:
+[`docs/recipe-format.html#send-to-camera`](docs/recipe-format.html#send-to-camera).
+
+### 5. The AF firmware build (flash at your own risk)
+
+```sh
+python3 tools/af_firmware.py        # writes work/firmware-af/FWDC243B.BIN
+```
+
+The build changes 19 words in the contrast-AF code, the setting tested on
+the bench as X875+FALLS2+OPT+NO29: better dim-light AF, 49 instead of 29 fps
+in dim light. `tools/gr_repack.py` re-runs the updater's container checks
+and, with `--allow af`, `tools/patch_guard.py` refuses any change outside
+the contrast-AF units. What changes, the AF-C check before flashing and the
+first results: [`docs/af-debug-log.html#af-flash`](docs/af-debug-log.html#af-flash).
+
+To flash: full battery, a card with only `FWDC243B.BIN` in its root, hold
+MENU while switching on, confirm the update, switch off when it says
+completed. Remove the file from the card afterwards: MENU at power-on also
+starts the update. **To go back**, flash the official 1.60 file the same way.
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `fetch_firmware.py` | Downloads an official package from Ricoh (`--package gr3x_v160.zip` by default) and records its SHA-256 |
+| `gr_unpack.py` | Decodes the firmware container |
+| `segments.py` | Lists payload regions and device-tree properties; `--split` writes them to `work/segments/` |
+| `strings_index.py` | Writes `work/index.json`, grouping names by subsystem (AF, lens, AE, stabilisation, …) |
+| `initramfs.py` | Lists or extracts files from the Linux initramfs (e.g. `webapid`, `mtpd`) |
+| `rtos_analysis.py` | Interactive helpers for reading the RTOS image (disassembly, cross-references, vtables) |
+| `gr_repack.py` | Rebuilds a container from a decoded payload and re-runs the updater's checks (writes a file, installs nothing) |
+| `patch_guard.py` | Allows payload changes only in RAW-development code (default) or contrast-AF code (`--allow af`) |
+| `af_firmware.py` | Builds the AF update file of setup 5 |
+| `af_debug_card.py` | Card files for SD scripts, the AF debug log, the Wi-Fi bench (`--remote`) and AF trace decoding |
+| `af_remote.py` | Drives the Wi-Fi bench from the Mac: presses, arms, sessions, trace fetch |
+| `af_optimize.py` | Optuna search over the contrast-AF detector constants, on the bench |
+| `af_csv.py` | One row per contrast-AF run from the debug CSVs |
+| `af_light.py` | Light, noise and peak margin of each logged sweep, by sensor mode |
+| `af_charts.py` | Writes `docs/af-charts.html` from your logs |
+| `af_timing_tally.py` | Summarises AF timings measured from high-speed video |
+| `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |
+| `recipe_card.py` | The recipe card of setup 4 and its Mac commands |
+
+## Documents
+
+| Document | Content |
+| --- | --- |
+| [`af-subsystem.html`](docs/af-subsystem.html) | How the AF works: phase and contrast detection, how they combine, lens calibration, continuous AF, where the time goes (§9), software levers (§10) |
+| [`caf-search-state-machine.html`](docs/caf-search-state-machine.html) | The per-frame contrast-AF search: action codes, paths, reversal cap, peak checks (partial decode) |
+| [`af-debug-log.html`](docs/af-debug-log.html) | Camera procedures, all sessions, the RAM patches, the parameter search and the flashed setting |
+| [`af-charts.html`](docs/af-charts.html) | Charts of the AF measurements |
+| [`firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) | Whether a modified firmware is accepted (checksum and version rule, no signature) and what a failure means |
+| [`remote-control.html`](docs/remote-control.html) | What the Wi-Fi API and USB can set |
+| [`recipe-format.html`](docs/recipe-format.html) | The `RECIPES.TXT` format, the firmware's value sets and sending recipes to Custom 1/2 |
+| [`gr-mod-landscape.html`](docs/gr-mod-landscape.html) | Community mods (GRKit, GR Mod, others), built-in AF debug logging, recipes via `UserData Set` |
+| [`gr3x-vs-gr4.html`](docs/gr3x-vs-gr4.html) | GR IIIx vs GR IV firmware: container, platform, AF code at address level |
+
+Statements in the documents are labelled **Read** (taken from the code or
+data), **Structural** (from names, strings and dependencies) or **Inferred**
+(interpreted).
 
 ## Key AF findings in brief
 
 - AF runs entirely in the real-time OS. Linux only relays settings.
 - **Phase detection** correlates left- and right-looking pixel signals block
-  by block. It uses SAD with NEON, verifies the minimum, grades reliability
-  against the scene's contrast, and interpolates the shift to a fraction of a
-  sample. The shift is converted to defocus with a per-aperture table and an
-  exit-pupil correction.
-- **Contrast AF** finishes the job. When a phase result is reliable, it jumps
-  the lens to the phase target. It then searches a small window
-  (about 300 × f-number µm) and fits a parabola to find the sharpness peak.
-- Every AF cycle ends with this contrast confirmation. That, together with
-  scenes where phase detection is unreliable, accounts for most of the AF
-  time. See §9 and §10 of the AF document.
+  by block (SAD with NEON), grades reliability against the scene's contrast
+  and interpolates the shift to a fraction of a sample.
+- **Contrast AF** finishes the job: it jumps to the phase target when that is
+  reliable, then searches a small window (about 300 × f-number µm) and fits a
+  parabola to the sharpness peak.
+- In dim light the peak check rejects clear peaks (margin curve, three falls,
+  29 fps). The flashed setting relaxes exactly these; see
+  [`docs/af-debug-log.html`](docs/af-debug-log.html).
+
+## Contributing
+
+- Docs are HTML in `docs/`. Link a new page from `docs/index.html`, and label
+  statements Read / Structural / Inferred.
+- Never commit firmware, decoded images or anything from `work/`. Camera logs
+  stay local; `docs/af-charts.html` carries only the data its charts draw.
+- Never log or commit the camera's Wi-Fi SSID, key, serial or MAC address.
+  `/v1/props` returns them; `af_remote.py` drops them (`PRIVATE_PROPS`).
+- Run `pytest tools/tests` before committing. Changes to the recipe rules in
+  `tools/recipes.py` must also go into the companion copy of the file, which
+  has the shared test vectors.
 
 ## Credits and related work
 
@@ -127,14 +253,14 @@ Verified reference values for GR IIIx 1.60:
   code was used to test `tools/gr_repack.py`; no code from it is included
   here.
 
-## Disclaimer
+## Licence and disclaimer
 
-- Unofficial and not affiliated with Ricoh Imaging.
-- Ricoh, GR and related marks belong to their owners.
-- The findings come from static analysis of one firmware version and may be
-  incomplete or wrong.
-- This project gives no instructions for flashing modified firmware. The camera
-  procedure in [`docs/af-debug-log.html`](docs/af-debug-log.html) (debug log,
-  and an optional one-word RAM patch for AF-C that is gone after power-off) is
-  at your own risk.
-- No licence has been chosen for this repository yet.
+The code and documents are under the [MIT licence](LICENSE). The firmware
+belongs to Ricoh Imaging and is not part of this repository.
+
+- Unofficial and not affiliated with Ricoh Imaging. Ricoh, GR and related
+  marks belong to their owners.
+- The findings come from one firmware version and may be incomplete or
+  wrong.
+- Everything that touches a camera is at your own risk. A failed firmware
+  flash may need a factory repair.
