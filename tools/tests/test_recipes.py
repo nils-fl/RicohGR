@@ -106,6 +106,7 @@ def evaluate(text):
     if not errors:
         out["canonical"] = r.format_file(recs)
         out["dial_in"] = "\n\n".join(r.dial_in(name, body) for name, body in recs)
+        out["userdata"] = [r.userdata(body, 1 + i % 2) for i, (_, body) in enumerate(recs)]
     return out
 
 

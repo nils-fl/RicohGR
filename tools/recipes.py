@@ -253,6 +253,115 @@ def dial_in(name: str, body: dict) -> str:
     return "\n".join(lines)
 
 
+# ---- UserData Set: a recipe as engineering-shell lines for Custom 1 or 2 ----------
+# Names and value texts read from the parser 0x5334688c and its matchers (GR IIIx
+# 1.60, docs/recipe-format.html, "Value sets from the firmware"). Not yet run on
+# a camera. Image-control settings belong to the Custom slot; white balance and
+# the corrections are the camera's current shooting settings.
+
+# control -> (firmware name, name prefix): Negative Film came with firmware 1.20
+# ("AfterRelease"), Cross Process with 1.30 ("StillFwup").
+USERDATA_CONTROL = {
+    "standard": ("Standard", "Still"),
+    "vivid": ("Vivid", "Still"),
+    "monotone": ("MonotoneGR", "Still"),
+    "soft_monotone": ("SoftMonotone", "Still"),
+    "hard_monotone": ("HardMonotone", "Still"),
+    "hi_contrast_bw": ("HighContrastBW", "Still"),
+    "negative_film": ("NegativeFilm", "AfterReleaseStill"),
+    "positive_film": ("PositiveFilm", "Still"),
+    "bleach_bypass": ("BleechBypass_GR", "Still"),
+    "retro": ("Retro", "Still"),
+    "hdr_tone": ("HdrCuisine", "Still"),
+    "cross_process": ("CrossProcess", "StillFwup"),
+}
+USERDATA_PARAM = {
+    "saturation": "Saturation", "hue": "ColorHue", "key": "ImageKey", "contrast": "Contrast",
+    "contrast_highlight": "ContrastHighLight", "contrast_shadow": "ContrastShadow", "sharpness": "Sharpness",
+    "shading": "Shading", "clarity": "ClarityControl", "grain": "Particle", "hdr_strength": "HdrIntense",
+}
+USERDATA_TONING = {   # control -> (name suffix, recipe value -> firmware text)
+    **{c: ("ColorToneMonotone", dict(zip(_MONO_TONING, ("OFF", "Sepia", "Red", "Green", "Blue", "Purple"))))
+       for c in ("monotone", "soft_monotone", "hard_monotone", "hi_contrast_bw")},
+    "bleach_bypass": ("ColorToneBleechBypass", {"none": "Normal", "cool": "Cool", "warm": "Warm"}),
+    "retro": ("ColorToneRetro", None),   # nine-step scale
+    "hdr_tone": ("ColorToneHdrIntense", {"none": "OFF", "bw": "BW", "sepia": "Sepia"}),
+    "cross_process": ("ColorToneCrossProcess", {"basic": "Basic", "magenta": "Magenta", "yellow": "Yellow"}),
+}
+USERDATA_WB = {
+    "auto": "Auto", "multi_auto": "Multi", "daylight": "Daylight", "shade": "Shade", "cloudy": "Cloudiness",
+    "fluorescent_d": "Flu_D", "fluorescent_n": "Flu_N", "fluorescent_w": "Flu_W", "fluorescent_l": "Flu_L",
+    "tungsten": "Tungsten", "cte": "Cte", "kelvin": "ColorTemp1",
+}
+USERDATA_SHOOTING = {
+    "highlight_correction": ("StillHighlightCorrect", {"auto": "Auto", "on": "On", "off": "Off"}),
+    "shadow_correction": ("StillShadowCorrect", {"auto": "Auto", "low": "Low", "mid": "Mid", "high": "High", "off": "Off"}),
+    "peripheral_correction": ("StillLensShadingCorrection", {"on": "On", "off": "Off"}),
+    "high_iso_nr": ("StillHighIsoNR", {"auto": "Auto", "low": "Low", "mid": "Mid", "high": "High", "off": "Off"}),
+}
+# Not sent, with the reason shown to the user.
+USERDATA_SKIP = {
+    "filter": "filter numbers 1-4 not yet matched to the firmware's Custom1-4",
+    "exposure": "exposure compensation (CommonXv) not yet confirmed",
+    "iso": "no UserData setting for ISO",
+    "iso_max": "no UserData setting for the Auto-ISO limit",
+}
+
+
+def _step9(v: str) -> str:
+    n = int(v)
+    return "OFF" if n == 0 else f"M{-n}" if n < 0 else f"P{n}"
+
+
+def userdata(body: dict, slot: int) -> dict:
+    """A valid recipe as 'UserData Set NAME VALUE' lines for Custom [slot] (1 or 2):
+    the slot's control first, then its parameters, then the shooting settings.
+    Settings the recipe leaves out are not sent (the slot keeps its values).
+    Returns {"lines": [...], "skipped": [[key, reason], ...]}."""
+    if slot not in (1, 2):
+        raise ValueError("slot must be 1 or 2")
+    control = body["control"]
+    fw, prefix = USERDATA_CONTROL[control]
+    base = f"{prefix}ImageControlNo{slot}Param{fw}"
+    lines = [f"UserData Set StillImageControlNo{slot} {fw}"]
+    skipped = []
+    for key in PARAMS:
+        if key not in body or GROUP.get(key) != "image":
+            continue
+        v = body[key]
+        if key in USERDATA_SKIP:
+            skipped.append([key, USERDATA_SKIP[key]])
+        elif key == "toning":
+            suffix, table = USERDATA_TONING[control]
+            lines.append(f"UserData Set {base}{suffix} {_step9(v) if table is None else table[v]}")
+        elif key == "grain":
+            lines.append(f"UserData Set {base}Particle {('Off', 'Low', 'Mid', 'High')[int(v)]}")
+        elif key == "hdr_strength":
+            lines.append(f"UserData Set {base}HdrIntense {('Low', 'Mid', 'High')[int(v) - 1]}")
+        else:
+            lines.append(f"UserData Set {base}{USERDATA_PARAM[key]} {_step9(v)}")
+    wb = body.get("wb")
+    if wb:
+        lines.append(f"UserData Set StillWhiteBalance {USERDATA_WB[wb]}")
+        if wb == "kelvin" and "wb_kelvin" in body:
+            lines.append(f"UserData Set StillWhiteBalanceColorTemp {int(body['wb_kelvin'])}")
+        for key, axis, zero in (("wb_shift_ab", "BA", "NORMAL"), ("wb_shift_gm", "GM", "NORMAL")):
+            if key in body:
+                v = body[key]
+                lines.append(f"UserData Set StillWhiteBalance{USERDATA_WB[wb]}Adjust{axis} {zero if v == '0' else v.upper()}")
+    else:
+        for key in ("wb_shift_ab", "wb_shift_gm", "wb_kelvin"):
+            if key in body:
+                skipped.append([key, "needs 'wb =': the shift belongs to a white balance mode"])
+    for key, (name, table) in USERDATA_SHOOTING.items():
+        if key in body:
+            lines.append(f"UserData Set {name} {table[body[key]]}")
+    for key in ("exposure", "iso", "iso_max"):
+        if key in body:
+            skipped.append([key, USERDATA_SKIP[key]])
+    return {"lines": lines, "skipped": skipped}
+
+
 def format_value(key: str, value: str) -> str:
     """The canonical spelling of a valid value: signed for the nine-step
     parameters (0 without a sign), plain for the rest."""
@@ -318,6 +427,8 @@ def main() -> None:
                         help="write the controls, parameters and value sets as JSON (for the Android app)")
     parser.add_argument("--canonical", action="store_true",
                         help="after checking, print the file in canonical form instead of the dial-in list")
+    parser.add_argument("--userdata", type=int, choices=(1, 2), metavar="SLOT",
+                        help="after checking, print each recipe as 'UserData Set' lines for Custom 1 or 2")
     args = parser.parse_args()
 
     if args.schema_json:
@@ -344,6 +455,15 @@ def main() -> None:
 
     if args.canonical:
         print(format_file(recipes), end="")
+        return
+    if args.userdata:
+        for name, body in recipes:
+            u = userdata(body, args.userdata)
+            print(f"[{name}] -> Custom {args.userdata}")
+            print("\n".join(u["lines"]))
+            for key, why in u["skipped"]:
+                print(f"# not sent: {key} = {body[key]} ({why})")
+            print()
         return
     print(f"{len(recipes)} recipe(s), all valid. Dial in on the camera:\n")
     print("\n\n".join(dial_in(name, body) for name, body in recipes))

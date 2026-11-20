@@ -297,6 +297,54 @@ blue and green count positive. The file format uses the camera's letters
 Film, 263 Bleach Bypass, 264 Retro, 267 Negative Film.</li>
 </ul>
 
+<h3 id="send-to-camera">Sending a recipe to Custom 1 or 2 (test, not yet run)</h3>
+<p><code>recipes.py --userdata 1</code> prints a recipe as
+<code>UserData Set</code> lines: the slot's image control first
+(<code>StillImageControlNo1 NegativeFilm</code>), then its parameters,
+then white balance and the corrections. Every name it can produce (244)
+is present in the 1.60 firmware (checked against the decoded image). A
+recipe's settings that it leaves out are not sent, so the slot keeps
+them. Not sent yet:</p>
+<ul>
+<li><code>filter</code>: the firmware's <code>FilterEffectCustom</code>
+takes <code>OFF</code>, <code>Custom1</code>…<code>Custom4</code>; which
+filter colour each means is not known.</li>
+<li><code>exposure</code>: <code>CommonXv</code> is a float and probably
+exposure compensation, but that is not confirmed.</li>
+<li><code>iso</code>, <code>iso_max</code>: no <code>UserData</code>
+setting found.</li>
+</ul>
+<p><code>tools/recipe_card.py</code> carries the lines to the camera over
+Wi-Fi. <code>recipe_card.py card</code> writes a card with
+<code>SCRIPT/STARTUP.TTL</code> and <code>SCRIPT/RECIPE/</code>. The
+script starts a small HTTP endpoint on port 8080 and relays shell lines to
+the RTOS, as the AF remote card does
+(<code>tools/af_debug_card.py --remote</code>). It has nothing else: no
+AF logging, no patch loader, no RAM access. The relay takes only
+<code>UserData</code>, <code>Af_Led_On</code> and
+<code>Af_Led_Off</code>, at most 8 lines per batch, arguments limited to
+letters, digits, space, dot, minus and underscore. The AF lamp flashes
+twice when the endpoint is up. Nothing is written to firmware; without
+the card the camera boots as before.</p>
+<p>Test plan:</p>
+<ol>
+<li><code>recipe_card.py check</code>: endpoint answers, relay heartbeat
+younger than 45 s.</li>
+<li>One harmless value:
+<code>recipe_card.py raw 'UserData Set StillImageControlNo2ParamStandardSaturation P1'</code>
+(with Custom 2 holding Standard). Check in the Image Control menu that
+Custom 2's saturation is +1.</li>
+<li>A full recipe: <code>recipe_card.py send recipes/ricoh-recipes.txt
+"Reggie's Color Negative" --slot 1</code>. Check Custom 1 in the menu,
+take a photo with it, then <code>recipe_card.py verify … </code> reads
+the photo's maker notes and compares them with the recipe.</li>
+<li>Power-cycle without the card and check again: do the values
+stay?</li>
+</ol>
+<p>the companion app shows <b>Send to the camera</b> (Custom 1 / Custom 2) in the
+recipe editor only while this card's endpoint answers. Its Kotlin port of
+the mapping is checked against the same test vectors.</p>
+
 <h2 id="community">Community recipes</h2>
 <p>Three files in <code>recipes/</code> hold recipes published for the GR
 III / GR IIIx, read on 2026-11-20, with author and source link for each.
