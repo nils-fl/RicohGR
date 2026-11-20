@@ -2283,7 +2283,7 @@ def remote_files():
             # In place, one sector: replacing the file (mv) let the RTOS keep
             # reading the released clusters (stall 5, 2026-11-19).
             f"{RELAY_PAD_SH}"
-            f"echo $q >{www}/relay.seq; busybox dd if=$o of=$d/RELAY.TTL bs={RELAY_SIZE} count=1 conv=notrunc 2>/dev/null; sync\n"
+            f"echo $q >{www}/relay.seq; cat $o 1<>$d/RELAY.TTL; sync\n"
             "read t _ </proc/uptime\n"
             'echo "shell $q $(busybox tr \"\\n\" \";\" <$b) $t" >>$d/REMOTE.LOG\n'
             + text + 'echo "queued $q"\n'),
@@ -2312,7 +2312,7 @@ def remote_files():
         # RELAY.TTL is created once and then only overwritten in place.
         f"o={www}/relay.idle; echo 'rseq = 0' >$o\n"
         f"{RELAY_PAD_SH}"
-        f"busybox dd if=$o of=$d/RELAY.TTL bs={RELAY_SIZE} count=1 conv=notrunc 2>/dev/null; sync\n"
+        f"cat $o 1<>$d/RELAY.TTL; sync\n"
         + here +
         f"busybox chmod 755 {www}/cgi-bin/*\n"
         f"echo 'AF remote endpoint: /cgi-bin/uptime arm tail ls file put rm run peek status log shell; /diag.txt /selftest.txt' >{www}/index.html\n"
@@ -2335,7 +2335,10 @@ def remote_files():
     return files
 
 
-# The shell relay's RELAY.TTL has a fixed size and is written in place.
+# The shell relay's RELAY.TTL has a fixed size and is written in place with
+# "cat $o 1<>file" (read-write, no truncation): the camera's BusyBox dd has
+# no conv=notrunc, and "mv" over the file failed with EIO on 2026-11-19 at
+# the relay stalls (MEM.LOG).
 # RELAY_PAD_SH pads the file $o to RELAY_SIZE bytes with assignment lines
 # (the TTL interpreter is only known to accept statements, not blank lines or
 # comments): "rpad = 0" lines, then one "rq...q = 0" line of the exact rest.

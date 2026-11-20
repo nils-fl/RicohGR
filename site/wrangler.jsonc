@@ -1,0 +1,8 @@
+{
+  // Static summary page of the GR IIIx AF study, served as Worker static assets
+  // at gr.nflaschel.de. Deploy from this folder: npx wrangler deploy
+  "name": "gr-af-study",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./public" },
+  "routes": [{ "pattern": "gr.nflaschel.de", "custom_domain": true }]
+}

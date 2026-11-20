@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Faster GR IIIx autofocus</title>
+<meta name="description" content="A remote, automated study of the GR IIIx contrast autofocus in dim light: what limits it, which firmware constants matter, and a stable pair of RAM patches that cuts dim-light AF time by 23 to 39 percent.">
+<style>
+:root {
+  --paper: #ffffff; --ink: #1a1a1a; --soft: #686868; --rule: #e3e3e3; --tint: #f4f4f4;
+  --bar-stock: #b8b8b8; --bar-patched: #1a1a1a;
+  --bg: var(--paper); --fg: var(--ink); --muted: var(--soft);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141414; --ink: #ececec; --soft: #9b9b9b; --rule: #2e2e2e; --tint: #1f1f1f;
+    --bar-stock: #555555; --bar-patched: #ececec;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 18px/1.62 "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+main { max-width: 52rem; margin: 0 auto; padding: 4rem 20px 5rem; }
+/* wider column on big screens, with slightly larger type so lines stay readable (about 80 characters) */
+@media (min-width: 64rem) { body { font-size: 19px; } main { padding-top: 5rem; } }
+h1 { font-size: 2.4rem; line-height: 1.08; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 1.2rem; }
+h2 { font-size: 1.4rem; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 3.2rem 0 0.7rem; }
+h3 { font-size: 1.05rem; font-weight: 700; margin: 2rem 0 0.4rem; }
+p, li { margin: 0.6rem 0; }
+.lede { font-size: 1.22rem; line-height: 1.5; margin: 0 0 1rem; }
+.meta { font-size: 0.85rem; color: var(--soft); margin: 0; }
+a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 0.15em; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+code { font: 0.84em ui-monospace, "SF Mono", Menlo, monospace; background: var(--tint); padding: 0.05em 0.3em; border-radius: 3px; }
+
+/* the result: AF time as bars */
+.result { margin: 2.8rem 0 2rem; }
+.result p.q { font-size: 0.9rem; color: var(--soft); margin: 0 0 1rem; }
+.run { display: grid; grid-template-columns: 5.5rem 1fr; align-items: center; column-gap: 1rem; margin: 0.9rem 0; }
+.run .who { font-size: 1rem; font-weight: 600; }
+.run .track { position: relative; height: 3.2rem; }
+.run .fill { height: 100%; border-radius: 2px; }
+.run.stock .fill { background: var(--bar-stock); width: 100%; }
+.run.patched .fill { background: var(--bar-patched); width: 60.8%; }
+.run .ms { position: absolute; top: 50%; transform: translateY(-50%); font-size: 1.5rem; font-weight: 700;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.run.stock .ms { right: 0.8rem; color: var(--ink); }
+.run.patched .ms { right: calc(39.2% + 0.8rem); color: var(--paper); }
+.run .delta { position: absolute; top: 50%; transform: translateY(-50%); left: calc(60.8% + 0.7rem);
+  font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* the other numbers, read like a spec sheet */
+dl.facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); margin: 0 0 2.4rem; border-top: 1px solid var(--rule); }
+dl.facts dt, dl.facts dd { margin: 0; padding: 0.7rem 0; border-bottom: 1px solid var(--rule); }
+dl.facts dt { color: var(--soft); padding-right: 1rem; }
+dl.facts dd b { font-variant-numeric: tabular-nums; }
+@media (max-width: 34rem) {
+  h1 { font-size: 1.9rem; } .lede { font-size: 1.1rem; }
+  dl.facts { grid-template-columns: 1fr; } dl.facts dt { border-bottom: 0; padding-bottom: 0; }
+  .run { grid-template-columns: 4.2rem 1fr; } .run .ms { font-size: 1.15rem; } .run .delta { font-size: 0.95rem; }
+}
+
+.table-wrap { overflow-x: auto; margin: 1rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; line-height: 1.4; }
+th, td { text-align: left; padding: 0.5rem 0.6rem 0.5rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--soft); border-bottom-color: var(--ink); }
+
+/* embedded charts (drawn by tools/af_charts.py --site) */
+.fig { --s1:#2a78d6; --s4:var(--ink); --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --abort:#898781;
+  --grid:#ececec; --axis:#c4c4c4; --ph1:#c4c4c4; --ph2:#1a1a1a; --ph3:#e2e2e2; --pt1:#1a1a1a; --pt2:#fff; --pt3:#1a1a1a;
+  margin: 1.2rem 0 0.4rem; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fig {
+  --grid:#262626; --axis:#444; --ph1:#5c5c5c; --ph2:#ececec; --ph3:#3a3a3a; --pt1:#fff; --pt2:#141414; --pt3:#fff; } }
+.fig .chart { overflow-x: auto; }
+.fig .chart svg { display: block; width: 100%; min-width: 540px; height: auto; font-family: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif; }
+.fig .legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 0.8rem; color: var(--soft); }
+.fig .legend span { display: inline-flex; align-items: center; gap: 6px; }
+.fig .grid { stroke: var(--grid); stroke-width: 1; } .fig .axis { stroke: var(--axis); stroke-width: 1; }
+.fig .tick { fill: var(--soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+.fig .tick.ink { fill: var(--ink); font-size: 13px; } .fig .lab { fill: var(--soft); font-size: 12.5px; }
+.fig .val { fill: var(--ink); font-size: 12px; font-variant-numeric: tabular-nums; }
+.fig .inbar { fill: #fff; font-size: 12.5px; font-weight: 600; } .fig .inbar.dark { fill: #1a1a1a; }
+.fig .inbar.t-ph1 { fill: var(--pt1); } .fig .inbar.t-ph2 { fill: var(--pt2); } .fig .inbar.t-ph3 { fill: var(--pt3); }
+.fig .f-s1 { fill: var(--s1); } .fig .f-s4 { fill: var(--s4); } .fig .f-good { fill: var(--good); }
+.fig .f-warn { fill: var(--warn); } .fig .f-crit { fill: var(--crit); } .fig .f-abort { fill: var(--abort); }
+.fig .ph1 { fill: var(--ph1); } .fig .ph2 { fill: var(--ph2); } .fig .ph3 { fill: var(--ph3); }
+.fig .mk circle:not(.hit), .fig .mk rect:not(.hit), .fig .mk path { stroke: var(--paper); stroke-width: 1.5; }
+.fig .hit { fill: transparent; stroke: none; }
+.fig .mk:hover rect:not(.hit), .fig .mk:hover path { stroke: var(--ink); }
+.fig .ci { stroke: var(--ink); stroke-width: 2; stroke-linecap: round; stroke-opacity: .5; }
+@media (max-width: 36rem) {
+  .fig .chart::before { content: "Swipe sideways to see the whole chart"; display: block; position: sticky; left: 0;
+    font-size: 0.78rem; color: var(--soft); margin-bottom: 0.3rem; }
+}
+.fig-cap { font-size: 0.85rem; line-height: 1.45; color: var(--soft); margin: 0.2rem 0 1.4rem; }
+#tip { position: fixed; pointer-events: none; z-index: 10; max-width: 320px; padding: 6px 9px; border-radius: 4px;
+  background: var(--ink); color: var(--paper); font-size: 12.5px; line-height: 1.4; opacity: 0; transition: opacity .08s; }
+footer { margin-top: 3.5rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
+@media (prefers-reduced-motion: reduce) { #tip { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>Faster autofocus in dim light on the Ricoh&nbsp;GR&nbsp;IIIx</h1>
+<p class="lede">I found two firmware settings that make the GR&nbsp;IIIx focus faster in dim
+light without making it less reliable. In every dim-light comparison, autofocus took
+23–39&nbsp;% less time. In good light nothing changed.</p>
+<p class="meta">Tested on my own GR&nbsp;IIIx with firmware 1.60, November 2026.
+<a href="https://nflaschel.de">nflaschel.de</a></p>
+</header>
+
+<section class="result" aria-label="Median autofocus time in a dim room">
+<p class="q">Median time from half-press to focus in a dim room, 28 presses each</p>
+<div class="run stock"><span class="who">Stock</span><div class="track"><div class="fill"></div><span class="ms">660&nbsp;ms</span></div></div>
+<div class="run patched"><span class="who">Patched</span><div class="track"><div class="fill"></div><span class="ms">401&nbsp;ms</span><span class="delta">−39&nbsp;%</span></div></div>
+</section>
+
+<dl class="facts">
+<dt>Dim light, all scenes</dt><dd><b>23–39&nbsp;%</b> faster in every comparison</dd>
+<dt>Good light</dt><dd>No slower (<b>−9 to +2&nbsp;%</b>)</dd>
+<dt>Failed or wrong focus</dt><dd><b>0</b> of 345 compared presses with the patch (stock: 1)</dd>
+<dt>Presses logged</dt><dd>About <b>2,500</b>, most of them hands-free</dd>
+</dl>
+
+<p>The two changes: the camera accepts a sharpness peak with a somewhat lower safety
+margin, and in the darkest mode it measures 49 instead of 29 frames per second. Neither
+helped on its own; together they cut the slowest part of a press, the focus sweep, by
+about a third.</p>
+<p><strong>This is research, not a release.</strong> The patches write into the running
+firmware's memory through the camera's own Linux side. They are gone after a power cycle
+and nothing is flashed, but they are unofficial, specific to firmware 1.60, and tested on
+one camera, on a tripod, in a handful of indoor scenes. Real-world shooting and the
+sharpness of the resulting photos have not been checked yet.</p>
+
+<h2>How the AF decides</h2>
+<p>The GR IIIx combines phase detection with contrast AF, and the final focus comes
+from a contrast sweep: the lens moves through focus while the camera measures sharpness
+on each live-view frame, and stops once it has seen the contrast rise to a peak and
+fall again. In dim light the phase pixels become unreliable and the sweep does all the
+work. Two
+things set the speed:</p>
+<ul>
+<li><strong>The acceptance margin.</strong> A peak only counts if the rise and the fall
+both exceed a margin. In dim light the firmware grows that margin with
+<em>1/brightness</em>, so it quickly asks for much more contrast change than
+the actual noise needs. Clear peaks get rejected, and the lens sweeps on, reverses,
+and tries again.</li>
+<li><strong>The frame rate.</strong> The sweep advances a fixed number of lens pulses
+per frame, so it is frame-bound. The camera picks one of four rates from the light:
+200, 100, 49 or 29&nbsp;fps. In dim light it falls to 29&nbsp;fps.</li>
+</ul>
+<p>A typical dim-light press of about 600&nbsp;ms splits into roughly 210&nbsp;ms of
+lens travel to the start position, 335&nbsp;ms of sweep (9–10 frames at
+29&nbsp;fps) and 70&nbsp;ms to settle. Only the sweep can be shortened by software,
+and only by faster frames or fewer of them. With both changes it drops to about
+210&nbsp;ms:</p>
+<!-- chart:phases --><div class="fig"><div class="legend"><span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" class="ph1"/></svg>Wait for the lens</span><span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" class="ph2"/></svg>Sweep (frames)</span><span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" class="ph3"/></svg>Accept and finish</span></div><div class="chart"><svg viewBox="0 0 720 174" role="img" aria-label="Where a dim-light press spends its time"><line x1="170.0" x2="170.0" y1="14" y2="128" class="grid"/><text x="170.0" y="146" class="tick" text-anchor="middle">0</text><line x1="238.6" x2="238.6" y1="14" y2="128" class="grid"/><text x="238.6" y="146" class="tick" text-anchor="middle">100</text><line x1="307.1" x2="307.1" y1="14" y2="128" class="grid"/><text x="307.1" y="146" class="tick" text-anchor="middle">200</text><line x1="375.7" x2="375.7" y1="14" y2="128" class="grid"/><text x="375.7" y="146" class="tick" text-anchor="middle">300</text><line x1="444.3" x2="444.3" y1="14" y2="128" class="grid"/><text x="444.3" y="146" class="tick" text-anchor="middle">400</text><line x1="512.9" x2="512.9" y1="14" y2="128" class="grid"/><text x="512.9" y="146" class="tick" text-anchor="middle">500</text><line x1="581.4" x2="581.4" y1="14" y2="128" class="grid"/><text x="581.4" y="146" class="tick" text-anchor="middle">600</text><line x1="650.0" x2="650.0" y1="14" y2="128" class="grid"/><text x="650.0" y="146" class="tick" text-anchor="middle">700</text><text x="410.0" y="166" class="lab" text-anchor="middle">Median time per phase of a press, ms (dim light)</text><text x="158" y="40" class="tick ink" text-anchor="end">Stock, 29 fps</text><text x="158" y="55" class="tick" text-anchor="end">n 50</text><g class="mk" data-tip="Stock, 29 fps: wait for the lens 214 ms (median of 50)"><rect x="170.0" y="26" width="144.7" height="32" rx="4" class="ph1"/><text x="178.0" y="47" class="inbar t-ph1">214</text></g><g class="mk" data-tip="Stock, 29 fps: sweep (frames) 335 ms (median of 50)"><rect x="316.7" y="26" width="227.7" height="32" rx="4" class="ph2"/><text x="324.7" y="47" class="inbar t-ph2">335</text></g><g class="mk" data-tip="Stock, 29 fps: accept and finish 70 ms (median of 50)"><rect x="546.5" y="26" width="45.7" height="32" rx="4" class="ph3"/><text x="554.5" y="47" class="inbar t-ph3">70</text></g><text x="602.1" y="47" class="val">= 618 ms</text><text x="158" y="94" class="tick ink" text-anchor="end">Patched, 49 fps</text><text x="158" y="109" class="tick" text-anchor="end">n 30</text><g class="mk" data-tip="Patched, 49 fps: wait for the lens 214 ms (median of 30)"><rect x="170.0" y="80" width="144.7" height="32" rx="4" class="ph1"/><text x="178.0" y="101" class="inbar t-ph1">214</text></g><g class="mk" data-tip="Patched, 49 fps: sweep (frames) 209 ms (median of 30)"><rect x="316.7" y="80" width="141.3" height="32" rx="4" class="ph2"/><text x="324.7" y="101" class="inbar t-ph2">209</text></g><g class="mk" data-tip="Patched, 49 fps: accept and finish 62 ms (median of 30)"><rect x="460.1" y="80" width="40.5" height="32" rx="4" class="ph3"/><text x="468.1" y="101" class="inbar t-ph3">62</text></g><text x="510.6" y="101" class="val">= 485 ms</text></svg></div></div><!-- /chart:phases -->
+<p class="fig-cap">Median dim-light press, split into its phases from the camera's AF state trace.</p>
+
+<h2>What helps</h2>
+<p>Two changes, which only pay off together:</p>
+<ol>
+<li><strong>A lower margin in dim light.</strong> The six per-mode base values of the
+margin (around 570–600) scaled by 0.32, the dim-light scaling softened from
+<em>(b/y)</em> to <em>(b/y)<sup>0.875</sup></em>, two falling samples instead of
+three before a peak is accepted, and a slightly lower rise floor.</li>
+<li><strong>NO29: 49&nbsp;fps instead of 29&nbsp;fps.</strong> One instruction in the
+frame-rate choice: where the camera would pick 29&nbsp;fps it now picks 49. Brighter
+light, which already runs 49, 100 or 200&nbsp;fps, is unaffected.</li>
+</ol>
+<p>Each 49&nbsp;fps frame gets about half the light, so with the stock margin NO29
+alone needs twice as many frames and gains nothing. With the lower margin the sweep
+stays short and runs at the faster rate.</p>
+
+<h3>Results</h3>
+<p>Blind A/B runs: stock and patched presses interleaved in shuffled order, on a tripod,
+the ND filter used as a remote dimmer, in several scenes on different days. The light is
+given by the frame rate the camera chose, because its exposure reading did not track the
+light the AF sees. Change in median AF time:</p>
+<!-- chart:effect --><div class="fig"><div class="chart"><svg viewBox="0 0 720 324" role="img" aria-label="Change in median AF time, candidate against stock, by condition"><line x1="230.0" x2="230.0" y1="24" y2="274" class="grid"/><text x="230.0" y="292" class="tick" text-anchor="middle">-60%</text><line x1="283.3" x2="283.3" y1="24" y2="274" class="grid"/><text x="283.3" y="292" class="tick" text-anchor="middle">-45%</text><line x1="336.7" x2="336.7" y1="24" y2="274" class="grid"/><text x="336.7" y="292" class="tick" text-anchor="middle">-30%</text><line x1="390.0" x2="390.0" y1="24" y2="274" class="grid"/><text x="390.0" y="292" class="tick" text-anchor="middle">-15%</text><line x1="443.3" x2="443.3" y1="24" y2="274" class="axis"/><text x="443.3" y="292" class="tick" text-anchor="middle">0</text><line x1="496.7" x2="496.7" y1="24" y2="274" class="grid"/><text x="496.7" y="292" class="tick" text-anchor="middle">+15%</text><line x1="550.0" x2="550.0" y1="24" y2="274" class="grid"/><text x="550.0" y="292" class="tick" text-anchor="middle">+30%</text><text x="390.0" y="314" class="lab" text-anchor="middle">Change in median AF time, patched against stock (bar: 95% interval)</text><text x="237.1" y="16" class="lab">← faster</text><text x="542.9" y="16" class="lab" text-anchor="end">slower →</text><text x="218" y="52.0" class="tick ink" text-anchor="end">Bright, two objects</text><text x="218" y="67.0" class="tick" text-anchor="end">stock at 100 fps</text><g class="mk" data-tip="Bright, two objects (stock at 100 fps): 334 → 305 ms, -9% [-18%, -4%], p 0.001, n 77/92"><rect x="230" y="34.0" width="320" height="40" class="hit"/><line x1="380.1" x2="428.2" y1="54.0" y2="54.0" class="ci"/><circle cx="413.1" cy="54.0" r="9" class="hit"/><rect x="408.1" y="49.0" width="10.0" height="10.0" rx="1" class="f-s4"/></g><text x="564" y="52.0" class="val">-9%  334 → 305 ms</text><text x="564" y="67.0" class="tick">n 77 / 92  · p 0.001</text><text x="218" y="92.0" class="tick ink" text-anchor="end">Easy target, ND out</text><text x="218" y="107.0" class="tick" text-anchor="end">stock at 200 fps</text><g class="mk" data-tip="Easy target, ND out (stock at 200 fps): 211 → 207 ms, -2% [-16%, +16%], p 0.962, n 12/12"><rect x="230" y="74.0" width="320" height="40" class="hit"/><line x1="386.7" x2="501.1" y1="94.0" y2="94.0" class="ci"/><circle cx="437.8" cy="94.0" r="9" class="hit"/><rect x="432.8" y="89.0" width="10.0" height="10.0" rx="1" class="f-s4"/></g><text x="564" y="92.0" class="val">-2%  211 → 207 ms</text><text x="564" y="107.0" class="tick">n 12 / 12  · p 0.962</text><text x="218" y="132.0" class="tick ink" text-anchor="end">Easy target, ND in</text><text x="218" y="147.0" class="tick" text-anchor="end">stock at 100 fps</text><g class="mk" data-tip="Easy target, ND in (stock at 100 fps): 256 → 261 ms, +2% [-14%, +18%], p 0.825, n 12/12"><rect x="230" y="114.0" width="320" height="40" class="hit"/><line x1="395.0" x2="507.9" y1="134.0" y2="134.0" class="ci"/><circle cx="450.4" cy="134.0" r="9" class="hit"/><rect x="445.4" y="129.0" width="10.0" height="10.0" rx="1" class="f-s4"/></g><text x="564" y="132.0" class="val">+2%  256 → 261 ms</text><text x="564" y="147.0" class="tick">n 12 / 12  · p 0.825</text><text x="218" y="172.0" class="tick ink" text-anchor="end">Medium light, day 1</text><text x="218" y="187.0" class="tick" text-anchor="end">stock at 29 fps</text><g class="mk" data-tip="Medium light, day 1 (stock at 29 fps): 575 → 440 ms, -24% [-28%, -12%], p 0.000, n 24/24"><rect x="230" y="154.0" width="320" height="40" class="hit"/><line x1="345.1" x2="400.3" y1="174.0" y2="174.0" class="ci"/><circle cx="359.7" cy="174.0" r="9" class="hit"/><rect x="354.7" y="169.0" width="10.0" height="10.0" rx="1" class="f-s4"/></g><text x="564" y="172.0" class="val">-24%  575 → 440 ms</text><text x="564" y="187.0" class="tick">n 24 / 24  · p <0.001</text><text x="218" y="212.0" class="tick ink" text-anchor="end">Dim, day 1</text><text x="218" y="227.0" class="tick" text-anchor="end">stock at 29 fps</text><g class="mk" data-tip="Dim, day 1 (stock at 29 fps): 676 → 520 ms, -23% [-29%, -4%], p 0.001, n 12/12"><rect x="230" y="194.0" width="320" height="40" class="hit"/><line x1="340.4" x2="429.2" y1="214.0" y2="214.0" class="ci"/><circle cx="361.3" cy="214.0" r="9" class="hit"/><rect x="356.3" y="209.0" width="10.0" height="10.0" rx="1" class="f-s4"/></g><text x="564" y="212.0" class="val">-23%  676 → 520 ms</text><text x="564" y="227.0" class="tick">n 12 / 12  · p <0.001</text><text x="218" y="252.0" class="tick ink" text-anchor="end">Dim, day 2, easy target</text><text x="218" y="267.0" class="tick" text-anchor="end">stock at 29 fps</text><g class="mk" data-tip="Dim, day 2, easy target (stock at 29 fps): 660 → 401 ms, -39% [-57%, -15%], p 0.002, n 28/28"><rect x="230" y="234.0" width="320" height="40" class="hit"/><line x1="240.3" x2="390.7" y1="254.0" y2="254.0" class="ci"/><circle cx="304.0" cy="254.0" r="9" class="hit"/><rect x="299.0" y="249.0" width="10.0" height="10.0" rx="1" class="f-s4"/></g><text x="564" y="252.0" class="val">-39%  660 → 401 ms</text><text x="564" y="267.0" class="tick">n 28 / 28  · p 0.002</text></svg></div></div><!-- /chart:effect -->
+<p class="fig-cap">Square: change in median AF time; bar: 95&nbsp;% bootstrap interval.
+Right: medians and number of presses (stock / patched).</p>
+<p>Where the camera already runs 100 or 200&nbsp;fps the patch changes nothing that
+matters. Where stock drops to 29&nbsp;fps it is consistently faster, and the slow
+presses that needed a second pass mostly disappear. None of the patched presses in
+these runs failed or focused on the wrong thing; stock had one wrong lock. An earlier
+session in different dim light, with 49&nbsp;fps forced, gave the same picture:
+622&nbsp;→&nbsp;486&nbsp;ms.</p>
+
+<h3>Where it does not help</h3>
+<p>Scenes without a clear target: a hard, low-detail target, a blank wall and a room
+too dark to focus. Both settings fail most of the time there. What matters is that the
+lower margin does not make the camera claim focus on nothing more often:</p>
+<!-- chart:hard --><div class="fig"><div class="legend"><span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" class="f-good"/></svg>Locked</span><span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" class="f-warn"/></svg>Ended without a confirmed peak</span><span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" class="f-crit"/></svg>Failed</span><span><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3" class="f-abort"/></svg>Released before a result</span></div><div class="chart"><svg viewBox="0 0 720 266" role="img" aria-label="Outcomes where AF struggles: hard target, blank wall, too dark"><text x="218" y="35" class="tick ink" text-anchor="end">Hard target · stock</text><g class="mk" data-tip="Hard target, stock: locked 2 of 24"><rect x="230.0" y="18" width="37.2" height="26" rx="4" class="f-good"/><text x="237.0" y="36" class="inbar">2</text></g><g class="mk" data-tip="Hard target, stock: ended without a confirmed peak 8 of 24"><rect x="269.2" y="18" width="154.7" height="26" rx="4" class="f-warn"/><text x="276.2" y="36" class="inbar dark">8</text></g><g class="mk" data-tip="Hard target, stock: failed 14 of 24"><rect x="425.8" y="18" width="272.2" height="26" rx="4" class="f-crit"/><text x="432.8" y="36" class="inbar">14</text></g><text x="218" y="75" class="tick ink" text-anchor="end">Hard target · patched</text><g class="mk" data-tip="Hard target, patched: locked 5 of 24"><rect x="230.0" y="58" width="95.9" height="26" rx="4" class="f-good"/><text x="237.0" y="76" class="inbar">5</text></g><g class="mk" data-tip="Hard target, patched: ended without a confirmed peak 3 of 24"><rect x="327.9" y="58" width="56.8" height="26" rx="4" class="f-warn"/><text x="334.9" y="76" class="inbar dark">3</text></g><g class="mk" data-tip="Hard target, patched: failed 16 of 24"><rect x="386.7" y="58" width="311.3" height="26" rx="4" class="f-crit"/><text x="393.7" y="76" class="inbar">16</text></g><text x="218" y="115" class="tick ink" text-anchor="end">Blank wall · stock</text><g class="mk" data-tip="Blank wall, stock: ended without a confirmed peak 5 of 20"><rect x="230.0" y="98" width="115.5" height="26" rx="4" class="f-warn"/><text x="237.0" y="116" class="inbar dark">5</text></g><g class="mk" data-tip="Blank wall, stock: failed 15 of 20"><rect x="347.5" y="98" width="350.5" height="26" rx="4" class="f-crit"/><text x="354.5" y="116" class="inbar">15</text></g><text x="218" y="155" class="tick ink" text-anchor="end">Blank wall · patched</text><g class="mk" data-tip="Blank wall, patched: locked 1 of 20"><rect x="230.0" y="138" width="21.5" height="26" rx="4" class="f-good"/></g><g class="mk" data-tip="Blank wall, patched: ended without a confirmed peak 2 of 20"><rect x="253.5" y="138" width="45.0" height="26" rx="4" class="f-warn"/><text x="260.5" y="156" class="inbar dark">2</text></g><g class="mk" data-tip="Blank wall, patched: failed 17 of 20"><rect x="300.5" y="138" width="397.5" height="26" rx="4" class="f-crit"/><text x="307.5" y="156" class="inbar">17</text></g><text x="218" y="195" class="tick ink" text-anchor="end">Too dark · stock</text><g class="mk" data-tip="Too dark, stock: ended without a confirmed peak 1 of 8"><rect x="230.0" y="178" width="56.8" height="26" rx="4" class="f-warn"/><text x="237.0" y="196" class="inbar dark">1</text></g><g class="mk" data-tip="Too dark, stock: failed 7 of 8"><rect x="288.8" y="178" width="409.2" height="26" rx="4" class="f-crit"/><text x="295.8" y="196" class="inbar">7</text></g><text x="218" y="235" class="tick ink" text-anchor="end">Too dark · patched</text><g class="mk" data-tip="Too dark, patched: failed 6 of 8"><rect x="230.0" y="218" width="350.5" height="26" rx="4" class="f-crit"/><text x="237.0" y="236" class="inbar">6</text></g><g class="mk" data-tip="Too dark, patched: released before a result 2 of 8"><rect x="582.5" y="218" width="115.5" height="26" rx="4" class="f-abort"/><text x="589.5" y="236" class="inbar">2</text></g></svg></div></div><!-- /chart:hard -->
+<p class="fig-cap">Outcome per half-press. On the blank wall any confirmed lock is a false one: stock 0,
+patched 1 of 20. The hard-target lock positions could not be scored.</p>
+
+<h3>The changes</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Change</th><th>Where (firmware 1.60)</th><th>Stock → patched</th></tr></thead>
+<tbody>
+<tr><td>Margin bases</td><td><code>0x53c16bb0</code>, 6 floats</td><td>about 570–600 → ×&nbsp;0.32</td></tr>
+<tr><td>Dim-light scaling</td><td>margin helper <code>0x5340c590</code></td><td>(b/y) → (b/y)<sup>0.875</sup></td></tr>
+<tr><td>Falls before accept</td><td><code>0x53c16cc0</code></td><td>3 → 2</td></tr>
+<tr><td>Rise floor (mode 0)</td><td><code>0x53c16d14</code></td><td>0.02 → 0.014</td></tr>
+<tr><td>NO29</td><td><code>0x533f4b10</code></td><td><code>movhi r3,#3</code> → <code>#2</code></td></tr>
+</tbody></table></div>
+
+<h2>What it costs, as far as I can tell</h2>
+<ul>
+<li><strong>Occasionally the wrong object.</strong> In a bright scene with two objects
+in the AF area, the lower margin locked on the second one in 3 of 85 presses; stock
+did not in 73. That difference isn't statistically significant (p&nbsp;=&nbsp;0.15),
+but it's the plausible trade-off of a lower margin and needs more presses to settle.</li>
+<li><strong>A wider spread at 49&nbsp;fps.</strong> 90&nbsp;% of patched locks landed within
+35–56 lens pulses of the reference, against 12–24 for stock. Whether that is visible in a
+photo hasn't been measured yet; it is the next test.</li>
+<li><strong>Somewhere darker, 49&nbsp;fps will lose.</strong> One press at the darkest
+usable level failed at 49&nbsp;fps. A better rule would fall back to 29&nbsp;fps below
+a measured brightness instead of always using 49.</li>
+</ul>
+
+<h2>What didn't help</h2>
+<ul>
+<li><strong>Forcing a frame rate everywhere.</strong> 49&nbsp;fps forced in bright
+light costs about 140&nbsp;ms there; 100&nbsp;fps in dim light fails and misses focus
+by up to 127 pulses.</li>
+<li><strong>Shortening the pre-sweep wait.</strong> The two frame counters that look
+responsible aren't active in this mode; the wait is the lens physically travelling.</li>
+<li><strong>Turning off the 3-frame smoothing</strong> of the sharpness signal: much
+worse, up to 3&nbsp;s and far off.</li>
+<li><strong>The peak-shape tests</strong> in the accept code: they never fired in about
+290 recorded sweeps.</li>
+<li><strong>The phase-detection threshold</strong> lives in RAM and is rewritten at
+every AF start, so it can't be patched there.</li>
+<li><strong>A larger or smaller lens step per frame</strong> than the stock 8 pulses:
+7–8 is the optimum at 49&nbsp;fps; coarser steps lose accuracy, finer ones time.</li>
+</ul>
+
+<h2>How it was measured</h2>
+<p>The camera runs a small web endpoint from the memory card next to Ricoh's own
+Wi-Fi API. From a laptop, a script defocuses the lens, triggers AF through the API,
+and reads the result from a tracer that samples the AF state every 4&nbsp;ms. Patches
+are uploaded and switched over Wi-Fi between presses, and the ND filter is switched
+through the camera's engineering shell to dim the scene on demand. Every comparison
+interleaves the settings in shuffled order, so drifting daylight affects all of them
+alike.</p>
+<p>On top of that I ran three parameter searches with
+<a href="https://optuna.org">Optuna</a>, about 1,500 presses over 105 trials, each
+trial a different patch scored on AF time and accuracy.</p>
+
+<h3>Was the parameter search worth it?</h3>
+<p>Partly. It settled the margin question cleanly: the margin's base factor and
+its rise floor carry about 90&nbsp;% of the effect, the exponent I had been tuning by
+hand under 10&nbsp;%. It also found the best lens step at 49&nbsp;fps and showed 100&nbsp;fps to be
+unreliable, all while running unattended. But the biggest gain, the frame rate, came
+from reading the firmware and splitting a press's time into phases; the optimiser can
+only tune the knobs it's given. With 4–5 presses per trial it also can't rank
+settings within the good plateau, so every number on this page comes from separate
+confirmation runs. In hindsight, a one-dimensional sweep of the margin base would have
+got there with fewer presses. I'd keep it as the tool for tuning newly found knobs,
+not as a replacement for understanding the firmware.</p>
+
+<footer>
+<p class="meta">Personal research on my own camera; not affiliated with Ricoh.
+Firmware addresses refer to GR IIIx firmware 1.60 only. The working notes behind
+this page (decoded code paths, every session's data) are kept privately.</p>
+</footer>
+</main>
+<div id="tip" role="tooltip"></div>
+<script>
+(function(){var t=document.getElementById('tip');
+function show(e){var m=e.target.closest&&e.target.closest('[data-tip]');if(!m){t.style.opacity=0;return}
+t.textContent=m.getAttribute('data-tip');t.style.opacity=1;var x=e.clientX+14,y=e.clientY+14,r=t.getBoundingClientRect();
+if(x+r.width>innerWidth-8)x=e.clientX-r.width-14;if(y+r.height>innerHeight-8)y=e.clientY-r.height-14;t.style.left=x+'px';t.style.top=y+'px'}
+document.addEventListener('pointermove',show);document.addEventListener('pointerdown',show);
+document.addEventListener('scroll',function(){t.style.opacity=0},true)})();
+</script>
+</body>
+</html>

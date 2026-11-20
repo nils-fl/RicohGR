@@ -68,6 +68,7 @@ strong{font-weight:650}
 <li><a href="#auto-runs" id="toc-auto-runs">Automated runs: the script presses the shutter</a></li>
 <li><a href="#rise-floor" id="toc-rise-floor">Dim light: the phase grade and the rise floor</a></li>
 <li><a href="#opt-study" id="toc-opt-study">Parameter search with Optuna</a></li>
+<li><a href="#af-flash" id="toc-af-flash">The setting flashed into the firmware</a></li>
 <li><a href="#afc-fast-patch" id="toc-afc-fast-patch">AF-C fast-drive patch (prototype)</a></li>
 </ul></li>
 </ul>
@@ -1467,6 +1468,41 @@ heartbeat kept coming, so the RTOS loop ran but did not act on new
 reading a stale copy, for example through a cached directory entry to the
 clusters the <code>mv</code> released. Untested fix: write the file in place
 at a fixed size instead of replacing it.</p>
+<h3 id="opt-day2">Second day (2026-11-20)</h3>
+<p><strong>Relay.</strong> The camera's BusyBox <code>dd</code> has no
+<code>conv=notrunc</code>; the relay file is now written with
+<code>cat $o 1&lt;&gt;RELAY.TTL</code> at a fixed 512 bytes (installed after
+boot by the <code>RELAYFIX</code> tool). The interpreter accepts the
+<code>rpad = 0</code> padding lines. 29 commands without a stall, acks in
+1.2 s. The stalls of the first day coincide with <code>mv: can't remove
+RELAY.TTL: Input/output error</code> in <code>MEM.LOG</code>. Then the loop
+died once more on its own (heartbeat stopped at 2378 s, no command pending,
+after about 4 minutes without presses; nobody touched the camera).</p>
+<p><strong>Light.</strong> The API's P-mode exposure (<code>tv</code> "1.125"
+= 1/125 s, <code>av</code>, <code>sv</code>, <code>xv</code>) gives a metered
+EV for each block, but it does not track the light the AF sees: at metered EV
+1.6 the camera still ran 100 fps. The AF frame rate does not depend on the
+photo ISO either (ISO 100–6400 all 100 fps, same times). Light levels are
+therefore given by the frame rate the camera picks.</p>
+<ul>
+<li>Hard target (<code>remote-hard1</code>, 72 presses, 100–200 fps): every
+setting failed about two thirds of the presses; the patch neither helped nor
+hurt. Positions not scored (the target was changed before a reference could be
+taken).</li>
+<li>Easy target at 100–200 fps (<code>remote-easy1</code>, 48 presses): stock
+211 / 256 ms, candidate 207 / 261 ms (ND out / in), all locked.</li>
+<li>Easy target, room dimmed until stock ran 29 fps (<code>remote-dim29</code>
+and <code>remote-dim29b</code>, 28 presses per arm, ND out):</li>
+</ul>
+<table>
+<thead><tr><th>Arm</th><th>fps</th><th>Locked</th><th>Second pass</th><th>Median (mean) time</th><th>IQR</th><th>Position error median / max</th></tr></thead>
+<tbody>
+<tr><td>STOCK</td><td>29</td><td>28 / 28</td><td>10</td><td>660 (754) ms</td><td>521–962</td><td>15 / 148</td></tr>
+<tr><td>margin</td><td>29</td><td>28 / 28</td><td>10</td><td>584 (739) ms</td><td>486–928</td><td>16 / 112</td></tr>
+<tr><td><strong>margin + NO29</strong></td><td>49</td><td>28 / 28</td><td>7</td><td><strong>401 (498) ms</strong></td><td>377–700</td><td>20 / 72</td></tr>
+</tbody></table>
+<p>Against stock: −39 % median, −34 % mean (permutation p = 0.002 median,
+0.0001 mean); against the margin alone p = 0.03 / 0.002. No wrong locks.</p>
 <p><strong>Not shown yet.</strong> Study 3 and the confirmation ran with ND
 out only. 49 fps with the lowered margin in ND-in light has 3 presses so far.
 No setting has been validated for false locks in the no-signal scene or on a
@@ -1474,6 +1510,78 @@ bright weak target, and FORCE49 also forces 49 fps in bright light, where
 stock uses 200 fps: a usable patch must change the limit, not force the
 level. The light drifted about 20 % darker over the afternoon; the stock
 controls track that.</p>
+<h2 id="af-flash">The setting flashed into the firmware (2026-11-20)</h2>
+<p>The card-script route patches the RTOS in RAM at every power-on, which
+makes the camera start slowly. To keep the GR's fast start, the tested
+setting (<code>X875+FALLS2+OPT+NO29</code>, see
+<a href="#opt-study">the parameter search</a>) was built into an update file
+and flashed onto the user's camera.</p>
+
+<h3 id="af-flash-build">The file</h3>
+<p><code>tools/af_firmware.py</code> takes the official 1.60 update
+(<code>firmware/fwdc243b-v160.bin</code>), checks each stock word, writes 19
+words and repacks with <code>tools/gr_repack.py --allow af</code>. The words
+come from the same site lists the RAM patches use:</p>
+<table>
+<thead><tr><th>Change</th><th>Address</th><th>Words</th></tr></thead>
+<tbody>
+<tr><td>Margin exponent 0.875 (<code>X875</code>)</td><td><code>0x5340c5f0</code>–<code>0x5340c614</code>, in <code>0x5340c590</code></td><td>10 instructions</td></tr>
+<tr><td>Margin base × 0.32</td><td><code>0x53c16bb0</code>, 6 floats</td><td>6</td></tr>
+<tr><td>Rise floor 0.02 → 0.014 (mode 0)</td><td><code>0x53c16d14</code></td><td>1</td></tr>
+<tr><td>Falls 3 → 2 (<code>FALLS2</code>)</td><td><code>0x53c16cc0</code></td><td>1</td></tr>
+<tr><td>49 instead of 29 fps (<code>NO29</code>)</td><td><code>0x533f4b10</code>, <code>movhi r3,#3</code> → <code>#2</code></td><td>1</td></tr>
+</tbody></table>
+<p>The repacker re-ran all container checks of the updater (project,
+magic, type, word sums, frame layout) and decoded its own output: exactly
+the 19 words and the checksum compensation word differ from the official
+payload. The guard (<code>tools/patch_guard.py</code>) got an opt-in AF
+allow-list: changes must lie in the contrast-AF units <code>CafProcess</code>,
+<code>CafDetection</code> and <code>CafWobbling</code>, which are compiled back
+to back (<code>0x533f3d18</code> up to <code>OtherafFactory</code> at
+<code>0x53417990</code>), and every reference to a patched function must
+come from there. The two patched functions have 5 and 3 callers, all AF
+code. The AF code runs only while the camera focuses in shooting mode, which
+the Update start-up mode (MENU at power-on) does not start, so a bad AF
+change would leave the rescue path working
+(<a href="firmware-mod-feasibility.html#21-update-start-up-mode-the-built-in-rescue-path-read">feasibility §2.1</a>).
+The prologue scan of the guard now accepts up to three setup instructions
+between <code>mov ip, sp</code> and <code>push</code>; it had missed the
+start of <code>0x5340c590</code>. The RAW-development ranges are unchanged.</p>
+
+<h3 id="af-flash-afc">AF-C check before flashing</h3>
+<p>The margin base table is also read by <code>CafWobbling</code>, and all
+earlier tests ran in AF-S. The API's focus command runs a single-shot search
+even in AF-C, so the user half-pressed and held (about 3 s, moving the
+camera a little) 20 times per round, while a script switched stock and
+patched at random whenever AF was idle (<code>remote-afc1</code>,
+<code>remote-afc-dim1</code>). Runs are grouped into half-presses by a gap of
+more than 1.2 s.</p>
+<table>
+<thead><tr><th>Round</th><th>Arm</th><th>fps</th><th>Half-presses</th><th>Runs per press</th><th>First run locked</th><th>First run, median</th></tr></thead>
+<tbody>
+<tr><td>Bright</td><td>Stock</td><td>200</td><td>11</td><td>3.1</td><td>8 / 11</td><td>662 ms</td></tr>
+<tr><td>Bright</td><td>Patched</td><td>200</td><td>12</td><td>3.8</td><td>9 / 12</td><td>685 ms</td></tr>
+<tr><td>Dim</td><td>Stock</td><td>29</td><td>12</td><td>1.1</td><td>12 / 12</td><td>1769 ms</td></tr>
+<tr><td>Dim</td><td>Patched</td><td>49</td><td>16</td><td>1.1</td><td>15 / 16</td><td>1026 ms</td></tr>
+</tbody></table>
+<p>No hang, no more hunting in dim light, NO29 active in AF-C. The bright
+round's re-search counts depend on how the camera was moved. The one dim
+patched press without a lock ended at the park position.</p>
+
+<h3 id="af-flash-done">Flash and check</h3>
+<p>Flashed 2026-11-20 with MENU held at power-on; the camera showed
+"completed" and waited to be switched off. After the next normal start
+(version 1.60) all 19 words read back as patched over the bench's
+<code>peek</code>, with no patch uploaded in that boot. Four presses without
+arming anything: three locks in 213–258 ms at 200 fps, one fail at 100 fps.
+Then <code>SCRIPT/STARTUP.TTL</code> was renamed <code>STARTUP.OFF</code> and
+the update file removed from the card, so the camera starts like stock.</p>
+<p><strong>For later bench sessions on this camera:</strong> the site lists
+of <code>tools/af_debug_card.py</code> expect stock words, and
+<code>arm STOCK</code> writes stock words into RAM, which undoes the flashed
+setting until the next power-on. Adapt the tools before using the bench
+again. To return to stock, flash the official 1.60 file the same way.</p>
+
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no
 firmware file; nothing goes to flash.</p>

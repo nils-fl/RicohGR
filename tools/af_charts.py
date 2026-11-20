@@ -9,7 +9,7 @@ The page carries its own data, so it is committed although work/ is not.
 Prints the aggregates it charts, to compare with the tables in the docs.
 Offline; reads your own files.
 """
-import argparse, hashlib, html, math, statistics, sys
+import argparse, hashlib, html, json, math, random, re, statistics, sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -26,9 +26,9 @@ TRACE_VARIANT = {
     "dim-contrast": "stock", "dim-arrays": "stock", "dim-ab2": "stock",
     "dim-sqrtns": "x0.5", "dim-scale75": "x0.75", "dim-ab1": "x0.75", "dim-ab3": "x0.75",
 }
-VARIANTS = [("stock", "Stock margin", "s1", "circle"),
-            ("x0.5", "SQRTNS (scale^0.5)", "s3", "triangle"),
-            ("x0.75", "SCALE75 (scale^0.75)", "s2", "square")]
+VARIANTS = [("stock", "Stock", "s1", "circle"),
+            ("x0.5", "Strong margin cut (SQRTNS)", "s3", "triangle"),
+            ("x0.75", "Mild margin cut (SCALE75)", "s2", "square")]
 BUCKETS = [(0, 60e3, "<60k"), (60e3, 150e3, "60–150k"), (150e3, 400e3, "150–400k"),
            (400e3, float("inf"), ">400k")]
 NEAR_STOP = -16000  # a lock that ends nearer than this sits at the near stop: false
@@ -88,7 +88,7 @@ def press(r, session, variant):
 
 def f49_presses():
     out = {}
-    for name, label in (("TRACE1.DAT", "49 fps (FORCE49)"), ("TRACE2.DAT", "29 fps (stock rate)")):
+    for name, label in (("TRACE1.DAT", "Forced 49 fps"), ("TRACE2.DAT", "Stock 29 fps")):
         _, runs = af_debug_card.trace_presses(LOGS / "f49-ab" / name)
         out[label] = [press(r, "f49-ab", "x0.75") for r in runs]
     return out
@@ -271,7 +271,7 @@ def chart_lock_rate(ps):
     W, H = 720, 330
     xs = Scale(0, len(BUCKETS), 70, W - 20)
     ys = Scale(0, 100, H - 60, 40)
-    o = axes(xs, ys, "Area-0 brightness Y during the search (median per press)", "% of presses locked",
+    o = axes(xs, ys, "Light the AF sees (camera brightness value, median per press)", "% of presses locked",
              y_fmt=lambda v: f"{v:g}%", x_ticks=[])
     bw, gap = 24, 10
     for b, (_, _, name) in enumerate(BUCKETS):
@@ -326,7 +326,7 @@ def chart_presses(ps):
                    f"{'es' if p['passes'] != 1 else ''}, {dict((k, n) for k, n, _, _ in OUTCOMES)[p['outcome']].lower()}")
             o.append(shape(kind, xs(p["y"]), ys(ms / 1000), f"f-{cls}" if kind != "ring" else "o-abort", tip))
     o.append(f'<text x="{W / 2}" y="{H - 18}" class="lab" text-anchor="middle">'
-             "Area-0 brightness Y (log); vertical lines at the 60k / 150k / 400k bucket edges</text>")
+             "Light the AF sees (camera brightness value, log); lines at 60k / 150k / 400k</text>")
     leg = legend([(n, key_mark(s, f"f-{c}" if s != "ring" else "o-abort")) for _, n, s, c in OUTCOMES])
     rows = [[p["variant"], p["session"], f"{p['y']:,.0f}", f"{p['ms']:.0f}" if p["ms"] else "–", p["passes"],
              p["outcome"], f"{p['scale']:.2f}" if p["scale"] else "–"] for p in sorted(ps, key=lambda p: (p["variant"], p["y"]))]
@@ -370,7 +370,7 @@ def chart_ladder(light):
         vals = [(s["light"], f"{s['session']}: {s['fps']} fps, light {s['light']:.2g}, gain {s['gain'] / 65536:.1f}×, "
                  f"{s['integ']:,} µs") for s in light if s["fps"] == fps and s["light"] > 0]
         rows.append((label, vals, "s1", "circle"))
-    c, summary = strip(rows, 0.005, 300, "Scene light: area-0 Y per pixel ÷ (integration µs × gain) × 1,000 (log)",
+    c, summary = strip(rows, 0.005, 300, "Scene light in camera units: brightness ÷ (exposure × gain), log",
                        label_fmt=lambda v: f"{v:.2g}", title="Scene light by frame rate")
     print("ladder medians:", [(r[0], r[2]) for r in summary])
     return c + table(["Frame rate", "Sweeps", "Median", "Min", "Max"], summary)
@@ -414,7 +414,7 @@ def chart_snr(light):
         vals = [(s["snr"], f"{s['session']}: {s['fps']} fps, rise {100 * s['mod']:.0f}%, {s['snr']:.1f} noise widths")
                 for s in light if s["peak"] == peak and math.isfinite(s["snr"]) and s["snr"] > 0]
         rows.append((label, vals, "s1", "circle"))
-    c, summary = strip(rows, 1, 300, "Peak height in noise widths: (max − min) ÷ noise of the contrast series (log)",
+    c, summary = strip(rows, 1, 300, "Height of the focus peak, in noise widths (log)",
                        label_fmt=lambda v: f"{v:.1f}", row_h=44, left=150, title="Peak-to-noise by outcome")
     print("snr medians:", [(r[0], r[1], r[2]) for r in summary])
     return c + table(["Sweeps", "n", "Median", "Min", "Max"], summary)
@@ -425,11 +425,11 @@ def chart_conditions():
         ("Bright AF-S", ["check5", "bright-edge"], "s1"),
         ("Bright AF-S, repetitive", ["repetitive"], "s1"),
         ("Bright AF-C", ["afc", "afc-stock"], "s1"),
-        ("Bright AF-C, AFCFAST", ["afc-patched"], "s2"),
+        ("Bright AF-C, fast-drive patch", ["afc-patched"], "s2"),
         ("Dim AF-S", DIM_AFS_STOCK + ["dim-trace", "dim-contrast", "dim-arrays"], "s1"),
         ("Dim AF-C (eye detect)", ["low-light-eye"], "s1"),
-        ("Dim AF-S, SCALE75", ["dim-scale75", "dim-ab1", "dim-ab3"], "s2"),
-        ("Dim AF-S, FORCE100", ["force100"], "s2"),
+        ("Dim AF-S, mild margin cut", ["dim-scale75", "dim-ab1", "dim-ab3"], "s2"),
+        ("Dim AF-S, forced 100 fps", ["force100"], "s2"),
     ]
     rows = []
     for label, sessions, col in groups:
@@ -439,12 +439,12 @@ def chart_conditions():
     c, summary = strip(rows, 20, 2000, "Sampling time of the logged sweep, ms (samples × frame time; log)",
                        label_fmt=lambda v: f"{v:.0f} ms", title="Sweep sampling time by condition")
     print("sweep ms by condition:", [(r[0], r[1], r[2]) for r in summary])
-    leg = legend([("Stock firmware", key_mark("circle", "f-s1")), ("Patched", key_mark("square", "f-s2"))])
+    leg = legend([("Stock firmware", key_mark("circle", "f-s1")), ("Early test patches", key_mark("square", "f-s2"))])
     return leg + c + table(["Condition", "Sweeps", "Median", "Min", "Max"], summary)
 
 
 def chart_afc():
-    series = [("Stock AF-C", ["afc", "afc-stock"], "s1", "circle"), ("AFCFAST patch", ["afc-patched"], "s2", "square")]
+    series = [("Stock AF-C", ["afc", "afc-stock"], "s1", "circle"), ("Fast-drive patch (AFCFAST)", ["afc-patched"], "s2", "square")]
     W, H = 720, 320
     xs = Scale(0, 2500, 70, W - 20)
     ys = Scale(0, 1400, H - 60, 40)
@@ -469,7 +469,7 @@ def chart_scale(ps):
     sel = [p for p in ps if p["scale"]]
     xs = Scale(10e3, 3e6, 70, W - 20, log=True)
     ys = Scale(0.5, 100, H - 60, 40, log=True)
-    o = axes(xs, ys, "Area-0 brightness Y (log)", "Margin scale +0x80, max per press (log)")
+    o = axes(xs, ys, "Light the AF sees (camera brightness value, log)", "How far the margin is raised, × (log)")
     for v, vname, col, kind in VARIANTS:
         for p in sel:
             if p["variant"] == v:
@@ -573,15 +573,258 @@ def chart_curves():
     return svg(W, H, o, "Example contrast curves, bright and dim"), bright, dim
 
 
+
+# ---------------------------------------------------------------- candidate (remote A/B runs)
+
+CAND = "Patched (lower margin + 49 fps)"
+STOCK_ARM = "STOCK"
+# Comparison runs of the candidate (X875+FALLS2+OPT, +NO29 where it matters) against
+# stock, from tools/af_remote.py sessions and the scratchpad ndblocks runs. Each entry:
+# label, frame rate stock ran at, [(session, ND filter or None)], reference position,
+# candidate arms. Bright: NO29 does nothing at 100 fps, so both candidate arms pool.
+CAND_RUNS = [
+    ("Bright, two objects", "100 fps", [("remote-bright", None), ("remote-bright2", None), ("remote-obj2", None)],
+     -16294, ("X875+FALLS2+OPT", "X875+FALLS2+OPT+NO29")),
+    ("Easy target, ND out", "200 fps", [("remote-easy1", "out")], -16305, ("X875+FALLS2+OPT+NO29",)),
+    ("Easy target, ND in", "100 fps", [("remote-easy1", "in")], -16305, ("X875+FALLS2+OPT+NO29",)),
+    ("Medium light, day 1", "29 fps", [("remote-ndin-no29", None), ("remote-ndin-no29b", None)], -16294,
+     ("X875+FALLS2+OPT+NO29",)),
+    ("Dim, day 1", "29 fps", [("remote-dim2", "in"), ("remote-dim-ndin2", None)], -16294, ("X875+FALLS2+OPT+NO29",)),
+    ("Dim, day 2, easy target", "29 fps", [("remote-dim29", None), ("remote-dim29b", None)], -16305,
+     ("X875+FALLS2+OPT+NO29",)),
+]
+HARD_RUNS = [("Hard target", "remote-hard1"), ("Blank wall", "remote-wall1"), ("Too dark", "remote-dark")]
+HARD_OUT = [("lock", "Locked", "good"), ("done", "Ended without a confirmed peak", "warn"),
+            ("fail", "Failed", "crit"), ("abort", "Released before a result", "abort")]
+
+
+def jsonl(session, nd=None):
+    f = LOGS / session / "presses.jsonl"
+    if not f.exists():
+        return []
+    out = []
+    for line in f.read_text().splitlines():
+        r = json.loads(line)
+        if nd is None or r.get("nd") == nd:
+            out.append(r)
+    return out
+
+
+def boot_change(a, b, n=4000, seed=7):
+    """95% bootstrap interval of median(b) / median(a) - 1."""
+    rnd = random.Random(seed)
+    rs = sorted(statistics.median(rnd.choices(b, k=len(b))) / statistics.median(rnd.choices(a, k=len(a)))
+                for _ in range(n))
+    return rs[int(.025 * n)] - 1, rs[int(.975 * n)] - 1
+
+
+def perm_p(a, b, n=20000, seed=1):
+    rnd = random.Random(seed)
+    d = abs(statistics.median(a) - statistics.median(b))
+    v, c = a + b, 0
+    for _ in range(n):
+        rnd.shuffle(v)
+        c += abs(statistics.median(v[:len(a)]) - statistics.median(v[len(a):])) >= d
+    return c / n
+
+
+def cand_data():
+    out = []
+    for label, fps, sessions, ref, arms in CAND_RUNS:
+        rs = [r for s, nd in sessions for r in jsonl(s, nd)]
+        st = [r for r in rs if r["arm"] == STOCK_ARM and r.get("ms")]
+        ca = [r for r in rs if r["arm"] in arms and r.get("ms")]
+        if not st or not ca:
+            continue
+        a, b = [r["ms"] for r in st], [r["ms"] for r in ca]
+        lo, hi = boot_change(a, b)
+        bad = lambda X: sum(r["outcome"] not in ("lock", "done") for r in X)
+        wrong = lambda X: sum(r["outcome"] in ("lock", "done") and r.get("final") is not None
+                              and abs(r["final"] - ref) > 150 for r in X)
+        out.append(dict(label=label, fps=fps, stock=st, cand=ca, ms_s=median(a), ms_c=median(b),
+                        change=median(b) / median(a) - 1, lo=lo, hi=hi, p=perm_p(a, b),
+                        fail_s=bad(st), fail_c=bad(ca), wrong_s=wrong(st), wrong_c=wrong(ca),
+                        sessions=", ".join(s + (f" ({nd})" if nd else "") for s, nd in sessions)))
+    return out
+
+
+def chart_effect(cd):
+    W, row_h, left, right = 720, 40, 230, 170
+    H = 34 + row_h * len(cd) + 50
+    xs = Scale(-60, 30, left, W - right)
+    o = []
+    for t in range(-60, 31, 15):
+        o.append(f'<line x1="{xs(t):.1f}" x2="{xs(t):.1f}" y1="24" y2="{H - 50}" class="{"axis" if t == 0 else "grid"}"/>')
+        o.append(f'<text x="{xs(t):.1f}" y="{H - 32}" class="tick" text-anchor="middle">{t:+d}%</text>'.replace("+0%", "0"))
+    o.append(f'<text x="{(xs.a + xs.b) / 2:.1f}" y="{H - 10}" class="lab" text-anchor="middle">'
+             'Change in median AF time, patched against stock (bar: 95% interval)</text>')
+    o.append(f'<text x="{xs(-58):.1f}" y="16" class="lab">← faster</text>')
+    o.append(f'<text x="{xs(28):.1f}" y="16" class="lab" text-anchor="end">slower →</text>')
+    for i, d in enumerate(cd):
+        cy = 34 + row_h * (i + .5)
+        o.append(f'<text x="{left - 12}" y="{cy - 2:.1f}" class="tick ink" text-anchor="end">{esc(d["label"])}</text>')
+        o.append(f'<text x="{left - 12}" y="{cy + 13:.1f}" class="tick" text-anchor="end">stock at {esc(d["fps"])}</text>')
+        tip = (f'{d["label"]} (stock at {d["fps"]}): {d["ms_s"]:.0f} → {d["ms_c"]:.0f} ms, {100 * d["change"]:+.0f}% '
+               f'[{100 * d["lo"]:+.0f}%, {100 * d["hi"]:+.0f}%], p {d["p"]:.3f}, n {len(d["stock"])}/{len(d["cand"])}')
+        o.append(f'<g class="mk" data-tip="{esc(tip)}"><rect x="{xs.a}" y="{cy - row_h / 2:.1f}" width="{xs.b - xs.a}" '
+                 f'height="{row_h}" class="hit"/>'
+                 f'<line x1="{xs(100 * d["lo"]):.1f}" x2="{xs(100 * d["hi"]):.1f}" y1="{cy:.1f}" y2="{cy:.1f}" class="ci"/>'
+                 + shape("square", xs(100 * d["change"]), cy, "f-s4", None, r=5.5).replace('<g class="mk">', "").replace("</g>", "")
+                 + "</g>")
+        o.append(f'<text x="{W - right + 14}" y="{cy - 2:.1f}" class="val">{100 * d["change"]:+.0f}%  '
+                 f'{d["ms_s"]:.0f} → {d["ms_c"]:.0f} ms</text>')
+        o.append(f'<text x="{W - right + 14}" y="{cy + 13:.1f}" class="tick">n {len(d["stock"])} / {len(d["cand"])}'
+                 f'{"  · p " + (f"{d[chr(112)]:.3f}" if d["p"] >= .001 else "<0.001")}</text>')
+    rows = [[d["label"], d["fps"], len(d["stock"]), len(d["cand"]), f'{d["ms_s"]:.0f}', f'{d["ms_c"]:.0f}',
+             f'{100 * d["change"]:+.0f}%', f'{100 * d["lo"]:+.0f}% to {100 * d["hi"]:+.0f}%', f'{d["p"]:.4f}',
+             f'{d["fail_s"]} / {d["fail_c"]}', f'{d["wrong_s"]} / {d["wrong_c"]}', d["sessions"]] for d in cd]
+    print("candidate effect:", *rows, sep="\n  ")
+    return svg(W, H, o, "Change in median AF time, candidate against stock, by condition") + table(
+        ["Condition", "Stock fps", "n stock", "n cand.", "Stock ms", "Cand. ms", "Change", "95% interval",
+         "p (permutation)", "Failed s / c", "Wrong lock s / c", "Sessions"], rows)
+
+
+def chart_cand_spread(cd):
+    rows = []
+    for d in cd:
+        for who, rs, col, kind in (("stock", d["stock"], "s1", "circle"), ("patched", d["cand"], "s4", "square")):
+            vals = [(r["ms"], f'{d["label"]}, {who}: {r["ms"]:.0f} ms, {r.get("fps")} fps, '
+                              f'{r.get("passes")} pass{"es" if r.get("passes") != 1 else ""}, {r["outcome"]}')
+                    for r in rs]
+            rows.append((f'{d["label"]} · {who}', vals, col, kind))
+    c, summary = strip(rows, 100, 2500, "Time from half-press to result, ms (log)", row_h=26, left=250,
+                       label_fmt=lambda v: f"{v:.0f} ms", title="Every compared press, stock and candidate")
+    leg = legend([("Stock", key_mark("circle", "f-s1")), (CAND, key_mark("square", "f-s4"))])
+    return leg + c + table(["Run", "Presses", "Median", "Min", "Max"], summary)
+
+
+def chart_phases(only_stock=False):
+    rs = jsonl("opt3")
+    groups = [("Stock, 29 fps", lambda r: r["arm"] == STOCK_ARM),
+              ("Patched, 49 fps", lambda r: "FORCE49" in r["arm"] and r["params"].get("falls") == 2
+               and str(r["params"].get("exponent")) == "0.875" and abs(float(r["params"].get("kb", 1)) - .32) < .08)]
+    groups = groups[:1] if only_stock else groups
+    phases = [("wait_ms", "Wait for the lens", "ph1"), ("sweep_ms", "Sweep (frames)", "ph2"),
+              ("finish_ms", "Accept and finish", "ph3")]
+    W, row_h, left = 720, 54, 170
+    H = 20 + row_h * len(groups) + 46
+    xs = Scale(0, 700, left, W - 70)
+    o = []
+    for t in range(0, 701, 100):
+        o.append(f'<line x1="{xs(t):.1f}" x2="{xs(t):.1f}" y1="14" y2="{H - 46}" class="grid"/>')
+        o.append(f'<text x="{xs(t):.1f}" y="{H - 28}" class="tick" text-anchor="middle">{t}</text>')
+    o.append(f'<text x="{(xs.a + xs.b) / 2:.1f}" y="{H - 8}" class="lab" text-anchor="middle">'
+             'Median time per phase of a press, ms (dim light)</text>')
+    table_rows = []
+    for i, (label, sel) in enumerate(groups):
+        g = [r for r in rs if r.get("cond") == "off" and r.get("wait_ms") is not None and sel(r)]
+        cy = 20 + row_h * i
+        o.append(f'<text x="{left - 12}" y="{cy + 20}" class="tick ink" text-anchor="end">{esc(label)}</text>')
+        o.append(f'<text x="{left - 12}" y="{cy + 35}" class="tick" text-anchor="end">n {len(g)}</text>')
+        x = 0
+        vals = []
+        for k, name, cls in phases:
+            v = median([r[k] for r in g])
+            vals.append(v)
+            o.append(f'<g class="mk" data-tip="{esc(f"{label}: {name.lower()} {v:.0f} ms (median of {len(g)})")}">'
+                     f'<rect x="{xs(x):.1f}" y="{cy + 6}" width="{xs(x + v) - xs(x) - 2:.1f}" height="32" rx="4" class="{cls}"/>'
+                     f'<text x="{xs(x) + 8:.1f}" y="{cy + 27}" class="inbar t-{cls}">{v:.0f}</text></g>')
+            x += v
+        o.append(f'<text x="{xs(x) + 8:.1f}" y="{cy + 27}" class="val">= {x:.0f} ms</text>')
+        table_rows.append([label, len(g)] + [f"{v:.0f}" for v in vals] + [f"{sum(vals):.0f}",
+                          f'{median([r["ms"] for r in g]):.0f}', f'{median([r["samples"] for r in g]):g}'])
+    print("time split:", table_rows)
+    leg = legend([(n, f'<rect x="2" y="2" width="12" height="12" rx="3" class="{c}"/>') for _, n, c in phases])
+    return leg + svg(W, H, o, "Where a dim-light press spends its time") + table(
+        ["Setting", "Presses", "Wait ms", "Sweep ms", "Finish ms", "Sum of medians", "Median total ms", "Samples"],
+        table_rows)
+
+
+def chart_hard():
+    W, row_h, left = 720, 40, 230
+    data = []
+    for scene, sess in HARD_RUNS:
+        rs = jsonl(sess)
+        for who, arm in (("stock", STOCK_ARM), ("patched", "X875+FALLS2+OPT+NO29")):
+            g = [r for r in rs if r["arm"] == arm]
+            if g:
+                data.append((scene, who, g))
+    H = 16 + row_h * len(data) + 10
+    o, rows = [], []
+    bar_w = W - left - 20
+    for i, (scene, who, g) in enumerate(data):
+        cy = 16 + row_h * i
+        o.append(f'<text x="{left - 12}" y="{cy + 19}" class="tick ink" text-anchor="end">{esc(scene)} · {who}</text>')
+        counts = Counter("fail" if r["outcome"] in ("fail", "none") else r["outcome"] for r in g)
+        x = left
+        for k, name, cls in HARD_OUT:
+            n = counts[k]
+            if not n:
+                continue
+            w = bar_w * n / len(g)
+            o.append(f'<g class="mk" data-tip="{esc(f"{scene}, {who}: {name.lower()} {n} of {len(g)}")}">'
+                     f'<rect x="{x:.1f}" y="{cy + 2}" width="{w - 2:.1f}" height="26" rx="4" class="f-{cls}"/>')
+            if w > 24:
+                o.append(f'<text x="{x + 7:.1f}" y="{cy + 20}" class="inbar{" dark" if cls == "warn" else ""}">{n}</text>')
+            o.append("</g>")
+            x += w
+        rows.append([scene, who, len(g)] + [counts[k] for k, *_ in HARD_OUT] +
+                    [f'{median([r["ms"] for r in g if r.get("ms")]):.0f}'])
+    print("hard scenes:", rows)
+    leg = legend([(n, f'<rect x="2" y="2" width="12" height="12" rx="3" class="f-{c}"/>') for _, n, c in HARD_OUT])
+    return leg + svg(W, H, o, "Outcomes where AF struggles: hard target, blank wall, too dark") + \
+        table(["Scene", "Setting", "Presses"] + [n for _, n, _ in HARD_OUT] + ["Median ms"], rows)
+
+
+def chart_importance():
+    try:
+        import optuna
+    except ImportError:
+        return "<p>(optuna not installed: chart skipped)</p>"
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    studies = []
+    for name, title in (("opt1", "Study 1: detector thresholds"), ("opt3", "Study 3: thresholds, step, frame rate")):
+        db = LOGS / name / "study.db"
+        if not db.exists():
+            continue
+        st = optuna.load_study(study_name=None, storage=f"sqlite:///{db}")
+        n = sum(t.state.name == "COMPLETE" for t in st.trials)
+        acc = defaultdict(float)  # fANOVA shifts with its random forest: average 5 seeds
+        for seed in range(5):
+            ev = optuna.importance.FanovaImportanceEvaluator(seed=seed)
+            for k, v in optuna.importance.get_param_importances(st, evaluator=ev).items():
+                acc[k] += v / 5
+        studies.append((title, n, sorted(acc.items(), key=lambda kv: -kv[1])))
+    W, row_h, left = 720, 22, 120
+    H = sum(30 + row_h * len(imp) + 14 for _, _, imp in studies) + 20
+    xs = Scale(0, 1, left, W - 70)
+    o, rows, y = [], [], 0
+    for title, n, imp in studies:
+        o.append(f'<text x="0" y="{y + 18}" class="lab strong">{esc(title)} · {n} trials</text>')
+        y += 30
+        for k, v in imp:
+            o.append(f'<text x="{left - 10}" y="{y + 15}" class="tick ink" text-anchor="end">{esc(k)}</text>')
+            o.append(f'<g class="mk" data-tip="{esc(f"{title}: {k} {100 * v:.0f}% of the explained variance")}">'
+                     f'<rect x="{left}" y="{y + 3}" width="{max(xs(v) - left, 2):.1f}" height="15" rx="3" class="f-ink"/></g>')
+            o.append(f'<text x="{xs(v) + 6:.1f}" y="{y + 15}" class="val">{100 * v:.0f}%</text>')
+            rows.append([title, n, k, f"{100 * v:.1f}%"])
+            y += row_h
+        y += 14
+    print("importance:", rows)
+    return svg(W, H, o, "Which knobs mattered in the Optuna studies (fANOVA importance)") + \
+        table(["Study", "Trials", "Knob", "Share of explained variance"], rows)
+
+
 # ---------------------------------------------------------------- page
 
 CSS = """
 :root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef;
---s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--abort:#898781;--grid:#e8e6e0;--axis:#c3c2b7}
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s4:#eda100;--good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--abort:#898781;--grid:#e8e6e0;--axis:#c3c2b7;
+--ph1:#b9b6ac;--ph2:#4a4d52;--ph3:#d6d3ca;--pt1:#0b0b0b;--pt2:#fff;--pt3:#0b0b0b}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21;
---s1:#3987e5;--s2:#d95926;--s3:#199e70;--grid:#25282c;--axis:#3a3e44}}
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--grid:#25282c;--axis:#3a3e44;--ph1:#6b6e73;--ph2:#d9d6ce;--ph3:#45484d;--pt1:#fff;--pt2:#0b0b0b;--pt3:#fff}}
 :root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21;
---s1:#3987e5;--s2:#d95926;--s3:#199e70;--grid:#25282c;--axis:#3a3e44}
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--grid:#25282c;--axis:#3a3e44;--ph1:#6b6e73;--ph2:#d9d6ce;--ph3:#45484d;--pt1:#fff;--pt2:#0b0b0b;--pt3:#fff}
 *{box-sizing:border-box}
 html{scroll-padding-top:16px}
 body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
@@ -621,7 +864,9 @@ details{overflow-x:auto}
 .val{fill:var(--fg);font-size:12px;font-variant-numeric:tabular-nums}
 .inbar{fill:#fff;font-size:12.5px;font-weight:600}
 .inbar.dark{fill:#0b0b0b}
-.f-s1{fill:var(--s1)}.f-s2{fill:var(--s2)}.f-s3{fill:var(--s3)}
+.f-s1{fill:var(--s1)}.f-s2{fill:var(--s2)}.f-s3{fill:var(--s3)}.f-s4{fill:var(--s4)}.f-ink{fill:var(--muted)}
+.ph1{fill:var(--ph1)}.ph2{fill:var(--ph2)}.ph3{fill:var(--ph3)}.inbar.t-ph1{fill:var(--pt1)}.inbar.t-ph2{fill:var(--pt2)}.inbar.t-ph3{fill:var(--pt3)}
+.ci{stroke:var(--fg);stroke-width:2;stroke-linecap:round;stroke-opacity:.55}
 .f-good{fill:var(--good)}.f-warn{fill:var(--warn)}.f-crit{fill:var(--crit)}.f-abort{fill:var(--abort)}
 .hatch-s1{fill:url(#h-s1)}.hatch-s2{fill:url(#h-s2)}.hatch-s3{fill:url(#h-s3)}
 .mk circle:not(.hit),.mk rect:not(.hit),.mk path{stroke:var(--bg);stroke-width:1.5}
@@ -635,6 +880,21 @@ details{overflow-x:auto}
 .fit{stroke:var(--fg);stroke-width:1.5;stroke-opacity:.7}
 .ln-s1{fill:none;stroke:var(--s1);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .cap{color:var(--muted);font-size:15px}
+h3{font-size:1.15rem;margin:2em 0 .3em}
+.finding{border-left:4px solid var(--accent);background:var(--side);padding:10px 16px;margin:0 0 1.4em;border-radius:0 8px 8px 0}
+.finding p{margin:.5em 0}
+.takeaway{font:600 16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:.2em 0 .3em}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:1.4em 0}
+@media (max-width:640px){.tiles{grid-template-columns:1fr}}
+.tile{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--side)}
+.tile .big{font:700 1.6rem/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+.tile .what{font:13.5px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--muted);margin-top:4px}
+.glossary dl{margin:.6em 0;display:grid;grid-template-columns:max-content 1fr;gap:4px 14px}
+.glossary dt{font-weight:600}.glossary dd{margin:0;color:var(--muted)}
+@media (max-width:640px){.glossary dl{grid-template-columns:1fr}.glossary dd{margin-bottom:6px}}
+nav#TOC ul ul{padding-left:12px;margin:2px 0 8px;font-size:13px}
+nav#TOC ul ul a{color:var(--muted)}
+ul.cap li{margin:.2em 0}
 #tip{position:fixed;pointer-events:none;z-index:10;max-width:320px;padding:6px 9px;border-radius:6px;background:var(--fg);color:var(--bg);
 font:12.5px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;opacity:0;transition:opacity .08s}
 """
@@ -654,16 +914,55 @@ document.addEventListener('scroll',function(){t.style.opacity=0},true)})();
 """
 
 
-def page(sections, ps, light, k_noise, n_noise):
-    toc = "".join(f'<li><a href="#{sid}">{esc(title)}</a></li>' for sid, title, _ in sections)
-    body = "".join(f'<h2 id="{sid}">{esc(title)}</h2>{content}' for sid, title, content in sections)
-    n_csv = sum(1 for _ in LOGS.glob("*/csv/*.csv"))
+def sub(sid, title, takeaway, caption, chart, details=None):
+    """One chart section: the finding first, a short plain caption, the chart,
+    then the technical notes folded away."""
+    d = f'<details class="more"><summary>Details</summary><p>{details}</p></details>' if details else ""
+    return (sid, title, f'<p class="takeaway">{takeaway}</p><p class="cap">{caption}</p>{chart}{d}')
+
+
+def stat_tiles(items):
+    return '<div class="tiles">' + "".join(
+        f'<div class="tile"><div class="big">{esc(big)}</div><div class="what">{what}</div></div>'
+        for big, what in items) + "</div>"
+
+
+GLOSSARY = [
+    ("Contrast AF", "The GR moves the lens through a range and measures how sharp (how contrasty) the "
+                    "focus area is at each step. The sharpest step is the focus."),
+    ("Sweep", "That run of the lens with a measurement per frame."),
+    ("fps", "Frames per second the camera measures during a sweep. In good light 200; in dim light it "
+            "drops to 100, 49 and finally 29 to collect more light per frame."),
+    ("Margin", "How far the sharpness peak must stand out before the camera accepts it. It is raised "
+               "in dim light so noise is not taken for a peak."),
+    ("Patched", "The combined change tested here: a lower margin (found by the optimizer) plus 49 instead "
+                "of 29 fps in the darkest mode. It lives in the camera's memory only and is gone after a restart."),
+    ("Locked / ended / failed", "Locked: the camera confirmed a peak (green frame). Ended: it stopped "
+                                "without confirming one. Failed: it gave up."),
+    ("ND filter", "The GR's built-in grey filter, switched in remotely to make the same scene darker."),
+]
+
+
+def glossary():
+    return ('<details class="glossary"><summary>Words used on this page</summary><dl>' + "".join(
+        f"<dt>{esc(k)}</dt><dd>{esc(v)}</dd>" for k, v in GLOSSARY) + "</dl></details>")
+
+
+def page(intro, chapters):
+    toc = "".join(
+        f'<li><a href="#{cid}">{esc(ctitle)}</a><ul>'
+        + "".join(f'<li><a href="#{sid}">{esc(t)}</a></li>' for sid, t, _ in subs) + "</ul></li>"
+        for cid, ctitle, _, subs in chapters)
+    body = "".join(
+        f'<h2 id="{cid}">{esc(ctitle)}</h2>{cintro}'
+        + "".join(f'<h3 id="{sid}">{esc(t)}</h3>{content}' for sid, t, content in subs)
+        for cid, ctitle, cintro, subs in chapters)
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AF measurement charts</title>
+<title>GR IIIx autofocus study</title>
 <style>{CSS}</style>
 </head>
 <body>
@@ -671,14 +970,8 @@ def page(sections, ps, light, k_noise, n_noise):
 <div class="layout">
 <nav id="TOC"><a class="home" href="index.html">← All documents</a><ul>{toc}</ul></nav>
 <main>
-<h1>AF measurement charts</h1>
-<p>Charts of the GR IIIx autofocus measurements in
-<a href="af-debug-log.html">AF debug log on the camera</a>. They are drawn from the
-raw logs, not copied from the tables there:
-{n_csv:,} debug CSV dumps (unique finished sweeps only, as in <code>tools/af_csv.py</code>)
-and {len(TRACE_VARIANT) + 2} state traces ({len(ps)} traced presses with brightness data). Hover a mark for its
-values. Each chart has its numbers under <em>Data</em>. Regenerate with
-<code>python3 tools/af_charts.py</code>.</p>
+<h1>Faster autofocus in dim light on the GR IIIx</h1>
+{intro}
 {body}
 </main>
 </div>
@@ -689,9 +982,26 @@ values. Each chart has its numbers under <em>Data</em>. Regenerate with
 """
 
 
+def fill_site(path, charts):
+    """Replace <!-- chart:NAME --> ... <!-- /chart:NAME --> in the public page with
+    the chart alone: the Data tables (session names, local log names) stay out."""
+    text = path.read_text(encoding="utf-8")
+    for name, html_ in charts.items():
+        html_ = re.sub(r"<details>.*?</details>", "", html_, flags=re.S)
+        pat = re.compile(rf"(<!-- chart:{name} -->).*?(<!-- /chart:{name} -->)", re.S)
+        if not pat.search(text):
+            print(f"site: no block for {name}")
+            continue
+        text = pat.sub(lambda m: m.group(1) + f'<div class="fig">{html_}</div>' + m.group(2), text)
+    path.write_text(text, encoding="utf-8")
+    print(f"filled {path.relative_to(ROOT)}: {', '.join(charts)}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=ROOT / "docs" / "af-charts.html")
+    ap.add_argument("--site", type=Path, nargs="?", const=ROOT / "site" / "public" / "index.html",
+                    help="also fill the <!-- chart:NAME --> blocks of the public summary page")
     args = ap.parse_args()
     ps = presses()
     light = sweeps_light()
@@ -699,59 +1009,189 @@ def main():
     noise_svg, k_noise, n_noise = chart_noise(light)
     curves_svg, bright, dim = chart_curves()
     n_lock = Counter(p["variant"] for p in ps)
-    sections = [
-        ("lock-rate", "Lock rate by light level and margin",
-         f'<p class="cap">Share of half-presses that locked, by the light during the search, for the stock dim-light '
-         f'margin and the two margin patches. Stock never locked below Y 60k and locked 57% from 60k to 150k. '
-         f'SCALE75 locks almost everything from 60k up, with one false lock in the darkest bucket. SQRTNS locks '
-         f'more in the dark, but 3 of its 5 locks there are false (the lens parked at the near stop). '
-         f'Presses: stock {n_lock["stock"]}, SQRTNS {n_lock["x0.5"]}, SCALE75 {n_lock["x0.75"]}. See '
-         f'<a href="af-debug-log.html#ab23">A/B, power-ons 2 and 3</a>.</p>' + chart_lock_rate(ps)),
-        ("presses", "Every traced press",
-         '<p class="cap">Each dot is one half-press: the light during the search against the time from half-press '
-         'to the result. With the stock margin, failures cluster below about 150k and take 2–6 s, while most locks '
-         'take 0.5–2 s. A press at the top edge ran to the end of the trace.</p>' + chart_presses(ps)),
-        ("margin-scale", "Margin scale against light",
-         '<p class="cap">The scale the camera multiplies its peak margin by (<code>+0x80</code>, the largest value '
-         'per press). Stock rises roughly as 1/Y in dim light, to about 30. SCALE75 holds it to about 4–16 over the '
-         'same range, and SQRTNS lower still. See <a href="af-debug-log.html#dim-margin">the dim-light margin</a>.</p>'
-         + chart_scale(ps)),
-        ("frame-rate", "Frame rate the camera picks",
-         '<p class="cap">Per stock sweep: the scene light behind each frame rate. That is the logged brightness per '
-         'pixel with exposure time and gain divided out, so it no longer depends on the exposure the camera chose. '
-         'The bars mark medians. AF-S drops from 200 to 100, 49 and 29 fps as the light falls, and AF-C runs at '
-         'the 59 fps live-view rate. The ranges overlap because the camera picks the rate from its own metering '
-         'before the sweep. Patched sessions are left out.</p>' + chart_ladder(light)),
-        ("noise", "Why contrast AF needs light",
-         f'<p class="cap">The lowest contrast value of each sweep, per pixel, against brightness per pixel × gain. '
-         f'It grows with a log-log slope of {k_noise:.2f} over {n_noise} stock sweeps, close to the 0.5 of sensor '
-         f'shot noise. So the floor under the focus peak is sensor noise, not scene detail. See '
-         f'<a href="af-debug-log.html#why-af-needs-light">the analysis</a>.</p>' + noise_svg
-         + '<p class="cap">How far the focus peak stood above that noise. Sweeps that found no peak barely cleared '
-           'a few noise widths.</p>' + chart_snr(light)),
-        ("curves", "What a sweep sees",
-         f'<p class="cap">Two logged sweeps, with the contrast (area 0, horizontal) shown as the % above the sweep\'s '
-         f'own minimum. Left: {esc(bright["session"])} {esc(bright["file"])}, a clear peak. Right: '
-         f'{esc(dim["session"])} {esc(dim["file"])}, a dim sweep the camera could not resolve. Its rise is about '
-         f'the size of the frame-to-frame jitter. Only the last pass is logged, so x is the sample number within that pass.</p>' + curves_svg),
-        ("conditions", "Sweep time by condition",
-         '<p class="cap">Sampling time of each logged sweep: samples × frame time. That is the sweep only, not the '
-         'whole AF delay. Bright AF-S takes about 50 ms at 200 fps. Dim AF-S at 29 fps takes 6–8× as long, and '
-         'AF-C pays for its 59 fps live-view rate. The bars mark medians.</p>' + chart_conditions()),
-        ("afc", "AF-C: stock against AFCFAST",
-         '<p class="cap">AF-C sweep time against the defocus the phase detector reported first. Stock AF-C mostly '
-         'sweeps at 59 fps. The AFCFAST patch gives it the 200 fps drive, about 3.8× faster at the same defocus. '
-         'See <a href="af-debug-log.html#afc-fast-patch">AF-C fast-drive patch</a>.</p>' + chart_afc()),
-        ("force", "Forcing a faster frame rate in dim light",
-         '<p class="cap">FORCE100 makes dim AF-S sample at 100 fps, with a third of the light per frame. Far more '
-         'sweeps find no peak or run the whole lens travel. The stock sessions are '
-         + ", ".join(f"<code>{s}</code>" for s in DIM_AFS_STOCK) + '. See '
-         '<a href="af-debug-log.html#force100-test">the force-100 test</a>.</p>' + chart_force100()
-         + '<p class="cap">FORCE49 (49 instead of 29 fps, SCALE75 on in both power-ons): outcome of each half-press. '
-           'See <a href="af-debug-log.html#force49-ab">FORCE49 A/B</a>.</p>' + chart_f49(f49)),
+    cd = cand_data()
+    n_cmp = sum(len(d["stock"]) + len(d["cand"]) for d in cd)
+    slow = [d for d in cd if d["fps"] == "29 fps"]
+    fast = [d for d in cd if d["fps"] != "29 fps"]
+    rng = lambda ds: (f'{100 * min(d["change"] for d in ds):+.0f} to {100 * max(d["change"] for d in ds):+.0f} %'
+                      .replace("-", "−"))
+    gain = f'{-100 * max(d["change"] for d in slow):.0f}–{-100 * min(d["change"] for d in slow):.0f} %'
+    bad_c = sum(d["fail_c"] + d["wrong_c"] for d in cd)
+    bad_s = sum(d["fail_s"] + d["wrong_s"] for d in cd)
+    n_csv = sum(1 for _ in LOGS.glob("*/csv/*.csv"))
+
+    intro = (
+        f'<div class="finding"><p><strong>What we found:</strong> a stable pair of settings that makes the GR IIIx '
+        f'focus faster in dim light. AF took {gain} less time wherever the camera dropped to its slowest '
+        f'measuring rate, in {len(slow)} scene and light combinations on two days. In good light it was no slower, '
+        f'and it did not fail or focus wrongly more often than stock.</p>'
+        f'<p>The two changes: the camera accepts a sharpness peak with a somewhat lower safety margin, and in the '
+        f'darkest mode it measures 49 instead of 29 frames per second. Neither helped on its own; together they '
+        f'cut the slowest part of a press, the focus sweep, by about a third. The patch is experimental: it runs '
+        f'from the camera\'s memory on one camera and firmware, and is gone after a restart.</p></div>'
+        '<p>The Ricoh GR IIIx focuses by contrast: it moves the lens and looks for the sharpest point. In dim '
+        'light that gets slow. This page follows one question through the measurements: <strong>where does '
+        'the time go, and can a small firmware change win some of it back without making focus less '
+        'reliable?</strong> All presses were made on one camera (firmware 1.60), most of them remote-controlled '
+        'over Wi-Fi so that stock and patched settings could be interleaved blind.</p>'
+        + stat_tiles([
+            (gain, f"less AF time where the camera drops to 29 fps (dim light), in {len(slow)} scene and "
+                   f"light combinations on two days"),
+            (rng(fast), "change in AF time in good light (100–200 fps): no slower"),
+            (str(bad_c), f"failed presses or wrong focus with the patch, in {n_cmp} compared presses "
+                         f"(stock: {bad_s})"),
+        ])
+        + glossary()
+        + f'<details class="more"><summary>About the data</summary><p>Drawn from the raw logs, not copied: '
+          f'{n_csv:,} debug CSV dumps (unique finished sweeps, as in <code>tools/af_csv.py</code>), '
+          f'{len(TRACE_VARIANT) + 2} state traces ({len(ps)} traced presses with brightness data) and the remote '
+          f'A/B sessions under <code>work/af-logs</code>. The lab notebook with every run is '
+          f'<a href="af-debug-log.html">AF debug log on the camera</a>. Hover a mark for its values; each chart '
+          f'has its numbers under <em>Data</em>. Regenerate with <code>python3 tools/af_charts.py</code>.</p></details>'
+    )
+
+    chapters = [
+        ("why-slow", "1. Why dim light makes AF slow",
+         '<p class="cap">Four steps: what the camera measures, what it does when light falls, what that costs, '
+         'and where in a press the time ends up.</p>', [
+             sub("curves", "What a sweep sees",
+                 "In good light the sharpness curve has a clear peak. In dim light the peak is barely larger "
+                 "than the noise.",
+                 "Two real sweeps. The height is how much sharper each frame was than the least sharp one.",
+                 curves_svg,
+                 f'Left: {esc(bright["session"])} {esc(bright["file"])}. Right: {esc(dim["session"])} '
+                 f'{esc(dim["file"])}, a dim sweep the camera could not resolve. Contrast of area 0, horizontal. '
+                 f'Only the last pass is logged, so x is the sample number within that pass.'),
+             sub("frame-rate", "The camera slows down to see more",
+                 "As light falls, the camera measures fewer frames per second: 200, then 100, 49 and 29.",
+                 "Each dot is one sweep, placed by the scene light. A slower frame rate gives each frame more "
+                 "light. AF-C uses the 59 fps of the live view.",
+                 chart_ladder(light),
+                 'Scene light is the logged brightness per pixel with exposure time and gain divided out. The '
+                 'ranges overlap because the camera picks the rate from its own metering before the sweep. '
+                 'Patched sessions are left out.'),
+             sub("sweep-time", "Which makes the sweep long",
+                 "At 29 fps a sweep takes 6–8 times as long as in good light.",
+                 "Time of each logged sweep: number of frames × frame time. The marks show the median.",
+                 chart_conditions(),
+                 'Sampling time only, not the whole AF delay. The two patched rows are early tests from chapter 2.'),
+             sub("time-split-stock", "Where a dim press spends its time",
+                 "In dim light the sweep is the largest part of a press. The wait before it is lens travel and "
+                 "does not depend on light.",
+                 "A median half-press at 29 fps, split into its phases.",
+                 chart_phases(only_stock=True),
+                 'From the camera\'s AF state trace (action codes 2, 4, 8/128) in the study-3 stock controls.'),
+             sub("noise", "Why: sensor noise",
+                 "The floor under the sharpness peak is sensor noise, so it grows when there is less light.",
+                 f"The lowest contrast value of each sweep against the light. It rises with a slope of "
+                 f"{k_noise:.2f} over {n_noise} sweeps, close to the 0.5 of photon noise. Below: sweeps that "
+                 f"found no peak rose only a few noise widths.",
+                 noise_svg + chart_snr(light),
+                 'Contrast per pixel against brightness per pixel × gain, log-log. See '
+                 '<a href="af-debug-log.html#why-af-needs-light">the analysis</a>.'),
+         ]),
+        ("first-tries", "2. Two levers, tried one at a time",
+         '<p class="cap">Two settings decide dim-light AF: the <em>margin</em> (how sure the camera must be) and '
+         'the <em>frame rate</em> (how fast it measures). Each was changed on its own first.</p>', [
+             sub("lock-rate", "Lowering the margin",
+                 "A lower margin lets the camera lock in darker light. Cut too far, it locks on nothing.",
+                 "Share of half-presses that locked, by the light the AF saw. Hatched: a false lock (the lens "
+                 "ended at the near stop).",
+                 chart_lock_rate(ps),
+                 f'Stock never locked below 60k and locked 57 % from 60k to 150k. The mild cut (SCALE75) locks '
+                 f'almost everything from 60k up, with one false lock in the darkest bucket. The strong cut '
+                 f'(SQRTNS) locks more in the dark, but 3 of its 5 locks there are false. Presses: stock '
+                 f'{n_lock["stock"]}, SQRTNS {n_lock["x0.5"]}, SCALE75 {n_lock["x0.75"]}. See '
+                 f'<a href="af-debug-log.html#ab23">A/B, power-ons 2 and 3</a>.'),
+             sub("margin-scale", "How the margin rises in the dark",
+                 "Stock raises the margin up to about 30× in dim light; the patches cap it.",
+                 "Largest margin factor per press against the light the AF saw.",
+                 chart_scale(ps),
+                 'The factor at <code>+0x80</code>. Stock rises roughly as 1/brightness. See '
+                 '<a href="af-debug-log.html#dim-margin">the dim-light margin</a>.'),
+             sub("force", "Forcing a faster frame rate",
+                 "Measuring faster alone made dim AF worse: less light per frame, more sweeps without a peak.",
+                 "Top: forcing 100 fps in dim light. Bottom: forcing 49 instead of 29 fps (with the mild "
+                 "margin cut in both halves), outcome per press.",
+                 chart_force100() + chart_f49(f49),
+                 'FORCE100 makes dim AF-S sample at 100 fps, with a third of the light per frame. Stock sessions: '
+                 + ", ".join(f"<code>{s}</code>" for s in DIM_AFS_STOCK) + '. See '
+                 '<a href="af-debug-log.html#force100-test">the force-100 test</a> and '
+                 '<a href="af-debug-log.html#force49-ab">FORCE49 A/B</a>. The 49 fps test ran in very dim light '
+                 'with the older margin patch.'),
+         ]),
+        ("search", "3. Letting an optimizer search the combination",
+         '<p class="cap">Since neither lever worked alone, an optimizer (Optuna) tried combinations: margin '
+         'settings, sweep step and frame rate together. The camera was driven over Wi-Fi, each setting uploaded '
+         'to its memory and scored on a batch of half-presses, with stock controls in between.</p>', [
+             sub("importance", "What mattered",
+                 "The margin settings (factor kb and rise floor) and the frame rate did most of the work.",
+                 "Share of the variation in the score each knob explains, per study.",
+                 chart_importance(),
+                 'fANOVA importance averaged over five seeds. With 34 and 60 trials these are rough rankings, '
+                 'good for deciding which knobs to freeze, not for effect sizes; those come from chapter 4. '
+                 'Study 2 (11 trials) is too short to rank. In study 1 the order of kb and rise swaps between seeds.'),
+         ]),
+        ("result", "4. The result: patched against stock",
+         '<p class="cap">The best combination: a lower margin (exponent 0.875, kb 0.32, falls 2, rise 0.014) '
+         'and 49 instead of 29 fps in the darkest mode. Tested blind against stock in several scenes and light '
+         'levels.</p>', [
+             sub("time-split", "The sweep gets shorter",
+                 "The patch cuts the sweep from about 335 to 210 ms. The wait and the finish stay the same.",
+                 "Median dim-light press, stock and patched.",
+                 chart_phases(),
+                 'Study-3 presses; there 49 fps was forced with FORCE49. NO29 gives the same rate only where '
+                 'stock would use 29 fps.'),
+             sub("effect", "Faster where it was slow, unchanged elsewhere",
+                 f"Where the camera drops to 29 fps, AF takes {gain} less time. In good light it is no "
+                 f"slower.",
+                 "Each row is one scene and light level. The square is the change in median AF time, the bar "
+                 "its 95 % range.",
+                 chart_effect(cd),
+                 f'{n_cmp} presses, settings interleaved. The light is given by the frame rate stock chose, because '
+                 f'the metered exposure did not track it. 95 % bootstrap interval; p from a permutation test of '
+                 f'the medians. See <a href="af-debug-log.html#opt-study">the remote studies</a>.'),
+             sub("presses-compared", "Every press, not just the median",
+                 "The whole spread moves. Most of the slow presses that needed a second pass disappear.",
+                 "Each mark is one half-press, stock and patched in adjacent rows.",
+                 chart_cand_spread(cd)),
+         ]),
+        ("limits", "5. Limits and what is still open",
+         '<p class="cap">A faster AF is only useful if it does not focus on the wrong thing more often.</p>', [
+             sub("hard-scenes", "Where AF struggles",
+                 "Without a clear target both settings fail most of the time, and the patch does not "
+                 "claim focus on nothing more often.",
+                 "A hard target, a blank wall and a scene too dark to focus.",
+                 chart_hard(),
+                 'On a blank wall a confirmed lock is a false one: stock 0, patched 1 of 20. The hard target '
+                 'locked 5 times patched against 2 stock, but those positions could not be scored: the target '
+                 'was changed before a reference was taken.'),
+             ("open", "Still open",
+              '<ul class="cap"><li>Sharpness of real photos at the patched focus positions.</li>'
+              '<li>A blind handheld test.</li>'
+              '<li>A low-contrast target in 29 fps light.</li>'
+              '<li>One camera and one firmware (1.60); other bodies may differ.</li>'
+              '<li>The patch runs from memory and is gone after a restart; it is a research tool, not a '
+              'firmware update.</li></ul>'),
+         ]),
+        ("appendix", "Appendix", "", [
+             sub("presses", "Every traced press (early tests)",
+                 "With the stock margin, presses in dim light either locked in 0.5–2 s or failed after 2–6 s.",
+                 "Each mark is one half-press: light against time to result.",
+                 chart_presses(ps),
+                 'A press at the top edge ran to the end of the trace.'),
+             sub("afc", "Side result: continuous AF",
+                 "In AF-C a patch that uses the fast drive makes the sweep about 3.8× faster.",
+                 "AF-C sweep time against how far out of focus the lens started.",
+                 chart_afc(),
+                 'Stock AF-C mostly sweeps at 59 fps. See '
+                 '<a href="af-debug-log.html#afc-fast-patch">AF-C fast-drive patch</a>.'),
+         ]),
     ]
-    args.out.write_text(page(sections, ps, light, k_noise, n_noise), encoding="utf-8")
+    args.out.write_text(page(intro, chapters), encoding="utf-8")
     print(f"wrote {args.out.relative_to(ROOT)}")
+    if args.site:
+        fill_site(args.site, {"effect": chart_effect(cd), "phases": chart_phases(), "hard": chart_hard()})
 
 
 if __name__ == "__main__":

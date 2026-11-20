@@ -217,6 +217,8 @@ def main() -> None:
     parser.add_argument("original", type=Path, help="official update file, e.g. firmware/fwdc243b-v160.bin")
     parser.add_argument("payload", type=Path, help="decoded payload to pack (same length as the original's)")
     parser.add_argument("--out", type=Path, required=True, help="where to write the rebuilt container")
+    parser.add_argument("--allow", action="append", choices=["raw", "af"],
+                        help="patch_guard allow-list (repeatable; default raw)")
     args = parser.parse_args()
 
     original = args.original.read_bytes()
@@ -232,7 +234,8 @@ def main() -> None:
 
     from patch_guard import guard  # loads the RTOS image, so import only when needed
 
-    guard_ok, report = guard(original_payload, bytes(payload), exempt=[(COMP_OFFSET, COMP_OFFSET + 4)])
+    guard_ok, report = guard(original_payload, bytes(payload), exempt=[(COMP_OFFSET, COMP_OFFSET + 4)],
+                             allow=tuple(args.allow or ["raw"]))
     print("\n".join("guard " + line for line in report))
     print(f"{'PASS' if guard_ok else 'FAIL'}  rescue path untouched (tools/patch_guard.py)")
     ok &= guard_ok

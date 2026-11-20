@@ -360,6 +360,16 @@ together:</p>
 </tr>
 </tbody>
 </table>
+<p><strong>AF allow-list (2026-11-20).</strong> <code>--allow af</code>
+(in <code>patch_guard.py</code> and <code>gr_repack.py</code>) adds the
+contrast-AF units <code>CafProcess</code>, <code>CafDetection</code> and
+<code>CafWobbling</code> as one span, from their first function
+(<code>0x533f3d18</code>) to the first function of
+<code>OtherafFactory</code> (<code>0x53417990</code>): these files have
+too few assert users for the extent rule above. A patched function must
+also be referenced only from inside the span. The default stays the
+RAW-development list. Used for the flashed AF setting, see
+<a href="af-debug-log.html#af-flash">AF debug log</a>.</p>
 <table>
 <thead>
 <tr>
