@@ -936,7 +936,7 @@ GLOSSARY = [
     ("Margin", "How far the sharpness peak must stand out before the camera accepts it. It is raised "
                "in dim light so noise is not taken for a peak."),
     ("Patched", "The combined change tested here: a lower margin (found by the optimizer) plus 49 instead "
-                "of 29 fps in the darkest mode. It lives in the camera's memory only and is gone after a restart."),
+                "of 29 fps in the darkest mode. Tested from the camera's memory; since 2026-11-20 flashed into the test camera."),
     ("Locked / ended / failed", "Locked: the camera confirmed a peak (green frame). Ended: it stopped "
                                 "without confirming one. Failed: it gave up."),
     ("ND filter", "The GR's built-in grey filter, switched in remotely to make the same scene darker."),
@@ -1029,8 +1029,8 @@ def main():
         f'and it did not fail or focus wrongly more often than stock.</p>'
         f'<p>The two changes: the camera accepts a sharpness peak with a somewhat lower safety margin, and in the '
         f'darkest mode it measures 49 instead of 29 frames per second. Neither helped on its own; together they '
-        f'cut the slowest part of a press, the focus sweep, by about a third. The patch is experimental: it runs '
-        f'from the camera\'s memory on one camera and firmware, and is gone after a restart.</p></div>'
+        f'cut the slowest part of a press, the focus sweep, by about a third. The patch is experimental: tested '
+        f'from the camera\'s memory on one camera and firmware, then flashed into that camera\'s firmware.</p></div>'
         '<p>The Ricoh GR IIIx focuses by contrast: it moves the lens and looks for the sharpest point. In dim '
         'light that gets slow. This page follows one question through the measurements: <strong>where does '
         'the time go, and can a small firmware change win some of it back without making focus less '
@@ -1173,8 +1173,8 @@ def main():
               '<li>A blind handheld test.</li>'
               '<li>A low-contrast target in 29 fps light.</li>'
               '<li>One camera and one firmware (1.60); other bodies may differ.</li>'
-              '<li>The patch runs from memory and is gone after a restart; it is a research tool, not a '
-              'firmware update.</li></ul>'),
+              '<li>The tests patched the camera\'s memory, gone after a restart; the setting is now flashed into the '
+              'test camera only. It is a research result, not a released firmware update.</li></ul>'),
          ]),
         ("appendix", "Appendix", "", [
              sub("presses", "Every traced press (early tests)",
