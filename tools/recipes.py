@@ -280,7 +280,8 @@ def format_file(recipes) -> str:
 
 def schema() -> dict:
     """Everything an editor needs to offer only valid recipes, as plain JSON.
-    The Android app reads this from its assets (android/app/src/main/assets/)."""
+    The the companion app Android app (repository its own repository, which has a copy of this
+    file) reads this from its assets (android/app/src/main/assets/)."""
     params = []
     for key, (label, values) in PARAMS.items():
         p = {"key": key, "label": label, "group": GROUP[key], "since": 2 if key in FORMAT2_KEYS else 1}

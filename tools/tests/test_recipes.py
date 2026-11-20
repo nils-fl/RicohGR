@@ -4,7 +4,9 @@ Two generated files are checked in, and these tests fail when either is stale:
 - tools/recipe-vectors.json: shared test cases; the Android port runs the same
   cases (android/app/src/test/.../RecipeVectorsTest.kt) and must give the same
   results, error messages included.
-- android/app/src/main/assets/recipe-schema.json: the editor's schema.
+- android/app/src/main/assets/recipe-schema.json: the editor's schema. The app
+  moved to its own repository (its own repository) with a copy of this file;
+  here the schema is only checked and written when android/ exists.
 
 Regenerate both after changing recipes.py:
     python3 tools/tests/test_recipes.py --regen
@@ -12,6 +14,8 @@ Regenerate both after changing recipes.py:
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -119,6 +123,8 @@ def test_vectors_file_is_current():
 
 
 def test_schema_asset_is_current():
+    if not SCHEMA.parent.exists():
+        pytest.skip("no android/ here: the app lives in its own repository")
     assert SCHEMA.read_text() == r.schema_json(), "stale: run python3 tools/tests/test_recipes.py --regen"
 
 
@@ -211,6 +217,7 @@ if __name__ == "__main__":
     if sys.argv[1:] != ["--regen"]:
         raise SystemExit("usage: test_recipes.py --regen   (run the tests with pytest)")
     VECTORS.write_text(vectors_json())
-    SCHEMA.parent.mkdir(parents=True, exist_ok=True)
-    SCHEMA.write_text(r.schema_json())
-    print(f"wrote {VECTORS.relative_to(ROOT)} and {SCHEMA.relative_to(ROOT)}")
+    print(f"wrote {VECTORS.relative_to(ROOT)}")
+    if SCHEMA.parent.exists():
+        SCHEMA.write_text(r.schema_json())
+        print(f"wrote {SCHEMA.relative_to(ROOT)}")

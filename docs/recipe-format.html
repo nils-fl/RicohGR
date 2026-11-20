@@ -215,10 +215,12 @@ in thirds: <code>-0.3</code>, <code>0.0</code>, <code>+0.3</code>,
 </tbody>
 </table>
 <p>The checker writes <code>format 1</code> whenever no recipe uses a
-format-2 key, so format-1 files keep their exact form. The Android app
-(<code>android/</code>) reads the same rules from
-<code>assets/recipe-schema.json</code>, which
-<code>tools/tests/test_recipes.py --regen</code> generates. Shared test
+format-2 key, so format-1 files keep their exact form. The the companion app Android app
+(own repository since 2026-11-20, <a href="https://github.com/its own repository">its own repository</a>)
+carries a copy of this checker and reads the same rules from its
+<code>assets/recipe-schema.json</code>, which its
+<code>tools/tests/test_recipes.py --regen</code> generates. Change the rules in
+both repositories. Shared test
 cases (<code>tools/recipe-vectors.json</code>) keep the two checkers
 identical, messages included.</p>
 
@@ -298,7 +300,7 @@ Film, 263 Bleach Bypass, 264 Retro, 267 Negative Film.</li>
 <h2 id="community">Community recipes</h2>
 <p>Three files in <code>recipes/</code> hold recipes published for the GR
 III / GR IIIx, read on 2026-11-20, with author and source link for each.
-The Android app adds them to its single recipe list, which can be filtered by
+The the companion app app (own repository) bundles a copy and adds them to its single recipe list, which can be filtered by
 image control, with favorites pinned on top. Older app versions made one
 collection per file; the app removes those collections once (library version 2)
 and keeps the recipes. The values are as published; none were checked on a
