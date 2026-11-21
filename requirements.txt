@@ -1,4 +1,5 @@
 # Only some tools need these; the rest use the Python standard library (3.10+).
 capstone>=5      # tools/rtos_analysis.py, tools/patch_guard.py (gr_repack.py, af_firmware.py)
+numpy>=1.24      # tools/af_replay.py (also pulled in by optuna)
 optuna>=3        # tools/af_optimize.py
 pytest>=7        # tools/tests

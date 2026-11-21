@@ -1051,8 +1051,8 @@ reader (Read). So some candidates are data patches, not code.</p>
 <tbody>
 <tr><td><code>0x53c16bb0</code>…<code>bc4</code></td><td>569.22, 569.22, 574.5, 597.85, 563.3, 563.3</td><td><code>0x5340c59c</code></td><td>base b of the margin scale per mode (Read)</td></tr>
 <tr><td><code>0x53c16bd4</code></td><td>0.25</td><td><code>0x5340c5f8</code></td><td>floor of the bright-light branch (Read)</td></tr>
-<tr><td><code>0x53c16cc0</code></td><td>3</td><td><code>0x5340dcc0</code></td><td>falling samples needed before the fall is tested against T (Read): the "3 samples after the peak" of every CSV</td></tr>
-<tr><td><code>0x53c16c00</code>, <code>0x53c16cb4</code></td><td>5, 5</td><td><code>0x5340db4c</code></td><td>peak within the first 5 samples and at least 5 falls, then a ratio test with 0.5 (<code>0x53c16c40</code>): probably the wrong-side test; the turn decision itself (<code>0x53403808</code>) is not decoded</td></tr>
+<tr><td><code>0x53c16cc0</code></td><td>3</td><td><code>0x5340dcc0</code></td><td>rising samples in the current run before the detector's return value can be set (rise over the run &gt; <code>+0x28</code> + T; Read). <em>Corrected 2026-11-21:</em> first read as falling samples; the only reader compares it with the rise count <code>+0xbc</code> (<a href="af-subsystem.html#replay-rebuilt">af-subsystem §11.1</a>)</td></tr>
+<tr><td><code>0x53c16c00</code>, <code>0x53c16cb4</code></td><td>5, 5</td><td><code>0x5340db4c</code></td><td>second-peak test: when the stored maximum lies within the first 5 samples and a new rising run reaches 5 samples (rise count, not falls) and recovers more than half of max − min (0.5 at <code>0x53c16c40</code>), the current sample becomes the maximum; only with <code>+0xae</code> set. <em>Corrected 2026-11-21:</em> first read as 5 falls, a possible wrong-side test. The turn decision itself (<code>0x53403808</code>) is not decoded</td></tr>
 <tr><td><code>0x53c16d14</code></td><td>8 bytes per mode: 0.02 / 0.04, 0.001 / 0.001, …</td><td><code>0x5340c450</code>, <code>0x5340c518</code></td><td>the absolute floor <code>+0x28</code> of the threshold, by detector mode (first column unless <code>+0x22</code>); see <a href="#rise-floor">the rise floor</a></td></tr>
 <tr><td><code>0x53c16c50</code>, <code>0x53c16d04</code>, <code>0x53c16e38</code></td><td>2, 3, 2</td><td><code>0x5340dd08</code>, <code>0x5340de84</code>, <code>0x5340de54</code></td><td>sample-index limits in the same detector; meaning not settled</td></tr>
 </tbody>
@@ -1071,7 +1071,7 @@ another one holds the shared words.</p>
 <tr><td>SCALE75 (existing)</td><td>x<sup>0.75</sup></td><td>3.9 / 6.9 / 12.0 / 21.5</td></tr>
 <tr><td>X875</td><td>x<sup>0.875</sup> (x / x<sup>0.125</sup>, three <code>vsqrt</code> and a <code>vdiv</code>; same ten words)</td><td>4.8 / 9.5 / 18.1 / 35.9</td></tr>
 <tr><td>HALFB</td><td>base table halved (data, 6 words): half of stock below b/2, 0.7× stock above b</td><td>3.0 / 6.5 / 13.7 / 29.9</td></tr>
-<tr><td>FALLS2</td><td><code>0x53c16cc0</code> 3 → 2 (data, 1 word): accept one frame earlier (34 ms at 29 fps); the fall must still exceed T</td><td>unchanged</td></tr>
+<tr><td>FALLS2</td><td><code>0x53c16cc0</code> 3 → 2 (data, 1 word): accept one frame earlier (34 ms at 29 fps); the fall must still exceed T. The word is a rising-run length, not a fall count (corrected 2026-11-21); the name stays for the existing logs</td><td>unchanged</td></tr>
 </tbody>
 </table>
 <p><code>--auto-arms STOCK,SCALE75,SQRTNS,X875,HALFB,FALLS2,SCALE75+FALLS2</code>
@@ -1172,7 +1172,13 @@ rise and fall exceed <code>+0x28</code> + T (T = <code>+0x4c</code> ×
 <code>+0x80</code>, the part the margin arms change). <code>0x5340c3c4</code>
 sets <code>+0x28</code> from the per-mode table <code>0x53c16d14</code>:
 <strong>0.02 in mode 0, 0.001 in mode 1</strong> (read live with
-<code>peek</code>; RISE10/RISE05 change the mode-0 value to 0.01/0.005).</li>
+<code>peek</code>; RISE10/RISE05 change the mode-0 value to 0.01/0.005).
+<em>Correction 2026-11-21:</em> the port of the detector update
+<code>0x5340dbfc</code> shows the floor entering at 0.5 × <code>+0x28</code> + T
+for the rise (over the current rising run) and at 0.25 × <code>+0x28</code> + T
+for the fall; the full <code>+0x28</code> + T is only in its return value (see
+<a href="af-subsystem.html#replay-rebuilt">af-subsystem §11.1</a>). The
+conclusions here stand: grade 0 still raises the floor twentyfold.</li>
 <li><strong>The mode is the phase decision grade.</strong> The detector setup
 <code>0x533f893c</code> passes the byte at CAF <code>+0x43c1</code> + area,
 which the CSV writer prints as <code>[DicisionGrade]</code>

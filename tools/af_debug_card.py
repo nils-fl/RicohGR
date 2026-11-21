@@ -1148,11 +1148,12 @@ HALFB_SITES = (
     (0x53C16BC4, 0x440CD333, 0x438CD333),
 )
 
-# FALLS2 (data only): the detector accepts a peak when the falling run after
-# it has reached N samples and the fall exceeds T (0x5340dcc0..0x5340dd00:
-# N = [0x53c16cc0] = 3, the "stops exactly 3 samples after the peak" of the
-# CSVs). 2 accepts one frame earlier (34 ms at 29 fps) and needs a shorter
-# run of falls in noisy dim light. The fall must still exceed T.
+# FALLS2 (data only): [0x53c16cc0] = 3 is read once, at 0x5340dcc0 in the
+# detector update 0x5340dbfc, and compared with the RISE count +0xbc: a rising
+# run of N samples whose rise exceeds +0x28 + T sets the detector's return
+# value (first read as a fall count, hence the name; corrected 2026-11-21, see
+# docs/af-subsystem.html#replay-rebuilt). Measured: 2 accepts about one frame
+# earlier (34 ms at 29 fps).
 FALLS2_SITES = (
     (0x53C16CC0, 0x00000003, 0x00000002),
 )

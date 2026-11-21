@@ -184,6 +184,7 @@ starts the update. **To go back**, flash the official 1.60 file the same way.
 | `af_optimize.py` | Optuna search over the contrast-AF detector constants, on the bench |
 | `af_csv.py` | One row per contrast-AF run from the debug CSVs |
 | `af_light.py` | Light, noise and peak margin of each logged sweep, by sensor mode |
+| `af_replay.py` | Replays recorded AF passes offline: detector port, other stop rules, peak fits |
 | `af_charts.py` | Writes `docs/af-charts.html` from your logs |
 | `af_timing_tally.py` | Summarises AF timings measured from high-speed video |
 | `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |

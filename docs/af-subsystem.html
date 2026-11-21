@@ -186,6 +186,8 @@ Which software changes would be felt (Inferred, no timings)</a></li>
 id="toc-106-lever-1-and-2-in-numbers-bounds-not-measurements">10.6 Lever
 1 and 2 in numbers (bounds, not measurements)</a></li>
 </ul></li>
+<li><a href="#offline-replay" id="toc-offline-replay">11. Offline replay:
+other focus rules on recorded sweeps</a></li>
 </ul></li>
 </ul>
 </nav>
@@ -1748,6 +1750,163 @@ with a low phase grade (0/0) took 467 ms median against 240 ms with grade 1/1,
 through more reversals. In the dim AF-C session, with one larger AF area
 (178 × 144 instead of two of 90 × 54), the grade was 1 in 17 of 18 sweeps
 (Inferred: the larger area gives phase detection more signal).</p>
+<h2 id="offline-replay">11. Offline replay: other focus rules on recorded sweeps</h2>
+<p>Added 2026-11-21. The question was whether the AF math could be done better,
+with statistics or newer methods. The arithmetic is cheap (10.4); what costs
+time is the decision rules (when a peak counts, when to stop). Every new rule
+would cost a camera session, so <code>tools/af_replay.py</code> replays the
+passes the tracer already recorded: 1,022 presses and 1,487 passes from 25
+remote sessions (<code>work/af-logs/*/tails</code>, tracer v3 with the detector
+arrays). Run <code>python3 tools/af_replay.py all</code> (about 30 s).</p>
+
+<h3 id="replay-rebuilt">11.1 What the replay rebuilds (Read + Measured)</h3>
+<ul>
+<li><strong>The value array</strong> (detector <code>+4</code>): each entry
+is the smoothed value (b[i−1] + 2·b[i] + b[i+1]) / 4 of the noise-normalised
+contrast b; the newest entry is the prediction (b[n−2] + 3·b[n−1]) / 4. The b
+series is solved by least squares from the array and the b values the records
+saw: 99 % within 3.5·10⁻⁴ of the recorded values, against margins of
+2–9·10⁻³. The first array (<code>+0</code>) is the lens position per sample,
+relative to the pass start.</li>
+<li><strong>The detector update <code>0x5340dbfc</code></strong>, ported
+instruction by instruction (Read). Per frame it compares the newest entry with
+the one before:
+<ul>
+<li>a fall adds one to the fall count and clears the rises; a single rise only
+takes one fall back (flag <code>+0x1d</code>), and a second rise in a row
+clears the falls;</li>
+<li>rise test: over the current rising run of r ≥ 2 samples
+(<code>0x53c16c50</code>), v[i] − v[i−r] &gt; 0.5·floor + T sets the state
+byte <code>+0x26</code> to 1;</li>
+<li>fall test: after at least one fall (<code>0x53c16bd0</code>),
+v[max] − v[i] &gt; 0.25·floor + T with the state at 1 sets it to 3, a
+confirmed peak;</li>
+<li>the return value needs a rising run of 3 (<code>0x53c16cc0</code>, the
+word FALLS2 changes to 2) and a gain above floor + T.</li>
+</ul>
+So the floor <code>+0x28</code> enters the state tests at half and a quarter,
+not in full as read earlier (<a href="af-debug-log.html#rise-floor">af-debug-log,
+rise floor</a>, corrected there). Not ported: the second-peak test
+<code>0x5340db4c</code> (off unless <code>+0xae</code>) and the branches that
+only set <code>+0xc0</code>.</li>
+<li><strong>Gate: the port against the camera</strong>, frame by frame, on the
+camera's own recorded counts and state byte:</li>
+</ul>
+<table>
+<thead><tr><th>Frame rate</th><th>Frames</th><th>Counts agree</th><th>State +0x26 agrees</th></tr></thead>
+<tbody>
+<tr><td>200 fps</td><td>3,026</td><td>82.0 %</td><td>98.0 %</td></tr>
+<tr><td>100 fps</td><td>11,623</td><td>91.5 %</td><td>94.4 %</td></tr>
+<tr><td>49 fps</td><td>4,565</td><td>93.6 %</td><td>95.2 %</td></tr>
+<tr><td>29 fps</td><td>19,181</td><td>94.5 %</td><td>95.7 %</td></tr>
+<tr><td>All</td><td>38,395</td><td>92.5 %</td><td>95.4 %</td></tr>
+</tbody>
+</table>
+<p>At 200 fps most misses come from the tracer, which reads the counts and the
+sample count of one frame at different moments (one 4 ms record per 5 ms frame).
+At 29 fps, where most frames are, 750 of the 1,055 count misses are in passes
+whose very first comparison already differs: the camera sometimes compares at
+the second sample, the port always starts at the third, and the difference
+carries into the counts (the state is affected far less). By session the state agrees in 80–99 % of frames; the lowest is the forced
+grade-0 session <code>remote-g0</code> (the mode-0 floor there is not fully
+explained; the table <code>0x53c16d14</code> has a second column, 0.04).
+Area 1 agrees less in mode 1 (90.5 % against 94.2 %), probably because the
+trace has only area 0's margin and the margin scale depends on each area's
+brightness (Inferred).</p>
+<p><strong>The stop itself is not ported.</strong> The camera stops 0–9
+frames after the state reaches 3, and 328 of 768 accepted passes never reach
+state 3 in the accepting area (they are accepted at the end of the pass:
+callers of <code>0x5340def0</code> and <code>0x53403808</code>, not decoded).
+The replay therefore uses the camera's recorded stop as the baseline. A rule
+that stops <em>sooner</em> saw only frames the camera also took, so its time
+and lock are exact; positions chain across a turn (next peak = previous pass
+end − peak + 14 pulses, 87 pairs, IQR 13–21), so a lock in a pass the camera
+rejected can be checked against the camera's later lock.</p>
+
+<h3 id="replay-rules">11.2 Stop rules (Measured offline)</h3>
+<p>Each rule is added to the camera's own: it can only stop sooner. 974
+presses of the arms the port models (the guard and offset patches are left
+out), 66 of them in the two scenes without a usable peak
+(<code>remote-g0real</code>, <code>remote-nd1</code>), where every lock is
+false.</p>
+<ul>
+<li><strong>state3</strong>: stop as soon as the camera's own detector has a
+confirmed peak (<code>+0x26</code> = 3). This is close to lever 1 of 10.5
+(shorten the confirmation), measured here for every phase grade, not only
+after a top-grade phase result.</li>
+<li><strong>noise k</strong>: a z-test on the drop. Stop when the peak rose
+and fell by k noise widths, with at least two falls in a row; σ comes from the
+same pass (robust spread of the second differences of b; the smoothed array
+it is compared with is about 0.6 times as noisy, so k is conservative). For a drop in
+Gaussian noise, a sequential probability ratio test reduces to a threshold of
+this kind, so this stands in for the "stop on evidence" approach.</li>
+</ul>
+<table>
+<thead><tr><th>Rule</th><th>Sooner in the accepted pass</th><th>Lock moved &gt;40 p</th><th>Rescued rejected passes (same peak / other)</th><th>Median saved per rescue</th><th>Unchecked</th><th>False locks added in no-signal scenes</th></tr></thead>
+<tbody>
+<tr><td>state3</td><td>258 presses, 40 ms median</td><td>3</td><td>20 / 0</td><td>738 ms</td><td>25</td><td>0 (+2)</td></tr>
+<tr><td>noise 6</td><td>150, 55 ms</td><td>1</td><td>46 / 0</td><td>910 ms</td><td>35</td><td>3 (+3)</td></tr>
+<tr><td>noise 8</td><td>93, 69 ms</td><td>0</td><td>38 / 0</td><td>958 ms</td><td>11</td><td>1 (+1)</td></tr>
+<tr><td>noise 12</td><td>57, 69 ms</td><td>0</td><td>21 / 0</td><td>954 ms</td><td>2</td><td>0 (+0)</td></tr>
+</tbody>
+</table>
+<p>"False locks added" counts presses the camera did not lock; in brackets,
+presses where the camera locked (wrongly) too and the rule would only have
+locked sooner. A rescue counts as the same peak when its lock, chained into
+the camera's accepting pass, is within 40 pulses of the camera's lock; for
+noise 8 and 12 all are within 6 pulses (noise 6: 27), and in one of them the
+camera's own lock was flagged wrong. "Saved" for a rescue runs to the
+camera's own stop in its accepting pass; the final move to the peak comes
+after both and is left out. That is fair: after a rescue the lens is no
+farther from the peak than the camera's is after its own stop (median within
+4 pulses; the camera's move costs about 76 ms + 0.4 ms per pulse). "Unchecked": the
+rule accepts a pass in a press the camera failed or aborted, mostly late in
+the last pass on the hard targets <code>remote-hard1</code> and
+<code>remote-wall1</code>. Those are rescues or false locks; offline cannot
+tell.</p>
+<p><strong>Reading.</strong> All rescues are at 29 fps and most are in one
+scene: for noise 8, 30 of 38 are in <code>remote-nd2</code>, the scene of the
+<a href="af-debug-log.html#rise-floor">rise floor</a>. There the fixed floor
+(0.02 at phase grade 0) rejects first sweeps whose peak stands clear of a
+noise of about 0.001. The replay finds that lever without being told about it,
+and puts it at about 0.95 s per affected press. In good light a rule can only
+shave the confirmation: 40–70 ms, on 6–26 % of the presses depending on the rule. A
+noise-scaled stop would be a code patch (σ per pass), not a data word; the data
+patch RISE05 already covers part of the same ground. Neither rule has been tried
+on the camera.</p>
+
+<h3 id="replay-fits">11.3 Peak fits (Measured offline)</h3>
+<p>Split-half test on 602 accepted passes whose peak lies at least two samples
+from either end. The peak is fitted from the even samples and from the odd
+samples, each at twice the camera's step (about 16 pulses). No ground truth is
+needed: both halves see the same peak, so a better estimator gives halves that
+agree.</p>
+<table>
+<thead><tr><th>Fit</th><th>Even vs odd half, median</th><th>90 %</th><th>Full step vs the camera's fit, median</th></tr></thead>
+<tbody>
+<tr><td>3-point parabola (the camera's CalcQuadraticCurve)</td><td>1.6 p</td><td>5.0 p</td><td>0</td></tr>
+<tr><td>5-point least-squares quadratic</td><td>1.9 p</td><td>5.7 p</td><td>0.7 p</td></tr>
+<tr><td>3-point Gaussian (parabola on log contrast)</td><td>1.1 p</td><td>4.5 p</td><td>0.0 p</td></tr>
+</tbody>
+</table>
+<p>The Gaussian, the better model of a focus curve, is the most consistent at
+the coarse spacing (1.1 against 1.6 pulses), and the 5-point fit the least. At
+the camera's own step the three agree to within a pulse. The differences are a
+fraction of one 8-pulse step, so the fit is not a lever for speed; a Gaussian
+would only matter if the camera sampled more coarsely. (The halves reuse the
+camera's smoothing at full step, which flatters coarse sampling a little.)</p>
+
+<h3 id="replay-limits">11.4 What the replay cannot test</h3>
+<ul>
+<li>Turn and direction rules, such as a turn after fewer falls: the replay is
+open loop, so the frames after a different turn were never taken.</li>
+<li>A phase prior (start where phase detection says and trust its grade): the
+tails do not record the phase value <code>+0x14bac</code>. Only
+<code>af_remote.py meter</code> samples it, in separate sessions.</li>
+<li>Learned AF (neural defocus estimation, as in recent Sony and Canon
+bodies): the camera has no accelerator for it, and there is no training data
+with a known true focus.</li>
+</ul>
 </main>
 </div>
 <script>

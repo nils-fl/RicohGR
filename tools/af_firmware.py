@@ -5,7 +5,8 @@ Usage:  python3 tools/af_firmware.py [--out work/firmware-af/FWDC243B.BIN]
 
 The setting is the one tested remotely as "X875+FALLS2+OPT+NO29" (docs/af-debug-log.html#opt-study):
 margin exponent 0.875 (X875), margin base table x 0.32 and rise floor 0.014 (the study's OPT data
-words), two falls before accepting a peak (FALLS2), and 49 instead of 29 fps (NO29). The words come
+words), FALLS2 (a rising run of 2 instead of 3 arms the detector's return value; the name says
+falls, after an early misreading), and 49 instead of 29 fps (NO29). The words come
 from the same site lists the RAM patches use (tools/af_debug_card.py, tools/af_optimize.py), and
 every stock word is checked against the official image before it is replaced.
 
