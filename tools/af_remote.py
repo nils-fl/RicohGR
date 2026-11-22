@@ -66,6 +66,12 @@ class Camera:
         raw = b"".join(chunks)
         hdr, _, data = raw.partition(b"\r\n\r\n")
         status = int(hdr.split(b" ", 2)[1]) if hdr.startswith(b"HTTP") else 0
+        # A connection that drops mid-reply (camera off, Wi-Fi gone) ends like a complete one.
+        for line in hdr.split(b"\r\n")[1:]:
+            name, _, value = line.partition(b":")
+            if name.strip().lower() == b"content-length" and value.strip().isdigit() \
+                    and len(data) < int(value):
+                raise OSError(f"{path}: reply cut off after {len(data)} of {int(value)} bytes")
         return status, data
 
     def api(self, method, path, body=b"", ctype="application/x-www-form-urlencoded"):
