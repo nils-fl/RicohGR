@@ -50,7 +50,7 @@ PAUSE_MS = 300         # after each line
 
 def startup_ttl() -> bytes:
     """Wait for Linux, start the endpoint, flash the AF lamp twice, then relay."""
-    rack = f"sendln 'lcmd sh {D}/RACK.SH hb'"
+    rack = f"sendln 'lcmd sh {WWW}/RACK.SH hb'"
     lines = [
         # GRKit: the RTOS builds its host-command tables after the script starts.
         "mpause 3000",
@@ -77,16 +77,18 @@ def startup_ttl() -> bytes:
         ":served",
         "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'", "mpause 500",
         "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'",
-        # The relay loop of the AF remote card: include RELAY.TTL (sequence
-        # guard inside), heartbeat every 50 rounds (~20 s).
+        # The relay loop: ask Linux to hand over a pending batch (PULL.SH, the only
+        # moment Linux writes the card), wait while it does, then include RELAY.TTL
+        # (sequence guard inside). Heartbeat every 50 rounds (~25 s).
         "rdone = 0",
         "rn = 0",
         ":relay",
+        f"sendln 'lcmd sh {WWW}/PULL.SH'",
+        "mpause 400",
         f"filesearch '{TTL_D}\\RELAY.TTL'",
         "if result = 0 goto rwait",
         f"include '{TTL_D}\\RELAY.TTL'",
         ":rwait",
-        "mpause 400",
         "rn = rn + 1",
         "if rn < 50 goto relay",
         "rn = 0",
@@ -99,7 +101,7 @@ def startup_ttl() -> bytes:
 
 
 def card_files() -> dict:
-    head = f"#!/bin/sh\nd={D}\nexec 2>>$d/ERR.LOG\n"
+    head = f"#!/bin/sh\nd={D}\nexec 2>>{WWW}/err.log\n"
     text = "printf 'Content-Type: text/plain\\r\\n\\r\\n'\n"
     cgi = {
         "uptime": head + text + "cat /proc/uptime\n",
@@ -111,13 +113,14 @@ def card_files() -> dict:
             "echo \"card recipe\"\n"),
         "log": head + (
             "n=${QUERY_STRING:-20}; case $n in *[!0-9]*) n=20 ;; esac\n"
-            + text + "busybox tail -n $n $d/RECIPE.LOG\n"),
+            + text + f"{{ cat $d/RECIPE.LOG; cat {WWW}/log.pending {WWW}/log.flush 2>/dev/null; }} | busybox tail -n $n\n"),
         # As the AF relay's shell CGI (af_debug_card.remote_files), with its own allowlist.
         "shell": head + (
             "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
             '[ "$REQUEST_METHOD" = POST ] || no POST only\n'
             "l=${CONTENT_LENGTH:-0}; case $l in *[!0-9]*) l=0 ;; esac\n"
             "[ $l -gt 0 ] && [ $l -le 2048 ] || no bad length $l\n"
+            f"[ -e {WWW}/relay.next ] && no busy\n"
             f"b={WWW}/shell.in; busybox dd of=$b bs=1 count=$l 2>/dev/null\n"
             f"q=$(cat {WWW}/relay.seq 2>/dev/null); q=$((${{q:-0}} + 1))\n"
             f"o={WWW}/relay.tmp; echo \"rseq = $q\" >$o; echo \"if rseq = rdone goto rskip$q\" >>$o\n"
@@ -128,14 +131,31 @@ def card_files() -> dict:
             "done <$b\n"
             f"[ $n -gt 0 ] && [ $n -le {MAX_LINES} ] || no 1 to {MAX_LINES} commands, got $n\n"
             "echo 'rdone = rseq' >>$o\n"
-            f"echo \"sendln 'lcmd sh {D}/RACK.SH $q'\" >>$o; echo \":rskip$q\" >>$o\n"
+            f"echo \"sendln 'lcmd sh {WWW}/RACK.SH $q'\" >>$o; echo \":rskip$q\" >>$o\n"
             f"{RELAY_PAD_SH}"
-            f"echo $q >{WWW}/relay.seq; cat $o 1<>$d/RELAY.TTL; sync\n"
+            f"echo $q >{WWW}/relay.seq; mv $o {WWW}/relay.next\n"
             "read t _ </proc/uptime\n"
-            'echo "shell $q $(busybox tr \"\\n\" \";\" <$b) $t" >>$d/RECIPE.LOG\n'
+            f'echo "shell $q $(busybox tr \"\\n\" \";\" <$b) $t" >>{WWW}/log.pending\n'
             + text + 'echo "queued $q"\n'),
     }
+    # Scripts the RTOS runs through lcmd live in RAM, so running them never reads the card.
+    # RACK.SH: ack and heartbeat, RAM only. PULL.SH: the only Linux writer of the card while the
+    # relay loop runs, and only when the RTOS asks (it then waits 400 ms before it reads):
+    # the pending batch into RELAY.TTL (in place, fixed size), the pending log lines, then sync.
+    rack_sh = ("read t _ </proc/uptime\n"
+               f"if [ \"$1\" = hb ]; then echo \"$t\" >{WWW}/relay.hb; exit 0; fi\n"
+               f"echo \"$1 $t\" >{WWW}/relay.ack\n"
+               f"echo \"ack $1 $t\" >>{WWW}/log.pending\n")
+    pull_sh = (f"w={WWW}; d={D}; c=\n"
+               "exec 2>>$w/err.log\n"
+               "if [ -f $w/relay.next ]; then cat $w/relay.next 1<>$d/RELAY.TTL; mv $w/relay.next $w/relay.done; c=1; fi\n"
+               "if [ -s $w/log.pending ]; then mv $w/log.pending $w/log.flush; cat $w/log.flush >>$d/RECIPE.LOG; rm -f $w/log.flush; c=1; fi\n"
+               "if [ -s $w/err.log ]; then cat $w/err.log >>$d/ERR.LOG && : >$w/err.log; c=1; fi\n"
+               "[ -n \"$c\" ] && sync\n"
+               "exit 0\n")
     here = "".join(f"cat >{WWW}/cgi-bin/{k} <<'END_{k.upper()}'\n{v}END_{k.upper()}\n" for k, v in cgi.items())
+    here += f"cat >{WWW}/RACK.SH <<'END_RACK'\n{rack_sh}END_RACK\n"
+    here += f"cat >{WWW}/PULL.SH <<'END_PULL'\n{pull_sh}END_PULL\n"
     remote = (
         f"d={D}\n"
         "exec 2>>$d/ERR.LOG\n"
@@ -163,10 +183,6 @@ def card_files() -> dict:
         "SCRIPT/STARTUP.TTL": startup_ttl(),
         f"{CARD_DIR}/MARK.SH": (f"d={D}\nread t _ </proc/uptime\necho \"$t\" >$d/BOOT.OK\n"
                                 "echo \"$t boot\" >>$d/RECIPE.LOG\nexit 0\n").encode(),
-        f"{CARD_DIR}/RACK.SH": ("read t _ </proc/uptime\n"
-                                f"if [ \"$1\" = hb ]; then echo \"$t\" >{WWW}/relay.hb; exit 0; fi\n"
-                                f"echo \"$1 $t\" >{WWW}/relay.ack\n"
-                                f"echo \"ack $1 $t\" >>{D}/RECIPE.LOG\n").encode(),
         f"{CARD_DIR}/REMOTE.SH": remote.encode("ascii"),
     }
 
@@ -203,12 +219,22 @@ def status(cam: Camera) -> dict:
     return out
 
 
+# Stalls (the RTOS loop stopping for good) came from Linux writing the card while the RTOS read
+# RELAY.TTL: seq 16 and 42 (2026-11-21), 18, 92, 23, 67 (2026-11-22). Since then the shell CGI
+# only queues a batch in RAM, and the RTOS fetches it itself (PULL.SH) before it reads.
+
+
 def relay(cam: Camera, lines, wait=12.0):
     for line in lines:
         if line.split()[0] not in ALLOW:
             raise SystemExit(f"not allowed on the recipe card: {line}")
     for i, group in enumerate(batches(lines), 1):
-        reply = cam.cgi_post("shell", "", ("\n".join(group) + "\n").encode()).decode().strip()
+        t0 = time.monotonic()
+        while True:
+            reply = cam.cgi_post("shell", "", ("\n".join(group) + "\n").encode()).decode().strip()
+            if reply != "busy" or time.monotonic() - t0 > wait:
+                break
+            time.sleep(0.2)   # the previous batch is still waiting for the RTOS to fetch it
         if not reply.startswith("queued "):
             raise SystemExit(f"relay refused batch {i}: {reply}")
         seq = int(reply.split()[1])
@@ -221,7 +247,7 @@ def relay(cam: Camera, lines, wait=12.0):
                 raise SystemExit(f"batch {i} (seq {seq}) not acknowledged after {wait:.0f} s: the RTOS loop may have "
                                  f"stopped (heartbeat {st.get('relay_hb', '?')}, uptime {st.get('uptime', '?')}). "
                                  "Power-cycle the camera.")
-            time.sleep(0.3)
+            time.sleep(0.1)
         print(f"  batch {i}: {len(group)} line(s), ack {seq} after {time.monotonic() - t0:.1f} s")
 
 

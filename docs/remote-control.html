@@ -404,6 +404,23 @@ takes about 0.5 s. Client: <code>tools/af_remote.py shell 'LINE' …</code> and
 a press and <code>ND_open</code>; after a power cycle the same sequence ran
 without a problem (cause unknown). Every call reports whether it was
 acknowledged.</p>
+<p><strong>Relay stalls and the pull relay (recipe card, 2026-11-22).</strong> The
+cause of those stops: Linux wrote <code>RELAY.TTL</code> (and its log lines) to the
+SD card while the RTOS read it. RECIPE.LOG shows six stalls over two days, each a
+batch that was never acknowledged, after which the heartbeat stopped too. The first
+three were written 0.45&ndash;0.50&nbsp;s after the previous acknowledgement, which is
+when the loop reads the file next (11 batches in that window, 3 stalled; 85 outside it,
+none). Holding the Mac's writes out of that window cut the rate, but writes at other
+moments still met the loop's routine reads (seq 92, 23 and 67, 5.6&ndash;6.9&nbsp;s after an
+acknowledgement). The recipe card (<code>tools/recipe_card.py</code>) therefore no longer
+lets Linux write the card on its own. The <code>shell</code> CGI only queues the batch in
+RAM (<code>/tmp/recipewww/relay.next</code>, <code>busy</code> while one is pending).
+Each round the loop runs <code>lcmd sh /tmp/recipewww/PULL.SH</code>, waits 400&nbsp;ms,
+then includes the file. PULL.SH is the only writer of the card while the loop runs: the
+pending batch into <code>RELAY.TTL</code> (in place, 512 bytes), the log lines collected in
+RAM into RECIPE.LOG and ERR.LOG, then <code>sync</code>, and nothing at all when nothing is
+pending. RACK.SH and PULL.SH run from RAM, so lcmd does not read the card either. The AF
+remote card (<code>af_debug_card.py</code>) still has the old relay.</p>
 <p>The engineering shell has 584 commands (a text table in the 1.60 image: name and
 handler address). The ones useful here, with the usage text each handler
 prints:</p>
