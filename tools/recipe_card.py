@@ -34,7 +34,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import recipes  # noqa: E402
-from af_debug_card import RELAY_PAD_SH, RELAY_SIZE, REMOTE_PORT, ttl_check  # noqa: E402
+from af_debug_card import (RELAY_PAD_SH, RELAY_SIZE, REMOTE_PORT, pull_rack_sh, pull_relay_ttl,  # noqa: E402
+                           pull_sh, pull_shell_body, ttl_check)
 from af_remote import Camera  # noqa: E402
 
 CARD_DIR = "SCRIPT/RECIPE"
@@ -50,7 +51,6 @@ PAUSE_MS = 300         # after each line
 
 def startup_ttl() -> bytes:
     """Wait for Linux, start the endpoint, flash the AF lamp twice, then relay."""
-    rack = f"sendln 'lcmd sh {WWW}/RACK.SH hb'"
     lines = [
         # GRKit: the RTOS builds its host-command tables after the script starts.
         "mpause 3000",
@@ -77,23 +77,9 @@ def startup_ttl() -> bytes:
         ":served",
         "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'", "mpause 500",
         "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'",
-        # The relay loop: ask Linux to hand over a pending batch (PULL.SH, the only
-        # moment Linux writes the card), wait while it does, then include RELAY.TTL
-        # (sequence guard inside). Heartbeat every 50 rounds (~25 s).
-        "rdone = 0",
-        "rn = 0",
-        ":relay",
-        f"sendln 'lcmd sh {WWW}/PULL.SH'",
-        "mpause 400",
-        f"filesearch '{TTL_D}\\RELAY.TTL'",
-        "if result = 0 goto rwait",
-        f"include '{TTL_D}\\RELAY.TTL'",
-        ":rwait",
-        "rn = rn + 1",
-        "if rn < 50 goto relay",
-        "rn = 0",
-        rack,
-        "goto relay",
+        # The pull relay (af_debug_card.pull_relay_ttl): PULL.SH is the only moment
+        # Linux writes the card.
+        *pull_relay_ttl(WWW, TTL_D),
         ":finish",
     ]
     ttl_check(lines)
@@ -114,48 +100,15 @@ def card_files() -> dict:
         "log": head + (
             "n=${QUERY_STRING:-20}; case $n in *[!0-9]*) n=20 ;; esac\n"
             + text + f"{{ cat $d/RECIPE.LOG; cat {WWW}/log.pending {WWW}/log.flush 2>/dev/null; }} | busybox tail -n $n\n"),
-        # As the AF relay's shell CGI (af_debug_card.remote_files), with its own allowlist.
-        "shell": head + (
-            "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
-            '[ "$REQUEST_METHOD" = POST ] || no POST only\n'
-            "l=${CONTENT_LENGTH:-0}; case $l in *[!0-9]*) l=0 ;; esac\n"
-            "[ $l -gt 0 ] && [ $l -le 2048 ] || no bad length $l\n"
-            f"[ -e {WWW}/relay.next ] && no busy\n"
-            f"b={WWW}/shell.in; busybox dd of=$b bs=1 count=$l 2>/dev/null\n"
-            f"q=$(cat {WWW}/relay.seq 2>/dev/null); q=$((${{q:-0}} + 1))\n"
-            f"o={WWW}/relay.tmp; echo \"rseq = $q\" >$o; echo \"if rseq = rdone goto rskip$q\" >>$o\n"
-            "n=0; while read -r c x || [ -n \"$c\" ]; do [ -n \"$c\" ] || continue; n=$((n + 1))\n"
-            ' case " ' + " ".join(ALLOW) + ' " in *" $c "*) ;; *) no not allowed: $c ;; esac\n'
-            ' case "$x" in *[!A-Za-z0-9\\ ._-]*) no bad arguments: $x ;; esac\n'
-            f" echo \"sendln '$c $x'\" >>$o; echo 'mpause {PAUSE_MS}' >>$o\n"
-            "done <$b\n"
-            f"[ $n -gt 0 ] && [ $n -le {MAX_LINES} ] || no 1 to {MAX_LINES} commands, got $n\n"
-            "echo 'rdone = rseq' >>$o\n"
-            f"echo \"sendln 'lcmd sh {WWW}/RACK.SH $q'\" >>$o; echo \":rskip$q\" >>$o\n"
-            f"{RELAY_PAD_SH}"
-            f"echo $q >{WWW}/relay.seq; mv $o {WWW}/relay.next\n"
-            "read t _ </proc/uptime\n"
-            f'echo "shell $q $(busybox tr \"\\n\" \";\" <$b) $t" >>{WWW}/log.pending\n'
-            + text + 'echo "queued $q"\n'),
+        # The pull relay's shell CGI (af_debug_card.pull_shell_body), with its own allowlist.
+        "shell": head + pull_shell_body(WWW, ALLOW, text, PAUSE_MS, MAX_LINES),
     }
     # Scripts the RTOS runs through lcmd live in RAM, so running them never reads the card.
-    # RACK.SH: ack and heartbeat, RAM only. PULL.SH: the only Linux writer of the card while the
-    # relay loop runs, and only when the RTOS asks (it then waits 400 ms before it reads):
-    # the pending batch into RELAY.TTL (in place, fixed size), the pending log lines, then sync.
-    rack_sh = ("read t _ </proc/uptime\n"
-               f"if [ \"$1\" = hb ]; then echo \"$t\" >{WWW}/relay.hb; exit 0; fi\n"
-               f"echo \"$1 $t\" >{WWW}/relay.ack\n"
-               f"echo \"ack $1 $t\" >>{WWW}/log.pending\n")
-    pull_sh = (f"w={WWW}; d={D}; c=\n"
-               "exec 2>>$w/err.log\n"
-               "if [ -f $w/relay.next ]; then cat $w/relay.next 1<>$d/RELAY.TTL; mv $w/relay.next $w/relay.done; c=1; fi\n"
-               "if [ -s $w/log.pending ]; then mv $w/log.pending $w/log.flush; cat $w/log.flush >>$d/RECIPE.LOG; rm -f $w/log.flush; c=1; fi\n"
-               "if [ -s $w/err.log ]; then cat $w/err.log >>$d/ERR.LOG && : >$w/err.log; c=1; fi\n"
-               "[ -n \"$c\" ] && sync\n"
-               "exit 0\n")
+    rack_sh = pull_rack_sh(WWW)
+    pull_sh_text = pull_sh(WWW, D, "RECIPE.LOG")
     here = "".join(f"cat >{WWW}/cgi-bin/{k} <<'END_{k.upper()}'\n{v}END_{k.upper()}\n" for k, v in cgi.items())
     here += f"cat >{WWW}/RACK.SH <<'END_RACK'\n{rack_sh}END_RACK\n"
-    here += f"cat >{WWW}/PULL.SH <<'END_PULL'\n{pull_sh}END_PULL\n"
+    here += f"cat >{WWW}/PULL.SH <<'END_PULL'\n{pull_sh_text}END_PULL\n"
     remote = (
         f"d={D}\n"
         "exec 2>>$d/ERR.LOG\n"

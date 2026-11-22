@@ -443,7 +443,8 @@ def chart_conditions():
     return leg + c + table(["Condition", "Sweeps", "Median", "Min", "Max"], summary)
 
 
-def chart_afc():
+def chart_afc(site=False):
+    """AF-C sweep time against defocus. site=True: tooltips without session and file names."""
     series = [("Stock AF-C", ["afc", "afc-stock"], "s1", "circle"), ("Fast-drive patch (AFCFAST)", ["afc-patched"], "s2", "square")]
     W, H = 720, 320
     xs = Scale(0, 2500, 70, W - 20)
@@ -454,7 +455,8 @@ def chart_afc():
         rs = [r for s in sessions for r in csv_runs(s) if r["defocus_um"] not in (None, 65535)]
         for r in rs:
             o.append(shape(kind, xs(min(abs(r["defocus_um"]), 2500)), ys(min(r["ms"], 1400)), f"f-{col}",
-                           f"{r['session']} {r['file']}: {r['fps']} fps, |defocus| {abs(r['defocus_um'])} µm, {r['ms']:.0f} ms"))
+                           ("" if site else f"{r['session']} {r['file']}: ")
+                           + f"{name}: {r['fps']} fps, |defocus| {abs(r['defocus_um'])} µm, {r['ms']:.0f} ms"))
         mid = [r["ms"] for r in rs if 500 <= abs(r["defocus_um"]) <= 1100]
         rows.append([name, len(rs), f"{median([r['ms'] for r in rs]):.0f}", len(mid), f"{median(mid):.0f}" if mid else "–",
                      ", ".join(f"{f} fps: {n}" for f, n in sorted(Counter(r["fps"] for r in rs).items(), reverse=True))])
@@ -1193,7 +1195,8 @@ def main():
     args.out.write_text(page(intro, chapters), encoding="utf-8")
     print(f"wrote {args.out.relative_to(ROOT)}")
     if args.site:
-        fill_site(args.site, {"effect": chart_effect(cd), "phases": chart_phases(), "hard": chart_hard()})
+        fill_site(args.site, {"effect": chart_effect(cd), "phases": chart_phases(), "hard": chart_hard(),
+                              "afc": chart_afc(site=True)})
 
 
 if __name__ == "__main__":

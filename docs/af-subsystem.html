@@ -1787,24 +1787,25 @@ word FALLS2 changes to 2) and a gain above floor + T.</li>
 So the floor <code>+0x28</code> enters the state tests at half and a quarter,
 not in full as read earlier (<a href="af-debug-log.html#rise-floor">af-debug-log,
 rise floor</a>, corrected there). Not ported: the second-peak test
-<code>0x5340db4c</code> (off unless <code>+0xae</code>) and the branches that
-only set <code>+0xc0</code>.</li>
+<code>0x5340db4c</code> (off unless <code>+0xae</code>). The peak candidate
+<code>+0xc0</code> that the same function keeps is ported with the stop
+(11.2).</li>
 <li><strong>Gate: the port against the camera</strong>, frame by frame, on the
 camera's own recorded counts and state byte:</li>
 </ul>
 <table>
 <thead><tr><th>Frame rate</th><th>Frames</th><th>Counts agree</th><th>State +0x26 agrees</th></tr></thead>
 <tbody>
-<tr><td>200 fps</td><td>3,026</td><td>82.0 %</td><td>98.0 %</td></tr>
-<tr><td>100 fps</td><td>11,623</td><td>91.5 %</td><td>94.4 %</td></tr>
-<tr><td>49 fps</td><td>4,565</td><td>93.6 %</td><td>95.2 %</td></tr>
-<tr><td>29 fps</td><td>19,181</td><td>94.5 %</td><td>95.7 %</td></tr>
-<tr><td>All</td><td>38,395</td><td>92.5 %</td><td>95.4 %</td></tr>
+<tr><td>200 fps</td><td>3,026</td><td>82.2 %</td><td>98.0 %</td></tr>
+<tr><td>100 fps</td><td>11,657</td><td>91.5 %</td><td>94.4 %</td></tr>
+<tr><td>49 fps</td><td>4,565</td><td>93.7 %</td><td>95.2 %</td></tr>
+<tr><td>29 fps</td><td>19,187</td><td>94.5 %</td><td>95.6 %</td></tr>
+<tr><td>All</td><td>38,435</td><td>92.5 %</td><td>95.4 %</td></tr>
 </tbody>
 </table>
 <p>At 200 fps most misses come from the tracer, which reads the counts and the
 sample count of one frame at different moments (one 4 ms record per 5 ms frame).
-At 29 fps, where most frames are, 750 of the 1,055 count misses are in passes
+At 29 fps, where most frames are, about 750 of the 1,055 count misses are in passes
 whose very first comparison already differs: the camera sometimes compares at
 the second sample, the port always starts at the third, and the difference
 carries into the counts (the state is affected far less). By session the state agrees in 80–99 % of frames; the lowest is the forced
@@ -1813,17 +1814,117 @@ explained; the table <code>0x53c16d14</code> has a second column, 0.04).
 Area 1 agrees less in mode 1 (90.5 % against 94.2 %), probably because the
 trace has only area 0's margin and the margin scale depends on each area's
 brightness (Inferred).</p>
-<p><strong>The stop itself is not ported.</strong> The camera stops 0–9
-frames after the state reaches 3, and 328 of 768 accepted passes never reach
-state 3 in the accepting area (they are accepted at the end of the pass:
-callers of <code>0x5340def0</code> and <code>0x53403808</code>, not decoded).
-The replay therefore uses the camera's recorded stop as the baseline. A rule
+<p><strong>The last sample of a pass.</strong> The frame that ends a pass
+adds its sample and changes the action in the same step, so that sample is
+only in the first record after the pass: in 566 of about 880 accepted passes
+that record holds one sample more than the last record of the pass. The
+replay first took the arrays from the last record of the pass and so missed
+the sample the camera stopped on; corrected 2026-11-21 (all numbers in this
+section are after the correction). The earlier reading that "the camera stops
+0–9 frames after state 3, and 328 of 768 accepted passes never reach it" came
+from that missing sample and from comparing with the wrong test (11.2).</p>
+<p>The replay still uses the camera's recorded stop as the baseline for the
+rules, because two inputs of the stop are not traced (11.2). A rule
 that stops <em>sooner</em> saw only frames the camera also took, so its time
 and lock are exact; positions chain across a turn (next peak = previous pass
 end − peak + 14 pulses, 87 pairs, IQR 13–21), so a lock in a pass the camera
 rejected can be checked against the camera's later lock.</p>
 
-<h3 id="replay-rules">11.2 Stop rules (Measured offline)</h3>
+<h3 id="replay-stop">11.2 The camera's stop decision (Read; gated against the recordings)</h3>
+<p>The state byte <code>+0x26</code> (rise, then confirmed fall) is not what
+stops a pass. The chain, decoded from the sweep step down:</p>
+<ul>
+<li><strong>Sweep step</strong> <code>0x53404b24</code> (action 4, called
+from the action dispatcher <code>0x5340a2b4</code>): runs the frame
+evaluation <code>0x534035a4</code> → <code>0x53402d6c</code>, then switches to
+action 8 (peak found) as soon as the area index <code>+0xf7c</code> is ≥ 0.
+<code>0x53402d6c</code> sets the index to −1, runs the frame loop, and picks
+the area from the per-area accept flags (<code>0x533fbbe4</code>,
+<code>0x533f7a18</code>); −2 means "stop the sweep and decide at the end of
+the pass" (11.5).</li>
+<li><strong>Frame loop</strong> <code>0x533fd9b8</code>: per AF area it
+updates two detectors, horizontal (<code>+0x102c + 0xc4 × area</code>, the
+one the tracer records) and vertical (<code>+0x2724 + 0xc4 × area</code>,
+not recorded), through <code>0x5340e0b8</code>. An area accepts when either
+accepts; <code>+0xf40 + area</code> records which (0 horizontal, 1 vertical,
+2 both). In the recordings the horizontal detector accepted 84 % of the
+AF-S stops on its own or with the vertical one, the vertical one alone
+13 %.</li>
+<li><strong>Per detector</strong> <code>0x5340e0b8</code> → <code>0x5340def0</code>:
+the update <code>0x5340dbfc</code> (11.1), then the accept test
+<code>0x5340d100</code>. With a peak candidate (<code>+0xc0</code>) it accepts
+when
+<ul>
+<li>the fall count <code>+0xbe</code> (the hysteresis count of 11.1) is at
+least 3 (<code>0x53c16c4c</code>),</li>
+<li>the current sample is at most 40 samples after the maximum
+(<code>0x53c16bfc</code>; later the candidate is dropped),</li>
+<li>and the drop from the maximum is more than the <em>full</em> margin,
+floor + T;</li>
+<li>then shape tests: the width on the falling side over the width on the
+rising side, both at the current level, interpolated in pulses
+(<code>+0x74</code>; the peak position from the 3-point parabola
+<code>0x5340cf48</code>), must lie in 0.5–2 (0.8–1.25 for the vertical
+detector). If it does not, the pass is still accepted when the brightness
+max/min of the pass (<code>+0x6c</code>) is at most 5 and that around the
+peak (<code>+0x70</code>) at most 1.5; otherwise it is rejected
+(<code>+0x23</code> = 1, candidate dropped). With <code>+0xac</code> set,
+the shape tests are skipped.</li>
+</ul>
+Without a candidate, 5 falls and the same drop only set the flag
+<code>+0x1c</code> ("a peak lies behind"), which is not an accept.</li>
+<li><strong>The candidate</strong> <code>+0xc0</code> is set in
+<code>0x5340dbfc</code> at each new maximum from sample 3 on, if the value
+has risen more than floor + T above the pass minimum (with
+<code>+0xac</code>: from sample 2 on, without that test). A second rise in a
+row clears it, and a new maximum sets it again.</li>
+<li><strong>Late accept</strong> <code>0x5340afc0</code> (through
+<code>0x5340ced4</code>, detector mode 0 only): 11–19 samples after a maximum
+past sample 1, with a drop of more than floor + 2T.</li>
+<li><strong>Vetoes after the accept</strong>: <code>0x5340c1dc</code>
+(the mean contrast per pixel over the pass too low, or the current contrast
+per pixel below a per-setting threshold, table <code>0x53c16c10</code>) and
+the post-filter <code>0x533f77a8</code>, which clears an area's accept when
+the brightness slope at the peak (<code>0x5340c69c</code>, scaled by the
+noise model) is above 1, 2, 3 or 10, depending on the setting: a peak made by
+a brightness change is not a focus peak. AF-C (<code>+0xc468</code>) adds a
+windowed test, <code>0x5340cc68</code>.</li>
+<li><strong>Setup per pass</strong> <code>0x5340c3bc</code> (from
+<code>0x533f8ac8</code> and <code>0x533f8b74</code>): <code>+0x22</code> = 0
+horizontal, 1 vertical; <code>+0x20</code> the detector mode;
+<code>+0xac</code> copied from the object byte <code>+0x43c0</code>;
+<code>+0xad</code> from <code>+0x4424</code>.</li>
+</ul>
+<p><strong>Gate.</strong> <code>tools/af_replay.py gate</code> runs the
+ported accept (candidate, 3 falls, full margin, the late accept; shape tests
+and vetoes assumed passed) on the AF-S passes the horizontal detector
+accepted, in the area the camera chose, and on the rejected passes:</p>
+<table>
+<thead><tr><th><code>+0xac</code> assumed</th><th>Accepted passes</th><th>Stop on the camera's frame</th><th>Sooner</th><th>Missed</th><th>Rejected passes the port accepts</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>584</td><td>56.5 %</td><td>14.2 %</td><td>29.3 %</td><td>6.9 % of 634</td></tr>
+<tr><td>1 in detector mode 1</td><td>584</td><td>64.2 %</td><td>18.8 %</td><td>17.0 %</td><td>10.7 %</td></tr>
+<tr><td>1</td><td>584</td><td>66.6 %</td><td>24.8 %</td><td>8.6 %</td><td>18.6 %</td></tr>
+</tbody>
+</table>
+<p>By session (with <code>+0xac</code> = 0) the dim 29 fps sessions match
+65–92 % (<code>remote-nd2</code> 36 of 39), the bright 100 fps sessions
+<code>remote-bright</code>/<code>remote-bright2</code> 15–25 %. There
+<code>+0xac</code> = 1 removes most misses (35 → 5 in
+<code>remote-bright</code>) but adds early stops (16 → 35), so in bright light
+something else holds the stop back as well, likely the window start
+<code>+0xa8</code> (the accept test runs only once the lens is past it) or the
+brightness post-filter (Inferred).</p>
+<p>Before the post-pass sample was added (11.1), the same test matched 160 of
+768. The rest is what the tracer cannot see: <code>+0x43c0</code> (a
+per-press setting; fitted press by press it is set in some presses of a
+session and not in others, so it is not a scene constant), the brightness
+array behind the shape tests and the post-filter (the likely reason for
+"sooner"), and the vertical detector (90 accepted passes left out). Two
+tracer words would close most of it: the object byte <code>+0x43c0</code> and
+the detector byte <code>+0xc0</code> per area.</p>
+
+<h3 id="replay-rules">11.3 Stop rules (Measured offline)</h3>
 <p>Each rule is added to the camera's own: it can only stop sooner. 974
 presses of the arms the port models (the guard and offset patches are left
 out), 66 of them in the two scenes without a usable peak
@@ -1831,9 +1932,10 @@ out), 66 of them in the two scenes without a usable peak
 false.</p>
 <ul>
 <li><strong>state3</strong>: stop as soon as the camera's own detector has a
-confirmed peak (<code>+0x26</code> = 3). This is close to lever 1 of 10.5
-(shorten the confirmation), measured here for every phase grade, not only
-after a top-grade phase result.</li>
+confirmed peak (<code>+0x26</code> = 3: one fall and a quarter of the floor,
+where the camera's accept needs three falls and the full floor, 11.2). This
+is close to lever 1 of 10.5 (shorten the confirmation), measured here for
+every phase grade, not only after a top-grade phase result.</li>
 <li><strong>noise k</strong>: a z-test on the drop. Stop when the peak rose
 and fell by k noise widths, with at least two falls in a row; σ comes from the
 same pass (robust spread of the second differences of b; the smoothed array
@@ -1844,10 +1946,10 @@ this kind, so this stands in for the "stop on evidence" approach.</li>
 <table>
 <thead><tr><th>Rule</th><th>Sooner in the accepted pass</th><th>Lock moved &gt;40 p</th><th>Rescued rejected passes (same peak / other)</th><th>Median saved per rescue</th><th>Unchecked</th><th>False locks added in no-signal scenes</th></tr></thead>
 <tbody>
-<tr><td>state3</td><td>258 presses, 40 ms median</td><td>3</td><td>20 / 0</td><td>738 ms</td><td>25</td><td>0 (+2)</td></tr>
-<tr><td>noise 6</td><td>150, 55 ms</td><td>1</td><td>46 / 0</td><td>910 ms</td><td>35</td><td>3 (+3)</td></tr>
-<tr><td>noise 8</td><td>93, 69 ms</td><td>0</td><td>38 / 0</td><td>958 ms</td><td>11</td><td>1 (+1)</td></tr>
-<tr><td>noise 12</td><td>57, 69 ms</td><td>0</td><td>21 / 0</td><td>954 ms</td><td>2</td><td>0 (+0)</td></tr>
+<tr><td>state3</td><td>417 presses, 40 ms median</td><td>3</td><td>20 / 0</td><td>738 ms</td><td>25</td><td>0 (+2)</td></tr>
+<tr><td>noise 6</td><td>255, 34 ms</td><td>1</td><td>46 / 0</td><td>910 ms</td><td>35</td><td>3 (+3)</td></tr>
+<tr><td>noise 8</td><td>156, 37 ms</td><td>0</td><td>38 / 0</td><td>958 ms</td><td>11</td><td>1 (+1)</td></tr>
+<tr><td>noise 12</td><td>85, 69 ms</td><td>0</td><td>21 / 0</td><td>954 ms</td><td>2</td><td>0 (+0)</td></tr>
 </tbody>
 </table>
 <p>"False locks added" counts presses the camera did not lock; in brackets,
@@ -1870,13 +1972,14 @@ scene: for noise 8, 30 of 38 are in <code>remote-nd2</code>, the scene of the
 (0.02 at phase grade 0) rejects first sweeps whose peak stands clear of a
 noise of about 0.001. The replay finds that lever without being told about it,
 and puts it at about 0.95 s per affected press. In good light a rule can only
-shave the confirmation: 40–70 ms, on 6–26 % of the presses depending on the rule. A
+shave the confirmation: 35–70 ms, on 9–43 % of the presses depending on the rule
+(state3 on 43 %, a little over one frame at 29 fps). A
 noise-scaled stop would be a code patch (σ per pass), not a data word; the data
 patch RISE05 already covers part of the same ground. Neither rule has been tried
 on the camera.</p>
 
-<h3 id="replay-fits">11.3 Peak fits (Measured offline)</h3>
-<p>Split-half test on 602 accepted passes whose peak lies at least two samples
+<h3 id="replay-fits">11.4 Peak fits (Measured offline)</h3>
+<p>Split-half test on 667 accepted passes whose peak lies at least two samples
 from either end. The peak is fitted from the even samples and from the odd
 samples, each at twice the camera's step (about 16 pulses). No ground truth is
 needed: both halves see the same peak, so a better estimator gives halves that
@@ -1884,22 +1987,161 @@ agree.</p>
 <table>
 <thead><tr><th>Fit</th><th>Even vs odd half, median</th><th>90 %</th><th>Full step vs the camera's fit, median</th></tr></thead>
 <tbody>
-<tr><td>3-point parabola (the camera's CalcQuadraticCurve)</td><td>1.6 p</td><td>5.0 p</td><td>0</td></tr>
-<tr><td>5-point least-squares quadratic</td><td>1.9 p</td><td>5.7 p</td><td>0.7 p</td></tr>
-<tr><td>3-point Gaussian (parabola on log contrast)</td><td>1.1 p</td><td>4.5 p</td><td>0.0 p</td></tr>
+<tr><td>3-point parabola (the camera's CalcQuadraticCurve)</td><td>1.3 p</td><td>3.6 p</td><td>0</td></tr>
+<tr><td>5-point least-squares quadratic</td><td>1.6 p</td><td>4.0 p</td><td>0.7 p</td></tr>
+<tr><td>3-point Gaussian (parabola on log contrast)</td><td>0.9 p</td><td>3.1 p</td><td>0.0 p</td></tr>
 </tbody>
 </table>
 <p>The Gaussian, the better model of a focus curve, is the most consistent at
-the coarse spacing (1.1 against 1.6 pulses), and the 5-point fit the least. At
+the coarse spacing (0.9 against 1.3 pulses), and the 5-point fit the least. At
 the camera's own step the three agree to within a pulse. The differences are a
 fraction of one 8-pulse step, so the fit is not a lever for speed; a Gaussian
 would only matter if the camera sampled more coarsely. (The halves reuse the
 camera's smoothing at full step, which flatters coarse sampling a little.)</p>
-
-<h3 id="replay-limits">11.4 What the replay cannot test</h3>
+<p><em>Corrected 2026-11-22:</em> the Gaussian's lead comes from that
+reused smoothing. The array the camera keeps is already smoothed over
+neighbouring frames, so each half still carries information from the other
+half's samples. Redone properly, the raw per-frame values are recovered
+(<code>bsolve</code>), each half is taken from them, and it is smoothed as the
+camera would at the coarse spacing, (b<sub>i−1</sub> + 2b<sub>i</sub> +
+b<sub>i+1</sub>)/4. Then the three fits agree equally badly. Same 667 passes,
+even vs odd half, median / 90 %:</p>
+<table>
+<thead><tr><th>Fit</th><th>Halves reuse full-step smoothing</th><th>Halves re-smoothed from raw values</th></tr></thead>
+<tbody>
+<tr><td>3-point parabola (camera)</td><td>1.3 / 3.6 p</td><td>2.6 / 11.5 p</td></tr>
+<tr><td>5-point quadratic</td><td>1.6 / 4.0 p</td><td>2.7 / 11.4 p</td></tr>
+<tr><td>3-point Gaussian</td><td>0.9 / 3.1 p</td><td>2.6 / 11.5 p</td></tr>
+</tbody>
+</table>
+<p>A coarser sweep step tells the same story. On 283 accepted passes, sampled every
+2nd or 3rd frame (16 or 24 pulses) and re-smoothed the same way, the error against
+the full-step fit is:</p>
 <ul>
-<li>Turn and direction rules, such as a turn after fewer falls: the replay is
-open loop, so the frames after a different turn were never taken.</li>
+<li>parabola 1.9 / 7.5 p at 16 pulses, Gaussian 2.0 / 7.4 p;</li>
+<li>parabola 3.3 / 14.4 p at 24 pulses, Gaussian 3.4 / 14.2 p;</li>
+<li>at 29&nbsp;fps alone, 1.3 / 5.5 p at 16 pulses for both.</li>
+</ul>
+<p>So a Gaussian fit improves neither precision nor speed: it would not let the camera
+take a coarser step. What a coarser step costs in accuracy does not depend on the
+fit. The step itself was already tuned on the camera (parameter search: 7–8 pulses
+best at 49&nbsp;fps). Measured offline with one-off scripts on the
+<code>af_replay.py</code> loaders (<code>bsolve</code>, the fit functions); not yet a
+subcommand.</p>
+<p>For scale: on the camera, pixel-level sharpness falls off with a Gaussian σ of
+about 4 AF pulses at f/2.8 and 7 at f/5.6
+(<a href="af-debug-log.html#focus-tolerance">focus tolerance</a>, pulse scale
+Inferred). Sub-pulse fit differences therefore cost a few percent of
+pixel detail at most.</p>
+
+<h3 id="replay-turn">11.5 The turn (Read; gated and estimated offline)</h3>
+<p>How a pass ends without an accept, decoded from the sweep step
+<code>0x53404b24</code> down (Read unless marked):</p>
+<ul>
+<li><strong>"Peak behind".</strong> A detector without a candidate sets
+<code>+0x1c</code> after 5 falls (<code>0x53c16cc8</code>) when the drop from
+its stored maximum is more than floor + T, the accept's own margin (11.2;
+the vertical detector only with <code>+0x6c</code> in 0.5–2). A new maximum
+and the contrast veto <code>0x5340c1dc</code> clear it. The frame loop ORs
+the flag over the two detectors of an area, and <code>0x533fe138</code>
+(called at <code>0x53402fe0</code>) votes over the areas: with one area the
+flag itself, on a grid the flagged areas' weights against 50 % of the total
+(25 % in AF-C; immediates at <code>0x533fe3a0</code>/<code>a4</code>,
+weight tables from <code>0x538f0474</code> by grid size 9/15/25/35). A yes
+sets the area index to −2, and the sweep step stops the lens
+(<code>0x533faadc</code>, <code>+0xc469</code> = 1).</li>
+<li><strong>Other −2 writers</strong> in the frame evaluation: an accept
+deferred to the end of the pass (<code>+0xc4bf</code> set: the area goes to
+<code>+0xc4c4</code>, <code>0x534032a8</code>), <code>+0x14e88</code> = 3
+(<code>0x53403334</code>), and <code>0x53402cb8</code> in the mode tested by
+<code>0x533f4868</code> (<code>0x5340322c</code>). So −2 means "stop and
+decide at the end", not "out of travel".</li>
+<li><strong>The window end.</strong> Without −2 the pass runs until the
+lens reaches the end of the scan window (<code>+0xc438</code>, set on action
+0x20) and <code>+0xc468</code> is set; the countdown <code>+0xc4df</code>
+lets the last frames in. There is no other travel limit.</li>
+<li><strong>End of the first pass</strong> (<code>+0xc4ca</code> = 0,
+<code>0x53404d7c</code>): <code>0x53400b74</code>, then
+<code>0x53403808</code>, which re-runs the stored pass sample by sample
+through the frame evaluation (<code>0x53402d68</code>, loop at
+<code>0x53403c68</code>; with a flag from table <code>0x53c16c44</code> when
+<code>0x533f8740</code> and <code>0x533f87dc</code> agree, not decoded). An
+area that accepts on the re-run gives action 8: 161 first passes with a −2
+in the recordings ended that way, 117 in a turn. Otherwise AF-S turns
+(<code>0x5340561c</code>; it gives up instead when <code>+0x150c9</code> =
+3). On a −2 with <code>+0xc4d3</code> set (written at the pass start,
+<code>0x53403680</code>, with what looks like the pass direction; Inferred)
+AF-S turns at once without the re-run (<code>0x53405388</code>). The
+reversal counter <code>+0x14bd6</code> (capped at 2) counts only AF-C
+turns.</li>
+<li><strong>The turn</strong> (action 2, dispatcher
+<code>0x5340a3e4</code>) waits until the lens has stopped
+(<code>0x533f6fbc</code>, countdown <code>+0xc4cc</code>), clears the
+detectors (<code>0x53400e0c</code>) and the sample arrays, and starts the
+return pass from where the lens stopped (<code>0x534035f0</code> →
+<code>0x533fa7fc</code>, speed table <code>0x53c16690</code>, step
+<code>0x533fc534</code>). It does not jump back: the return pass measures
+the first pass's stretch again. A jump back would need new code, not a
+changed constant.</li>
+<li><strong>End of the second pass</strong> (<code>0x534054c4</code>): the
+same re-run; then the path-2 decision <code>0x53404878</code> (when
+<code>+0xc4ca</code> ≠ 2 and <code>+0x43c0</code> = 0), the area-1 fallback
+<code>0x53400c50</code>, or give up (action 0x40).</li>
+<li><strong>Knobs:</strong> <code>0x53c16cc8</code> = 5, the falls before
+"peak behind" (also read at <code>0x5340dfb4</code>, where it bounds the
+flag <code>+0x21</code> to 5 samples after the maximum, so a patch moves that
+too); the margin has no constant of its own; the vote shares.</li>
+</ul>
+<p><strong>Gate.</strong> <code>tools/af_replay.py turns</code> runs the
+ported flag (area 0, horizontal detector) on the 242 first passes that
+turned: on 193 (80 %) it agrees with the camera, either on the frame of the
+camera's −2 or, where the camera ran to the window end, by not firing
+(<code>remote-nd2</code> and <code>remote-confirm49</code>: 36 of 38). Of the
+rest, 30 have a camera −2 the port does not produce, most likely a deferred
+accept or the vertical detector (Inferred), and 17 fire sooner.</p>
+<p><strong>What the turns are.</strong> First passes that turned: 99 of 395
+at 29 fps, 31 of 151 at 49 fps, 112 of 349 at 100–200 fps. Only 24, 8 and 19
+of them have only falls (the sweep started on the peak or just past it); the
+rest passed a peak and did not accept it. In the locked presses the lock lay
+beyond the first pass's start in only 4 of 101 (turn position
+<code>+0xc434</code>). The "wrong-side start on 30–40 % of dim presses" of
+the 10-press dim trace (<a href="af-debug-log.html">debug log</a>) is about
+6 % here; most turns are rejected peaks, an accept question (11.3).</p>
+<p><strong>Turning sooner</strong> (falls lowered from 5; open loop: an
+earlier turn shortens the pass and the retrace by the same frames). New
+false turns: accepted first passes the rule would stop before any accept,
+before the stock rule and before the camera's own −2.</p>
+<table>
+<thead><tr><th>Falls</th><th>Band</th><th>Only-falls turns, saved each</th><th>Rejected-peak turns, saved each</th><th>New false turns</th></tr></thead>
+<tbody>
+<tr><td>3</td><td>29 fps</td><td>24 × 182 ms</td><td>75 × 18 ms</td><td>12 of 256</td></tr>
+<tr><td>3</td><td>49 fps</td><td>8 × 173 ms</td><td>23 × 18 ms</td><td>15 of 109</td></tr>
+<tr><td>3</td><td>100–200 fps</td><td>19 × 31 ms</td><td>93 × 2 ms</td><td>44 of 205</td></tr>
+<tr><td>4</td><td>29 fps</td><td>24 × 120 ms</td><td>75 × 10 ms</td><td>7 of 256</td></tr>
+<tr><td>4</td><td>49 fps</td><td>8 × 115 ms</td><td>23 × 0 ms</td><td>7 of 109</td></tr>
+<tr><td>4</td><td>100–200 fps</td><td>19 × 10 ms</td><td>93 × 1 ms</td><td>29 of 205</td></tr>
+</tbody>
+</table>
+<p>At 29 fps, 3 falls save about 11 ms per first pass on average and send
+4.7 % of the passes the camera accepted the wrong way, each costing at least
+a pass in the wrong direction and a second turn (not in the recording). The
+bright false turns are probably overstated: there the port lacks
+<code>+0xac</code>, which arms the candidate earlier (11.2).</p>
+<p><strong>Jumping back</strong> to the first pass's start, keeping a few
+samples of overlap so that the detector sees a rise, on the 28 only-falls
+turns whose return pass the camera accepted (the return pass replayed
+without the skipped samples): with 4 samples of overlap 13 still accept on
+the same peak and 13 no longer accept; with 6 samples 22 same peak, 4 lost.
+Gross saving with 6: 15 × 199 ms at 29 fps, before the fast move back
+(not measured).</p>
+<p><strong>Verdict</strong> (Measured offline, open loop): a turn patch
+saves roughly 10 ms per dim press and risks false turns about as often as it
+helps. Not worth a camera session on its own.</p>
+
+<h3 id="replay-limits">11.6 What the replay cannot test</h3>
+<ul>
+<li>The cost of a false turn: turning sooner is replayed up to the turn
+(11.5), but a pass sent away from the peak was never recorded.</li>
 <li>A phase prior (start where phase detection says and trust its grade): the
 tails do not record the phase value <code>+0x14bac</code>. Only
 <code>af_remote.py meter</code> samples it, in separate sessions.</li>

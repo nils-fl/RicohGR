@@ -1609,7 +1609,7 @@ badptr:
 dev:
     .asciz  "/dev/mem"
 out:
-    .asciz  "/media/storage1/SCRIPT/AFDBG/TRACE.DAT"
+    .asciz  "{out}"
     .balign 4
 period:
     .word   0, {period_ns}
@@ -1619,7 +1619,9 @@ offsets:
 """
 
 
-def trace_bin(records=TRACE_RECORDS):
+def trace_bin(records=TRACE_RECORDS, out="/media/storage1/SCRIPT/AFDBG/TRACE.DAT"):
+    """The tracer: `records` records every TRACE_PERIOD_NS into `out` (appended, flushed
+    every TRACE_CHUNK records)."""
     offsets = "\n".join(f"    .word   {o:#x}" for o in TRACE_OFFSETS)
     rec = 8 + 4 * len(TRACE_OFFSETS) + 16 * TRACE_ARRAY_WORDS
     return arm_elf(TRACE_S.replace("{map_len}", f"{TRACE_MAP:#x}")
@@ -1632,7 +1634,8 @@ def trace_bin(records=TRACE_RECORDS):
                    .replace("{nfields}", str(len(TRACE_OFFSETS)))
                    .replace("{chunk}", str(TRACE_CHUNK))
                    .replace("{period_ns}", str(TRACE_PERIOD_NS))
-                   .replace("{offsets}", offsets))
+                   .replace("{offsets}", offsets)
+                   .replace("{out}", out))
 
 
 def trace_records(path):
@@ -1794,7 +1797,7 @@ def trace_presses(path):
     signed = lambda x: x - (1 << 32) if x >> 31 else x
     records = trace_records(path)
     has_contrast = len(records[0][1]) >= 29
-    runs, cur, last = [], None, None
+    runs, cur, last, prev_t = [], None, None, None
     for t, w in records:
         act = w[0] & 0xffff
         # A run starts with action 2 (pre-move), or straight with 4 (sampling)
@@ -1802,8 +1805,12 @@ def trace_presses(path):
         # first record is a run already under way when the trace began.
         if (act == 2 and last in (1, None)) or (act == 4 and last == 1):
             cur = {"t": t, "acts": [], "final": None, "scale": [], "y": [], "levels": [],
-                   "acc0": w[3] & 0xff, "c434": None, "modes": []}
+                   "acc0": w[3] & 0xff, "c434": None, "modes": [], "sweep_s": 0.0,
+                   "afc": (w[0] >> 16) & 0xff,     # +0xc44e: 1 in AF-C
+                   "samples": 0, "_s": 0}          # samples over all passes (area 0, +0xc)
             runs.append(cur)
+        if cur is not None and "end" not in cur and last == 4 and prev_t is not None:
+            cur["sweep_s"] += t - prev_t        # time in action 4 (sampling), all passes
         if cur is not None and "end" not in cur:
             if not cur["acts"] or cur["acts"][-1] != act:
                 cur["acts"].append(act)
@@ -1815,6 +1822,10 @@ def trace_presses(path):
                 cur["c434"] = signed(w[6])
             if act == 4:
                 cur["levels"].append((w[10] >> 16) & 0xff)
+                if len(w) > 29:   # samples in the pass; a drop starts a new pass
+                    if w[29] < cur["_s"]:
+                        cur["samples"] += cur["_s"]
+                    cur["_s"] = w[29]
             if act == 4 and has_contrast:
                 cur["scale"].append(f32(w[22]))
                 cur["y"].append(w[17])
@@ -1825,7 +1836,7 @@ def trace_presses(path):
             if act == 1 and len(cur["acts"]) > 1:
                 cur["end"] = t
                 cur["acc_end"], cur["area_end"] = w[3] & 0xff, signed(w[5])
-        last = act
+        last, prev_t = act, t
     for r in runs:
         r["outcome"] = "lock" if 8 in r["acts"] else "fail" if 64 in r["acts"] else \
             "done" if 128 in r["acts"] else "abort"
@@ -1842,6 +1853,10 @@ def trace_presses(path):
         r["level"] = max(set(r["levels"]), key=r["levels"].count) if r["levels"] else None
         r["ms"] = 1000 * (r["end"] - r["t"]) if "end" in r else None
         r["passes"] = r["acts"].count(4)
+        r["samples"] += r.pop("_s")
+        # Frames per second during sampling. The drive level +0x1022 only names the CAF
+        # drive's rate; in AF-C the live-view drive (59 fps) may be used instead (0x533f70a4).
+        r["sample_fps"] = r["samples"] / r["sweep_s"] if r["sweep_s"] > 0.02 and r["samples"] else None
         r["mode"] = "".join(str(m) for i, m in enumerate(r["modes"]) if i == 0 or m != r["modes"][i - 1]) or None
     return records[0][0], runs
 
@@ -2351,6 +2366,232 @@ RELAY_PAD_SH = (
 ).replace("RELAY_SIZE", str(RELAY_SIZE))
 
 
+# ---- bench card for a camera with the flashed AF build (--flashed) ----------------------
+# The --remote card's arm CGI restores every site list first; on a camera that runs
+# tools/af_firmware.py's build that writes stock words over the flashed setting. This card
+# has no arm, no rm and no patch uploads: tools only (AFCFAST.BIN is preinstalled as one),
+# a tracer that writes to RAM and is started per trial (trace CGI), and the pull relay, so
+# Linux writes the card only when the RTOS asks (PULL.SH). See docs/af-debug-log.html.
+FLASHED_DIR = "SCRIPT/AFFL"
+FLASHED_D = f"/media/storage1/{FLASHED_DIR}"
+FLASHED_TTL_D = "C:\\SCRIPT\\AFFL"
+FLASHED_WWW = "/tmp/afflwww"
+FLASHED_TRACE_RECORDS = 2750          # 11 s per trial, 2.3 MB of RAM
+
+
+def flashed_card_files():
+    D, W = FLASHED_D, FLASHED_WWW
+    rec = 8 + 4 * len(TRACE_OFFSETS) + 16 * TRACE_ARRAY_WORDS
+    head = f"#!/bin/sh\nd={D}\nw={W}\nexec 2>>$w/err.log\n"
+    text = "printf 'Content-Type: text/plain\\r\\n\\r\\n'\n"
+    binary = "printf 'Content-Type: application/octet-stream\\r\\n\\r\\n'\n"
+    log = 'read t _ </proc/uptime; echo "{0} $t" >>$w/log.pending\n'
+    cgi = {
+        "uptime": head + text + "cat /proc/uptime\n",
+        "status": head + text + (
+            "read u _ </proc/uptime; echo \"uptime $u\"\n"
+            "echo \"card flashed\"\n"
+            "echo \"relay_seq $(cat $w/relay.seq 2>/dev/null)\"\n"
+            "echo \"relay_ack $(cat $w/relay.ack 2>/dev/null)\"\n"
+            "echo \"relay_hb $(cat $w/relay.hb 2>/dev/null)\"\n"
+            "echo \"trace_bytes $(ls -ln $w/TRACE.DAT 2>/dev/null | awk '{print $5}')\"\n"
+            "p=$(cat $w/trace.pid 2>/dev/null); r=0; [ -n \"$p\" ] && kill -0 $p 2>/dev/null && r=1\n"
+            "echo \"trace_running $r\"\n"
+            "busybox free | awk '/Mem/ {print \"mem_free_kb\", $4}'\n"
+            "for f in $w/up/tool/*.BIN; do [ -f \"$f\" ] || continue\n"
+            " echo \"up tool ${f##*/} $(ls -ln $f | awk '{print $5}') $(busybox md5sum $f | awk '{print $1}')\"\n"
+            "done\n"),
+        "log": head + (
+            "n=${QUERY_STRING:-20}; case $n in *[!0-9]*) n=20 ;; esac\n"
+            + text + "{ cat $d/AFFL.LOG; cat $w/log.pending $w/log.flush 2>/dev/null; } | busybox tail -n $n\n"),
+        "shell": head + pull_shell_body(W, SHELL_ALLOW, text),
+        # Tools only: nothing here restores or writes AF words except a tool that is run.
+        "put": head + (
+            "q=$QUERY_STRING; n=${q%%+*}\n"
+            "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
+            '[ "$q" = "$n+tool" ] || no tools only on this card\n'
+            'case "$n" in ""|*[!A-Z0-9]*) no bad name ;; esac; [ ${#n} -le 12 ] || no name too long\n'
+            '[ "$REQUEST_METHOD" = POST ] || no POST only\n'
+            "l=${CONTENT_LENGTH:-0}; case $l in *[!0-9]*) l=0 ;; esac\n"
+            "[ $l -gt 0 ] && [ $l -le 262144 ] || no bad length $l\n"
+            "busybox mkdir -p $w/up/tool; f=$w/up/tool/$n.BIN\n"
+            "busybox dd of=$f bs=1 count=$l 2>/dev/null; busybox chmod 755 $f\n"
+            "z=$(ls -ln $f | awk '{print $5}'); m=$(busybox md5sum $f | awk '{print $1}')\n"
+            '[ "$z" = "$l" ] || { rm -f $f; no short $z of $l; }\n'
+            + log.format("put $n $z $m") + text + 'echo "tool $n $z $m"\n'),
+        "run": head + (
+            "q=$QUERY_STRING; n=${q%%+*}; a=; [ \"$q\" = \"$n\" ] || a=${q#*+}\n"
+            "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
+            'case "$n" in ""|*[!A-Z0-9]*) no bad name ;; esac\n'
+            'case "$a" in *[!A-Za-z0-9+._-]*) no bad arguments ;; esac\n'
+            "f=$w/up/tool/$n.BIN; [ -f $f ] || no no uploaded tool $n\n"
+            "o=$w/run.out\n"
+            "x=$IFS; IFS=+; set -- $a; IFS=$x\n"
+            "$f \"$@\" >$o 2>&1 & k=$!\n"
+            "i=0; while kill -0 $k 2>/dev/null; do i=$((i + 1)); "
+            "[ $i -gt 150 ] && { kill $k; break; }; busybox usleep 200000; done\n"
+            "wait $k; r=$?\n"
+            + log.format("run $n $a $r") + text + 'echo "exit $r"; cat $o\n'),
+        "peek": head + (
+            "q=$QUERY_STRING; ad=${q%%+*}; c=${q#*+}\n"
+            'case "$q" in *+*) ;; *) c=1 ;; esac\n'
+            'case "$ad$c" in ""|*[!0-9A-Fa-f]*) ' + text.strip() + '; echo "bad address"; exit 0 ;; esac\n'
+            "$w/bin/PEEK.BIN $ad $c >$w/peek.out; r=$?\n"
+            "printf 'Content-Type: application/octet-stream\\r\\nX-Exit: %d\\r\\n\\r\\n' $r\n"
+            "cat $w/peek.out\n"),
+        # A fresh RAM trace of FLASHED_TRACE_RECORDS records (the old one is stopped first).
+        "trace": head + (
+            "p=$(cat $w/trace.pid 2>/dev/null); [ -n \"$p\" ] && kill $p 2>/dev/null\n"
+            "rm -f $w/TRACE.DAT\n"
+            "$w/bin/TRACE.BIN </dev/null >/dev/null 2>&1 & echo $! >$w/trace.pid\n"
+            + text + 'echo "trace $(cat $w/trace.pid)"\n'),
+        "tail": head + (
+            "n=${QUERY_STRING:-750}; case $n in *[!0-9]*) n=750 ;; esac\n"
+            "f=$w/TRACE.DAT; sz=$(ls -ln $f 2>/dev/null | awk '{print $5}')\n"
+            f"r=$((${{sz:-0}} / {rec})); s=$((r - n)); [ $s -lt 0 ] && s=0\n"
+            + binary +
+            f"busybox dd if=$f bs={rec} skip=$s count=$n 2>/dev/null\n"),
+    }
+    here = "".join(f"cat >{W}/cgi-bin/{k} <<'END_{k.upper()}'\n{v}END_{k.upper()}\n" for k, v in cgi.items())
+    here += f"cat >{W}/RACK.SH <<'END_RACK'\n{pull_rack_sh(W)}END_RACK\n"
+    here += f"cat >{W}/PULL.SH <<'END_PULL'\n{pull_sh(W, D, 'AFFL.LOG')}END_PULL\n"
+    remote = (
+        f"d={D}\n"
+        "exec 2>>$d/ERR.LOG\n"
+        "read u _ </proc/uptime\n"
+        "setup() {\n"
+        f"busybox mkdir -p {W}/cgi-bin {W}/bin {W}/up/tool\n"
+        # The binaries are read from the card once, before the relay loop starts.
+        f"cp $d/PEEK.BIN $d/TRACE.BIN {W}/bin/; cp $d/AFCFAST.BIN {W}/up/tool/; busybox chmod 755 {W}/bin/* {W}/up/tool/*\n"
+        f"o={W}/relay.idle; echo 'rseq = 0' >$o\n"
+        f"{RELAY_PAD_SH}"
+        "cat $o 1<>$d/RELAY.TTL; sync\n"
+        + here +
+        f"busybox chmod 755 {W}/cgi-bin/*\n"
+        f"echo 'AF bench (flashed camera): /cgi-bin/uptime status log shell put run peek trace tail' >{W}/index.html\n"
+        "}\n"
+        "case $1 in\n"
+        f"start) rm -f $d/HTTPD.DEAD; setup; busybox httpd -p {REMOTE_PORT} -h {W}; echo \"$u start $?\" >>$d/AFFL.LOG ;;\n"
+        f"check) if netstat -ltn | grep -q ':{REMOTE_PORT} '; then echo \"$u up\" >>$d/AFFL.LOG; "
+        "else echo dead >$d/HTTPD.DEAD; echo \"$u dead\" >>$d/AFFL.LOG; fi ;;\n"
+        f"fg) echo \"$u fg\" >>$d/AFFL.LOG; sync; busybox httpd -f -p {REMOTE_PORT} -h {W} ;;\n"
+        "esac\n"
+        "sync\n"
+    )
+    T = FLASHED_TTL_D
+    ttl = [
+        "mpause 3000",
+        "sendln 'lcmd_resp on'",
+        f"filedelete '{T}\\BOOT.OK'",
+        "attempts = 0",
+        ":mark",
+        f"sendln 'lcmd sh {D}/MARK.SH'",
+        f"filesearch '{T}\\BOOT.OK'",
+        "if result != 0 goto linux",
+        "mpause 1000",
+        "attempts = attempts + 1",
+        "if attempts < 60 goto mark",
+        "goto finish",
+        ":linux",
+        f"sendln 'lcmd sh {D}/REMOTE.SH start'",
+        "mpause 4000",
+        f"sendln 'lcmd sh {D}/REMOTE.SH check'",
+        "mpause 2000",
+        f"filesearch '{T}\\HTTPD.DEAD'",
+        "if result = 0 goto served",
+        f"sendln 'lcmd sh {D}/REMOTE.SH fg'",
+        "mpause 2000",
+        ":served",
+        "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'", "mpause 500",
+        "sendln 'Af_Led_On'", "mpause 500", "sendln 'Af_Led_Off'",
+        *pull_relay_ttl(W, T),
+        ":finish",
+    ]
+    ttl_check(ttl)
+    return {
+        "SCRIPT/STARTUP.TTL": ("\r\n".join(ttl) + "\r\n").encode("ascii"),
+        f"{FLASHED_DIR}/MARK.SH": (f"d={D}\nread t _ </proc/uptime\necho \"$t\" >$d/BOOT.OK\n"
+                                   "echo \"$t boot\" >>$d/AFFL.LOG\nexit 0\n").encode(),
+        f"{FLASHED_DIR}/REMOTE.SH": remote.encode("ascii"),
+        f"{FLASHED_DIR}/PEEK.BIN": peek_bin(),
+        f"{FLASHED_DIR}/TRACE.BIN": trace_bin(FLASHED_TRACE_RECORDS, f"{W}/TRACE.DAT"),
+        f"{FLASHED_DIR}/AFCFAST.BIN": afcfast_bin(),
+    }
+
+
+# The pull relay (recipe card first, 2026-11-22; docs/remote-control.html): Linux never
+# writes the card on its own while the RTOS loop runs. The shell CGI only queues a
+# batch in RAM (www/relay.next, "busy" while one is pending); each round the RTOS
+# runs www/PULL.SH, which writes the batch into RELAY.TTL (in place, one sector) and
+# flushes the buffered log lines, then waits 400 ms and includes the file.
+
+def pull_shell_body(www, allow, text, pause_ms=300, max_lines=8):
+    """The shell CGI after its head: queue 1..max_lines allowed lines as a padded batch."""
+    return (
+        "no() { " + text.strip() + "; echo \"$*\"; exit 0; }\n"
+        '[ "$REQUEST_METHOD" = POST ] || no POST only\n'
+        "l=${CONTENT_LENGTH:-0}; case $l in *[!0-9]*) l=0 ;; esac\n"
+        "[ $l -gt 0 ] && [ $l -le 2048 ] || no bad length $l\n"
+        f"[ -e {www}/relay.next ] && no busy\n"
+        f"b={www}/shell.in; busybox dd of=$b bs=1 count=$l 2>/dev/null\n"
+        f"q=$(cat {www}/relay.seq 2>/dev/null); q=$((${{q:-0}} + 1))\n"
+        f"o={www}/relay.tmp; echo \"rseq = $q\" >$o; echo \"if rseq = rdone goto rskip$q\" >>$o\n"
+        "n=0; while read -r c x || [ -n \"$c\" ]; do [ -n \"$c\" ] || continue; n=$((n + 1))\n"
+        ' case " ' + " ".join(allow) + ' " in *" $c "*) ;; *) no not allowed: $c ;; esac\n'
+        ' case "$x" in *[!A-Za-z0-9\\ ._-]*) no bad arguments: $x ;; esac\n'
+        f" echo \"sendln '$c $x'\" >>$o; echo 'mpause {pause_ms}' >>$o\n"
+        "done <$b\n"
+        f"[ $n -gt 0 ] && [ $n -le {max_lines} ] || no 1 to {max_lines} commands, got $n\n"
+        "echo 'rdone = rseq' >>$o\n"
+        f"echo \"sendln 'lcmd sh {www}/RACK.SH $q'\" >>$o; echo \":rskip$q\" >>$o\n"
+        f"{RELAY_PAD_SH}"
+        f"echo $q >{www}/relay.seq; mv $o {www}/relay.next\n"
+        "read t _ </proc/uptime\n"
+        f'echo "shell $q $(busybox tr \"\\n\" \";\" <$b) $t" >>{www}/log.pending\n'
+        + text + 'echo "queued $q"\n')
+
+
+def pull_rack_sh(www):
+    """Ack and heartbeat, RAM only."""
+    return ("read t _ </proc/uptime\n"
+            f"if [ \"$1\" = hb ]; then echo \"$t\" >{www}/relay.hb; exit 0; fi\n"
+            f"echo \"$1 $t\" >{www}/relay.ack\n"
+            f"echo \"ack $1 $t\" >>{www}/log.pending\n")
+
+
+def pull_sh(www, d, log_name):
+    """The only Linux writer of the card while the relay loop runs, and only when the RTOS
+    asks: the pending batch into RELAY.TTL, the pending log lines, the error log, then sync."""
+    return (f"w={www}; d={d}; c=\n"
+            "exec 2>>$w/err.log\n"
+            "if [ -f $w/relay.next ]; then cat $w/relay.next 1<>$d/RELAY.TTL; mv $w/relay.next $w/relay.done; c=1; fi\n"
+            f"if [ -s $w/log.pending ]; then mv $w/log.pending $w/log.flush; cat $w/log.flush >>$d/{log_name}; rm -f $w/log.flush; c=1; fi\n"
+            "if [ -s $w/err.log ]; then cat $w/err.log >>$d/ERR.LOG && : >$w/err.log; c=1; fi\n"
+            "[ -n \"$c\" ] && sync\n"
+            "exit 0\n")
+
+
+def pull_relay_ttl(www, ttl_d):
+    """The RTOS loop: ask PULL.SH for a pending batch, wait, include RELAY.TTL (sequence
+    guard inside); heartbeat every 50 rounds (~25 s)."""
+    return [
+        "rdone = 0",
+        "rn = 0",
+        ":relay",
+        f"sendln 'lcmd sh {www}/PULL.SH'",
+        "mpause 400",
+        f"filesearch '{ttl_d}\\RELAY.TTL'",
+        "if result = 0 goto rwait",
+        f"include '{ttl_d}\\RELAY.TTL'",
+        ":rwait",
+        "rn = rn + 1",
+        "if rn < 50 goto relay",
+        "rn = 0",
+        f"sendln 'lcmd sh {www}/RACK.SH hb'",
+        "goto relay",
+    ]
+
+
 PROBE_STAGES = ((1, 6000), (2, 6000), (3, 16000), (4, 16000))   # stage, TTL wait (ms)
 
 
@@ -2449,6 +2690,9 @@ def main():
     auto.add_argument("--remote", action="store_true",
                       help="remote mode: no scripted presses; after CAF.OK a web endpoint on port "
                            f"{REMOTE_PORT} for tools/af_remote.py (camera Wi-Fi), trace on")
+    auto.add_argument("--flashed", action="store_true",
+                      help="bench card for a camera running the flashed AF build (tools/af_firmware.py): "
+                           f"no arm, tools only, RAM trace per trial, pull relay; files under {FLASHED_DIR}")
     auto.add_argument("--remote-min", type=int, default=45, metavar="MIN",
                       help="with --remote: trace length in minutes (default %(default)s)")
     auto.add_argument("--probe", action="store_true",
@@ -2498,6 +2742,17 @@ def main():
         return
     if args.trace_contrast:
         trace_contrast(args.trace_contrast)
+        return
+    if args.flashed:
+        if args.out.exists():
+            sys.exit(f"{args.out} exists; remove it or pick another --out (this tool never overwrites)")
+        for name, data in flashed_card_files().items():
+            path = args.out / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            print(f"wrote {path} ({len(data)} bytes)")
+        print(f"\nCopy {args.out}/SCRIPT to the card (scripts must already be enabled). "
+              "Drive it with tools/af_remote.py (afc-hold).")
         return
     flags = args.flags.upper()
     if not flags or any(c not in FLAGS for c in flags) or len(set(flags)) != len(flags):

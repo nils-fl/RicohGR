@@ -152,6 +152,7 @@ settings that are not sent yet:
 
 ```sh
 python3 tools/af_firmware.py        # writes work/firmware-af/FWDC243B.BIN
+python3 tools/af_firmware.py --afc  # + AF-C fast drive: work/firmware-af-afc/FWDC243B.BIN
 ```
 
 The build changes 19 words in the contrast-AF code, the setting tested on
@@ -160,6 +161,10 @@ in dim light. `tools/gr_repack.py` re-runs the updater's container checks
 and, with `--allow af`, `tools/patch_guard.py` refuses any change outside
 the contrast-AF units. What changes, the AF-C check before flashing and the
 first results: [`docs/af-debug-log.html#af-flash`](docs/af-debug-log.html#af-flash).
+`--afc` adds one more word: AF-C searches use the 200 fps AF drive instead of
+the 59 fps live-view drive. That build is prepared, not flashed; what is still
+untested is listed in
+[`docs/af-debug-log.html#af-flash-afc-build`](docs/af-debug-log.html#af-flash-afc-build).
 
 To flash: full battery, a card with only `FWDC243B.BIN` in its root, hold
 MENU while switching on, confirm the update, switch off when it says
@@ -184,7 +189,8 @@ starts the update. **To go back**, flash the official 1.60 file the same way.
 | `af_optimize.py` | Optuna search over the contrast-AF detector constants, on the bench |
 | `af_csv.py` | One row per contrast-AF run from the debug CSVs |
 | `af_light.py` | Light, noise and peak margin of each logged sweep, by sensor mode |
-| `af_replay.py` | Replays recorded AF passes offline: detector port, other stop rules, peak fits |
+| `af_replay.py` | Replays recorded AF passes offline: detector and stop-decision port, other stop rules, peak fits |
+| `af_tolerance.py` | Focus tolerance on the flashed camera: AF-S lock, motor offset, photo, sharpness per patch |
 | `af_charts.py` | Writes `docs/af-charts.html` from your logs |
 | `af_timing_tally.py` | Summarises AF timings measured from high-speed video |
 | `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |

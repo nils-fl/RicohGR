@@ -611,13 +611,22 @@ result</strong> (grade 1: 34 of 42 took path 1). In AF-S, when the first pass
 ends without an accepted peak, the code at <code>0x53404d8c</code> calls
 <code>0x53400b74</code> and <code>0x53403808</code> (about 1,000 instructions,
 the end-of-pass decision) and, if that returns 0, reverses at
-<code>0x5340561c</code>.</li>
+<code>0x5340561c</code>. <em>Decoded 2026-11-21
+(<a href="af-subsystem.html#replay-turn">af-subsystem §11.5</a>):</em>
+<code>0x53403808</code> re-runs the stored pass through the frame evaluation
+and accepts (action 8) or lets AF-S turn. Whether the pass stops early is
+set by the "peak behind" flag of the accept test (5 falls, drop above the
+accept margin), not by this function.</li>
 <li><s>The first pass crosses the peak without accepting it.</s>
 <strong>Corrected by the state trace below:</strong> in a clean reversal the
 first pass starts at or just past the peak and moves <em>away</em> from it;
 contrast falls from the first sample. The return pass retraces those samples
 before it reaches the peak, which is why the peak sits about 7.5 samples
-(median, IQR 6.6–12.5, 60 dim path-1 sweeps) into the logged pass.</li>
+(median, IQR 6.6–12.5, 60 dim path-1 sweeps) into the logged pass. <em>Note 2026-11-21:</em> that holds for the 10 presses of the
+state trace. In the 25 remote sessions (offline replay,
+<a href="af-subsystem.html#replay-turn">af-subsystem §11.5</a>) only 24 of 99
+turned first passes at 29&nbsp;fps fell from the first sample; the others
+crossed a peak and did not accept it.</li>
 <li><strong>Cost:</strong> measured directly in the trace below: a clean
 reversal adds about 320 ms (about 880 ms against about 560 ms from the
 half-press to the accepted peak).</li>
@@ -629,7 +638,13 @@ non-zero. Nothing in the AF code sets it; only the constructor and vtable slot
 13 (<code>0x533f5024</code>, a reset) clear it. So peaks are apparently accepted
 at the end of a pass, in <code>0x53403808</code>. The pass ends when the
 countdown <code>+0xc4df</code> reaches 0 (<code>0x53404ba0</code>), and its
-writer is not found by direct addressing either.</p>
+writer is not found by direct addressing either.
+<em>Corrected 2026-11-21:</em> peaks are accepted frame by frame, not at the
+end of a pass. The sweep step <code>0x53404b24</code> switches to action 8 as
+soon as the frame evaluation (<code>0x534035a4</code> →
+<code>0x53402d6c</code>) leaves an area index ≥ 0, from the per-detector
+accept test <code>0x5340d100</code>; the countdown stays 0 in most passes
+(<a href="af-subsystem.html#replay-stop">af-subsystem §11.2</a>).</p>
 <p><strong>AF state tracer:</strong> <code>TRACE.BIN</code> (540 bytes) maps the
 static contrast AF object read-only and records 16 state words (action code,
 path, countdown, accepted and success flags, the gate byte, area index, sweep
@@ -898,7 +913,11 @@ first.
 (2) Wrong side: turn after fewer falling samples, or jump back to the first
 pass's start instead of retracing it; at most about 300 ms on about 4 of 10
 presses. A wider start margin would cost about 100 ms on every press and save
-little on average.</p>
+little on average. <em>Note 2026-11-21:</em> the replay of the remote sessions
+puts true wrong-side starts at about 6&nbsp;% of dim first passes, not 4 of
+10. Turning after 3 falls instead of 5 would save about 11&nbsp;ms per dim
+press and add false turns on about 5&nbsp;% of passes, so this lever is
+parked (<a href="af-subsystem.html#replay-turn">af-subsystem §11.5</a>).</p>
 <h2 id="auto-runs">Automated runs: the script presses the shutter (2026-11-17)</h2>
 <p>The A/B results above depend on hand presses: the user defocuses by
 pointing at a far target, half-presses 10–20 times, and the two arms are
@@ -1382,11 +1401,17 @@ writes it back at every AF start.</li>
 <li>The 4.8 constant at <code>0x533fc160</code>: no effect on the sweep step.</li>
 <li>Smoothing off (the series is (b0 + 2·b4 + b8)/4, <code>0x5340cb00</code>;
 4 words): much worse, up to 3 s and 100 pulses off.</li>
-<li>Second accept count <code>0x53c16c4c</code> 3 → 2: no effect.</li>
+<li>Second accept count <code>0x53c16c4c</code> 3 → 2: no effect.
+<em>Note 2026-11-21:</em> this is the fall count of the camera's accept
+(<a href="af-subsystem.html#replay-stop">af-subsystem §11.2</a>); in the
+replay 2 falls would end about 40 % of the matched passes one frame sooner,
+about 15 ms on average, which this check may not have resolved.</li>
 <li>Shape tests in the accept function <code>0x5340d100</code> (symmetry
 0.5–2.0 at <code>0x53c16ce4</code>, raw ratio 1.5 at <code>0x53c16cb8</code>):
 the reject flag <code>+0x23</code> is set in none of about 290 recorded
-passes.</li>
+passes. (The symmetry test alone does not reject: a pass that fails it is
+still accepted when the brightness stayed within ×5 over the pass and ×1.5
+around the peak; §11.2 of af-subsystem.)</li>
 </ul>
 <h3 id="opt-bright">Bright scene and the NO29 patch</h3>
 <p>Second scene (more light, several objects in the AF area; reference
@@ -1587,6 +1612,126 @@ of <code>tools/af_debug_card.py</code> expect stock words, and
 <code>arm STOCK</code> writes stock words into RAM, which undoes the flashed
 setting until the next power-on. Adapt the tools before using the bench
 again. To return to stock, flash the official 1.60 file the same way.</p>
+
+<h3 id="af-flash-afc-build">AF-C build (prepared 2026-11-21, not flashed)</h3>
+<p><code>tools/af_firmware.py --afc</code> adds the one word of the
+<a href="#afc-fast-patch">AF-C fast-drive patch</a> to the 19:
+<code>0x533f7118</code>, <code>movne r3, #1</code> → <code>mov r3, #1</code>
+(output <code>work/firmware-af-afc/FWDC243B.BIN</code>). In the drive
+selector <code>0x533f70a4</code>, AF-C (<code>+0xc44e</code> ≠ 0) with
+<code>+0xc488</code> = 0 then always gets the CAF drive. Stock gives the
+59 fps live-view drive when <code>+0xc484</code> = 2. The other vetoes stay:
+<code>+0xc488</code>, the object byte <code>+0x43c0</code>, and
+<code>+0x1004</code> = 0 with <code>+0xfec</code> = 2 (Read). All container
+checks pass. The guard places the site in the AF code (it names
+<code>0x533f6fbc</code> as the function because the selector is a leaf
+without a prologue). Without <code>--afc</code> the tool still writes a
+file byte-identical to the one flashed on 2026-11-20.</p>
+<p>Not tested yet: AFCFAST together with the flashed margin setting (the
+2026-10-29 test ran on stock margins), AF-C in dim light with AFCFAST
+(in the dim AF-C check above, stock already searched on the CAF drive at
+29 fps, so the patch may change little there; Inferred), and power use and heat in long
+AF-C use. The RAM patch can be tried over the flashed firmware first: its
+site holds the stock word there, and <code>AFCFAST.BIN</code> writes only
+that one word. Do not use <code>arm STOCK</code> on this camera.</p>
+
+<h3 id="af-flash-afc-bench">AF-C on the flashed camera, first probes (2026-11-22)</h3>
+<p>Hands-free over Wi-Fi with a separate bench card
+(<code>af_debug_card.py --flashed</code>). It has no <code>arm</code>,
+<code>rm</code> or patch <code>put</code>, because those restore stock words
+over the flashed ones. Instead it has a RAM tracer per trial and the pull
+relay. Measured on a still indoor scene:</p>
+<ul>
+<li><strong>First search:</strong> the first AF-C search after a half-press
+already samples at about 200 fps in stock firmware (6 of 6 presses,
+samples over sweep time). The 59 fps live-view drive is used only for
+<em>re-searches</em> while the half-press is held, so those re-searches are
+all AFCFAST changes.</li>
+<li><strong>The drive level is not shown:</strong> the traced drive level
+<code>+0x1022</code> does not show the live-view drive. Use
+<code>sample_fps</code> from <code>trace_presses</code> instead.</li>
+<li><strong>Triggering re-searches:</strong> ND in or out during the hold
+does not trigger a re-search. Moving the focus motor with the relay
+command <code>AF_drive</code> does.</li>
+<li><strong>First comparison:</strong> stock re-searches took 531–554 ms at
+about 60 fps; with AFCFAST, 63 and 169 ms at about 200 fps. That is one
+trial each, so not a result.</li>
+<li><strong>Hang:</strong> once, AF-C stayed in action 4 after an
+<code>AF_drive</code>. A half-press in AF-S brought it back.</li>
+</ul>
+<p>Paused. More trials are needed before anything about AF-C is
+published.</p>
+
+<h3 id="focus-tolerance">Focus tolerance: sharpness against lens pulses (2026-11-22)</h3>
+<p>This measures how much a photo loses per pulse away from the AF lock.
+It sets the scale for every lock-position error in this log. Tool:
+<code>tools/af_tolerance.py</code>, hands-free on the flashed camera. Per
+shot:</p>
+<ol>
+<li>AF-S locks on a half-press; the RAM trace records the run.</li>
+<li>The relay command <code>AF_drive &lt;dir&gt; &lt;n&gt;</code> moves the
+motor n of its pulses.</li>
+<li>A full press takes the photo. The trace confirms that nothing
+refocused.</li>
+<li>The lens is driven back by the same n before release.</li>
+</ol>
+<p>Sharpness is the squared Laplacian over squared mean brightness, on a
+6×4 grid of patches of the 6000×4000 JPEG. It is computed at full size and
+on copies averaged over 2, 4 and 8 pixels. Each aperture got 30 shots, two
+of each offset in shuffled blocks. The scene is an indoor wooden beam with
+cords and depth across the frame. Measured:</p>
+<table>
+<thead><tr><th>Patches that peak at the lock, Gaussian σ in AF_drive pulses (median)</th><th>f/2.8</th><th>f/5.6</th></tr></thead>
+<tbody>
+<tr><td>Full-size pixels</td><td>7.6</td><td>14.8</td></tr>
+<tr><td>2× averaged</td><td>7.7</td><td>15.9</td></tr>
+<tr><td>4× averaged</td><td>11.7</td><td>22.4</td></tr>
+<tr><td>8× averaged</td><td>19.7</td><td>40.8</td></tr>
+</tbody>
+</table>
+<p>The fits are good (R² 0.90–1.00). σ doubles from f/2.8 to f/5.6, as depth
+of focus should. Full-size detail loses 10 % at 0.46 σ and 50 % at 1.18 σ.</p>
+<p><strong>Pulse scale (Inferred):</strong> one AF_drive pulse is taken as
+½ AF pulse. Two observations support this:</p>
+<ul>
+<li>a phase-detection estimate (words at <code>0x55078de0</code>) moves
+0.48 per drive pulse, linearly from 16 to 200 pulses and back;</li>
+<li>the motor controller keeps its position ×2.</li>
+</ul>
+<p>On that scale, full-size detail at f/2.8 has σ ≈ 3.8 AF pulses: −10 %
+within about 2 pulses, −50 % within about 4.5. One AF search step is 8
+pulses. At f/5.6 the same figures are about 3.5 and 9 pulses. So the peak
+fits of <a href="af-subsystem.html#replay-fits">§11.4</a> differ by under
+a pulse, which is a few percent of pixel detail at most. A lock one step
+(8 pulses) off loses most of it at f/2.8.</p>
+<p><strong>The lock is not quite at the pixel optimum on this scene.</strong></p>
+<ul>
+<li><strong>At the frame centre:</strong> in a 400 px crop the fitted
+peak lies at +3.6 drive pulses at f/2.8 and +9.3 at f/5.6, the same
+direction both times. The drive-0 shots reach 0.90 and 0.85 of the fitted
+peak (800 px crop: 0.71 and 0.75).</li>
+<li><strong>Repeatability:</strong> the two drive-0 shots per aperture
+agree to within 3–11 %, so the locks repeat well.</li>
+<li><strong>Cause open:</strong> it may be depth inside the crop, focus
+that depends on spatial frequency (the AF judges contrast on the live
+view), or a real offset.</li>
+<li><strong>Test that would settle it:</strong> a flat, square-on target.
+If the offset holds there, a fixed correction after the lock could gain
+sharpness.</li>
+</ul>
+<p><strong>Caveats:</strong></p>
+<ul>
+<li><code>AF_drive</code> moves the lens without updating the AF's own
+position. Without the drive-back, 4 of 11 following searches aborted. The
+traced absolute lock values drift with the drives, so they do not measure
+lock scatter here.</li>
+<li>The camera stopped taking relayed presses twice, after about 20
+minutes. The first time a press on the camera woke it; the second time it
+needed a power cycle. Auto power-off was then switched off.</li>
+<li>The card's <code>trace_running</code> stays at 1 after the tracer
+ends, so the tool waits out the trace length instead.</li>
+</ul>
+<p>Data and photos in <code>work/af-logs/tolerance/</code> (local).</p>
 
 <h2 id="afc-fast-patch">AF-C fast-drive patch (prototype, 2026-10-29)</h2>
 <p>A one-word RAM patch, applied from the card at power-on. No GRKit and no

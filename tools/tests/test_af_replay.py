@@ -91,3 +91,86 @@ def test_detector_port_matches_the_recorded_camera_state():
                         total += 1
                         agree += state == rec[4]
     assert total > 1000 and agree / total > 0.93
+
+
+def first_accept(b, floor=0.001, T=0.002, mode=1, ac=False):
+    area = dict(arr=camera_array(b), b={})
+    det = R.Detector(ac)
+    for m, v in R.frame_arrays(area, b):
+        det.update(v, m - 1, floor, T)
+        if det.accepts(v, m - 1, floor, T, mode):
+            return m, det
+    return None, det
+
+
+def test_accept_needs_three_falls_and_the_full_margin():
+    m, det = first_accept(peak())
+    assert m is not None and det.fall >= 3 and m > 10     # later than state 3 (frame 9-10)
+
+
+def test_accept_without_candidate_on_a_small_rise_unless_ac():
+    # The rise from the pass minimum stays under floor + T, the drop after the top does not.
+    b = [0.030, 0.0302, 0.0305, 0.0308, 0.030, 0.026, 0.022, 0.018, 0.014, 0.012]
+    assert first_accept(b, T=0.002)[0] is None
+    assert first_accept(b, T=0.002, ac=True)[0] is not None
+
+
+def test_second_rise_without_new_maximum_drops_the_candidate():
+    det, v = R.Detector(), [0.01, 0.02, 0.03, 0.04, 0.035, 0.036, 0.037]
+    for i in range(1, len(v)):
+        det.update(v, i, 0.001, 0.002)
+    assert det.max_i == 3 and det.c0 == 0
+
+
+@pytest.mark.skipif(not (R.LOGS / "remote-nd2" / "tails").is_dir(), reason="needs work/af-logs (local data)")
+def test_accept_port_stops_on_the_camera_frame():
+    # Two dim sessions (2026-11-21: 36 of 39 and 45 of 62 horizontal AF-S stops on the
+    # camera's own frame with +0xac = 0; all sessions 56.5 %, bright 100 fps ones 15-25 %).
+    presses = R.load(["remote-nd2", "remote-confirm49"])
+    exact = total = 0
+    for p in presses:
+        for q in p["passes"]:
+            a = q["area"] if q["area"] in (0, 1) else 0
+            if q["act"] == 8 and q["f40"][a] in (0, 2):
+                total += 1
+                exact += R.camera_stop(p, q, a) == len(q["areas"][a]["arr"])
+    assert total > 80 and exact / total > 0.7
+
+
+def test_peak_behind_after_five_falls_without_a_candidate():
+    # The sweep starts on the peak and only falls: no candidate, so no accept; the turn
+    # flag comes at the fifth fall once the drop exceeds floor + T.
+    b = [0.040, 0.038, 0.035, 0.031, 0.027, 0.023, 0.019, 0.016, 0.014, 0.013]
+    area = dict(arr=camera_array(b), b={})
+    det, first = R.Detector(), {}
+    for m, v in R.frame_arrays(area, b):
+        det.update(v, m - 1, 0.001, 0.002)
+        assert not det.accepts(v, m - 1, 0.001, 0.002, 1)
+        for n in (3, 5):
+            if n not in first and det.behind(v, m - 1, 0.001, 0.002, n):
+                first[n] = (m, det.fall)
+    assert first[5][1] == 5 and first[3] == (first[5][0] - 2, 3)
+
+
+def test_no_peak_behind_while_a_candidate_is_armed():
+    det = R.Detector()
+    v = peak(n=16)
+    for i in range(1, len(v)):
+        det.update(v, i, 0.001, 0.002)
+        if det.accepts(v, i, 0.001, 0.002, 1):
+            break
+        assert not det.behind(v, i, 0.001, 0.002)
+    assert det.c0 == 1
+
+
+@pytest.mark.skipif(not (R.LOGS / "remote-nd2" / "tails").is_dir(), reason="needs work/af-logs (local data)")
+def test_turn_port_matches_the_camera_turn():
+    # 2026-11-21: 36 of 38 turned first passes in these two dim sessions (all sessions 80 %).
+    rows = R.first_passes(R.load(["remote-nd2", "remote-confirm49"]))
+    agree = total = 0
+    for r in rows:
+        if r["kind"] == "turned":
+            cam, port = r["q"]["minus2"], R.turn_frame(r["p"], r["q"])
+            total += 1
+            agree += (port is None or port >= r["n"]) if cam is None else port == cam
+    assert total > 30 and agree / total > 0.85

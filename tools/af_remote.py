@@ -25,8 +25,16 @@ Commands:
   rm NAME               restore and delete an uploaded patch (or delete a tool)
   run NAME [ARG...]     run an uploaded tool (30 s limit)
   peek ADDR [N]         N words of RTOS memory (read-only, 0x53000000..0x5fefffff)
+  afc-hold ...          hands-free AF-C trials on a camera with the flashed AF build
+                        (card: af_debug_card.py --flashed): AFCFAST on/off per trial,
+                        relay half-press hold, two focus-motor moves (AF_drive) that make
+                        AF-C search again, a RAM trace per trial
+
+On the flashed card (status "card flashed") everything that could write stock words
+is refused here and on the card: no arm, no rm, no patch uploads (tools only).
 """
 import argparse, hashlib, json, random, socket, statistics, struct, subprocess, sys, tempfile, time
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -104,7 +112,12 @@ class Camera:
                 raise SystemExit(f"not in the relay allowlist: {line}")
         if any(line.split()[0].startswith("ND_") for line in lines):
             self.wait_af_idle()
-        reply = self.cgi_post("shell", "", ("\n".join(lines) + "\n").encode()).decode().strip()
+        t0 = time.monotonic()
+        while True:   # the pull relay answers "busy" while the previous batch waits for the RTOS
+            reply = self.cgi_post("shell", "", ("\n".join(lines) + "\n").encode()).decode().strip()
+            if reply != "busy" or time.monotonic() - t0 > wait:
+                break
+            time.sleep(0.2)
         if not reply.startswith("queued "):
             raise SystemExit(f"relay refused: {reply}")
         seq = int(reply.split()[1])
@@ -116,6 +129,20 @@ class Camera:
                     return seq, True
             time.sleep(0.3)
         return seq, False
+
+    def status(self):
+        """The status CGI as {key: rest of line}."""
+        out = {}
+        for line in self.cgi("status").decode().splitlines():
+            k, _, v = line.partition(" ")
+            out[k] = v.strip()
+        return out
+
+    def flashed(self):
+        """True on the bench card for the flashed camera (af_debug_card.py --flashed)."""
+        if getattr(self, "_flashed", None) is None:
+            self._flashed = self.status().get("card") == "flashed"
+        return self._flashed
 
     def wait_af_idle(self, quiet=1.0, timeout=15.0):
         """Wait until the AF action word (CAF +0xc44c, 1 = idle) has read 1 for
@@ -220,6 +247,9 @@ def run_from_tail(cam, t_cam, timeout=7.0, records=2000, keep=None):
 
 
 def press(cam, arm, defocus=True, orig_setting="spot", keep=None):
+    if cam.flashed():
+        raise SystemExit("this camera runs the flashed AF build: arms would write stock words; "
+                         "use afc-hold or run tools only")
     status = cam.cgi("arm", arm).decode().split()
     if defocus and cam.defocus_method:
         cam.set_focus_setting("inf"); time.sleep(DEFOCUS_S)
@@ -311,6 +341,215 @@ def phase_press(cam, arm, orig):
     return r, vals, grades
 
 
+# ---- hands-free AF-C trials on the flashed camera ------------------------------------
+
+def flashed_mismatches(cam, afc_fast):
+    """Sites of the flashed build (tools/af_firmware.py) that do not hold the expected word:
+    the 19 flashed words patched, the AF-C word as set for this trial. [] = all as expected."""
+    import af_firmware
+    bad = []
+    for a, old, new in af_firmware.sites(afc=True):
+        want = (new if afc_fast else old) if a == af_debug_card.AFC_SITE else new
+        got = cam.peek(a, 1)[0]
+        if got != want:
+            bad.append(f"{a:#010x} holds {got:#010x}, expected {want:#010x}")
+    return bad
+
+
+def set_afc_word(cam, fast):
+    reply = cam.cgi("run", "AFCFAST" if fast else "AFCFAST+restore").decode().split()
+    want = af_debug_card.AFC_FAST if fast else af_debug_card.AFC_STOCK
+    got = cam.peek(af_debug_card.AFC_SITE, 1)[0]
+    if reply[:2] != ["exit", "0"] or got != want:
+        raise SystemExit(f"AFCFAST {'apply' if fast else 'restore'}: {' '.join(reply)}, word {got:#010x}")
+
+
+def wait_trace_done(cam, timeout=15.0):
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout:
+        if cam.status().get("trace_running") == "0":
+            return True
+        time.sleep(0.4)
+    return False
+
+
+def relay_now(cam, line, wait=8.0):
+    """One relay line without Camera.shell's wait for AF idle (AF-C stays busy while held).
+    Returns the camera time of the ack, or None."""
+    t0 = time.monotonic()
+    while True:
+        reply = cam.cgi_post("shell", "", (line + "\n").encode()).decode().strip()
+        if reply != "busy" or time.monotonic() - t0 > wait:
+            break
+        time.sleep(0.2)
+    if not reply.startswith("queued "):
+        raise SystemExit(f"relay refused {line}: {reply}")
+    seq = reply.split()[1]
+    while time.monotonic() - t0 < wait:
+        if cam.status().get("relay_ack", "").split()[:1] == [seq]:
+            return cam.cam_now()
+        time.sleep(0.15)
+    return None
+
+
+AFC_DRIVE_PULSES = 100
+
+
+def af_state(cam):
+    w = cam.peek(AF_ACTION & ~3, 1)[0]
+    return w & 0xffff, (w >> 16) & 0xff
+
+
+def recover_af(cam):
+    """A hung AF-C (action 4 that never ends, seen once after AF_drive, 2026-11-22) came back
+    with a half-press in AF-S. True when AF is idle afterwards."""
+    cam.set_focus_setting("spot"); time.sleep(1.0)
+    relay_now(cam, "SW_sws 1"); time.sleep(2.0); relay_now(cam, "SW_sws 0")
+    return cam.wait_af_idle(quiet=0.5, timeout=5)
+
+
+def afc_trial(cam, fast, path, settle_s=1.2, research_s=1.8):
+    """One held AF-C half-press with two re-searches: after the first lock the focus motor is
+    moved AFC_DRIVE_PULSES one way (AF_drive 0) and later back (AF_drive 1); each move makes
+    AF-C search again while the half-press is held. In stock those re-searches use the 59 fps
+    live-view drive (+0xc484 = 2 after the first search end), the first search the AF drive."""
+    if not cam.wait_af_idle(quiet=1.0, timeout=20) and not recover_af(cam):
+        raise SystemExit("AF not idle for 20 s and not recovered: power-cycle the camera")
+    set_afc_word(cam, fast)
+    # Re-sync lens and AF with a single AF-S focus before every hold (the motor moves of the
+    # last trial happened behind the AF's back), then back to continuous AF.
+    cam.set_focus_setting("spot"); time.sleep(0.5)
+    cam.api("POST", "/v1/lens/focus", b"")
+    cam.wait_af_idle(quiet=0.5, timeout=6)
+    cam.set_focus_setting("continuous"); time.sleep(0.5)
+    cam.cgi("trace")
+    time.sleep(0.2)
+    t_on = relay_now(cam, "SW_sws 1")
+    if t_on is None:
+        relay_now(cam, "SW_sws 0")
+        raise SystemExit("relay: half-press not acknowledged")
+    time.sleep(settle_s)
+    t_d0 = relay_now(cam, f"AF_drive 0 {AFC_DRIVE_PULSES}")
+    time.sleep(research_s)
+    t_d1 = relay_now(cam, f"AF_drive 1 {AFC_DRIVE_PULSES}")
+    time.sleep(research_s)
+    t_off = relay_now(cam, "SW_sws 0") or relay_now(cam, "SW_sws 0")
+    if t_off is None:
+        raise SystemExit("relay: release not acknowledged twice; the half-press may still be held")
+    wait_trace_done(cam)
+    data = cam.cgi("tail", str(af_debug_card.FLASHED_TRACE_RECORDS))
+    path.write_bytes(data)
+    stuck = not cam.wait_af_idle(quiet=0.5, timeout=5)
+    if stuck and not recover_af(cam):
+        raise SystemExit("AF hung and not recovered: power-cycle the camera")
+    rec = {"fast": fast, "t_on": t_on, "t_d0": t_d0, "t_d1": t_d1, "t_off": t_off, "bytes": len(data),
+           "stuck": stuck, "runs": []}
+    rec = {k: round(v, 3) if isinstance(v, float) else v for k, v in rec.items()}
+    try:
+        runs = trace_presses(str(path))[1]
+    except SystemExit:
+        runs = []
+    for r in runs:
+        if r["t"] < t_on - 1.5:
+            continue
+        if r["t"] > t_off + 0.5:
+            continue
+        rec["runs"].append({k: r.get(k) for k in ("t", "outcome", "passes", "final", "afc", "pre", "samples")}
+                           | {"fps": AF_FPS.get(r["level"]), "ms": r["ms"] and round(r["ms"]),
+                              "sweep_ms": round(1000 * r["sweep_s"]),
+                              "sample_fps": r["sample_fps"] and round(r["sample_fps"], 1)})
+    return rec
+
+
+def afc_line(rec):
+    if not rec["runs"]:
+        return "no AF run in the trace"
+    f = lambda r: (f"{r['sample_fps'] or 0:4.0f}fps {r['sweep_ms']:4d}ms {r['samples']:3d}s {r['outcome']}")
+    return (("STUCK (recovered) " if rec.get("stuck") else "")
+            + f"{len(rec['runs'])} runs: " + " | ".join(f(r) for r in rec["runs"]))
+
+
+def afc_table(recs):
+    def med(xs):
+        return f"{statistics.median(xs):.0f}" if xs else "-"
+    for level in dict.fromkeys(r["level"] for r in recs):
+        print(f"\n{level}:")
+        for fast in (False, True):
+            rs = [r for r in recs if r["level"] == level and r["fast"] == fast and r["runs"]]
+            if not rs:
+                continue
+            first = [r["runs"][0] for r in rs]
+            again = [x for r in rs for x in r["runs"][1:]]
+            for name, xs in (("first search", first), ("re-searches", again)):
+                fps = [x["sample_fps"] for x in xs if x["sample_fps"]]
+                print(f"  {'AFCFAST' if fast else 'flashed':8s} {name:13s} n {len(xs):3d}  fps median {med(fps):>4s}"
+                      f" (<80: {sum(f < 80 for f in fps)})  sweep median {med([x['sweep_ms'] for x in xs]):>4s} ms"
+                      f"  run median {med([x['ms'] for x in xs if x['ms']]):>4s} ms"
+                      f"  samples median {med([x['samples'] for x in xs]):>3s}"
+                      f"  locked {sum(x['outcome'] == 'lock' for x in xs)}/{len(xs)}")
+            print(f"  {'':8s} runs per hold median {statistics.median(len(r['runs']) for r in rs)}, "
+                  f"hung {sum(bool(r.get('stuck')) for r in recs if r['level'] == level and r['fast'] == fast)}")
+
+
+def afc_hold(cam, args):
+    if not cam.flashed():
+        raise SystemExit("afc-hold needs the flashed card (af_debug_card.py --flashed)")
+    out = args.out
+    out.mkdir(parents=True, exist_ok=True)
+    cam.sync_clock()
+    bad = flashed_mismatches(cam, False) if cam.peek(af_debug_card.AFC_SITE, 1)[0] == af_debug_card.AFC_STOCK \
+        else flashed_mismatches(cam, True)
+    if bad:
+        raise SystemExit("flashed words not as expected, nothing done:\n  " + "\n  ".join(bad))
+    print("flashed words: all 19 patched")
+    orig = cam.props().get("focusSetting", "spot")
+    method, _ = cam.find_defocus()
+    if not method:
+        raise SystemExit("no way found to set focusSetting over the API")
+    cam.set_focus_setting("continuous"); time.sleep(0.5)
+    if cam.props().get("focusSetting") != "continuous":
+        cam.set_focus_setting(orig)
+        raise SystemExit("could not switch to continuous AF over the API")
+    rng = random.Random(args.seed)
+    log = (out / "trials.jsonl").open("a")
+    recs, n = [], 0
+    try:
+        for level in args.levels.split(","):
+            cam.shell(["ND_close" if level == "nd" else "ND_open"])
+            time.sleep(1.0)
+            pr = cam.props()
+            print(f"level {level}: battery {pr.get('battery')}, hot {pr.get('hot')}")
+            order = []
+            for _ in range(args.per_arm):
+                pair = [False, True]; rng.shuffle(pair); order += pair
+            print(f"\nlevel {level}: {len(order)} trials")
+            for fast in order:
+                n += 1
+                rec = afc_trial(cam, fast, out / f"t{n:03d}.DAT")
+                rec.update(n=n, level=level)
+                recs.append(rec)
+                log.write(json.dumps(rec) + "\n"); log.flush()
+                print(f"{n:3d} {level:4s} {'AFCFAST' if fast else 'flashed'}  {afc_line(rec)}", flush=True)
+                if n % 10 == 0:
+                    bad = flashed_mismatches(cam, fast)
+                    if bad:
+                        raise SystemExit("flashed words changed, stopping:\n  " + "\n  ".join(bad))
+                if args.limit and n >= args.limit:
+                    break
+            if args.limit and n >= args.limit:
+                break
+    finally:
+        try:
+            set_afc_word(cam, False)
+            cam.shell(["ND_open"])
+            cam.set_focus_setting(orig)
+            bad = flashed_mismatches(cam, False)
+            print("\nend: AF-C word stock, ND out, focus setting " + orig
+                  + ("; flashed words all patched" if not bad else "; MISMATCH: " + "; ".join(bad)))
+        except (SystemExit, OSError, RuntimeError) as e:
+            print(f"\nend: cleanup incomplete ({e}); power-cycle the camera to be sure", flush=True)
+    afc_table(recs)
+
 def check_arms(arms, extra=()):
     for arm in arms:
         parts = [] if arm == "STOCK" else arm.split("+")
@@ -368,6 +607,12 @@ def main():
     me = sub.add_parser("meter", help="presses that report the phase value and grade, for setting up a scene")
     me.add_argument("--n", type=int, default=20); me.add_argument("--arm", default="STOCK")
     me.add_argument("--pause", type=float, default=3.0)
+    ah = sub.add_parser("afc-hold", help="hands-free AF-C trials on the flashed camera (AFCFAST on/off)")
+    ah.add_argument("--out", type=Path, default=Path("work/af-logs/remote-afc2"))
+    ah.add_argument("--levels", default="room,nd", help="room (ND out) and/or nd (ND in), in order (default %(default)s)")
+    ah.add_argument("--per-arm", type=int, default=30, help="trials per arm and level (default %(default)s)")
+    ah.add_argument("--seed", type=int, default=1)
+    ah.add_argument("--limit", type=int, default=0, help="stop after this many trials (probe)")
     args = ap.parse_args()
 
     cam = Camera(args.host, args.iface, args.api_port, args.cgi_port)
@@ -384,7 +629,10 @@ def main():
                                                 "focusMode", "focusSetting", "focused", "liveState")})
         rtt, off = cam.sync_clock()
         print(f"endpoint uptime ok, clock offset {off:.3f} s (round trip {1000 * rtt:.0f} ms)")
-        print(cam.cgi("ls").decode()[-1500:])
+        if cam.flashed():
+            print(cam.cgi("status").decode(), end="")
+        else:
+            print(cam.cgi("ls").decode()[-1500:])
         return
     if args.cmd == "fetch":
         args.out.mkdir(parents=True, exist_ok=True)
@@ -404,6 +652,8 @@ def main():
     if args.cmd == "log":
         print(cam.cgi("log", str(args.n)).decode(), end="")
         return
+    if args.cmd in ("put", "rm") and cam.flashed() and not (args.cmd == "put" and args.tool):
+        sys.exit(f"{args.cmd}: the flashed card takes tools only (put --tool)")
     if args.cmd == "put":
         name = args.name.upper()
         if args.file:
@@ -432,6 +682,9 @@ def main():
         addr, n = int(args.addr, 16), int(args.n, 0)
         for i, w in enumerate(cam.peek(addr, n)):
             print(f"{addr + 4 * i:#010x}: {w:#010x}  {struct.unpack('<f', struct.pack('<I', w))[0]:.6g}")
+        return
+    if args.cmd == "afc-hold":
+        afc_hold(cam, args)
         return
     cam.sync_clock()
     if args.cmd == "defocus-test":
