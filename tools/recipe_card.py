@@ -54,7 +54,7 @@ PAUSE_MS = 300         # after each line
 # the RTOS through the pull relay like the shell CGI (one batch at a time, the next after the
 # ack), but with any engineering-shell line: it comes from the card, not from Wi-Fi. Its log
 # lines go to RECIPE.LOG ("solo ..."), written by PULL.SH as every other log line.
-SOLO_ARMS = ("SMOKE", "SESSION")
+SOLO_ARMS = ("SMOKE", "SESSION", "SESSION2")
 
 
 def solo_lib() -> str:

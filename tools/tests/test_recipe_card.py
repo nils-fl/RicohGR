@@ -42,6 +42,7 @@ def test_remote_sh_and_solo_parse():
     files = rc.card_files()
     remote = files[f"{rc.CARD_DIR}/REMOTE.SH"].decode()
     assert "solo ;;" in remote and "SOLO.LIB" in remote
+    assert "for s in SMOKE SESSION SESSION2;" in remote   # the first armed one runs
     for text in (remote, rc.solo_lib(), rc.solo_script("T", [("cmd", "Af_Led_On", 300)]).decode()):
         r = subprocess.run(["sh", "-n"], input=text, capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
