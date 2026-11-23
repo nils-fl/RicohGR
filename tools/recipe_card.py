@@ -47,6 +47,78 @@ MAX_LINES = 8          # per relay batch, as the AF relay
 PAUSE_MS = 300         # after each line
 
 
+# ---- solo runs: the camera works through a script by itself -------------------------
+# An arm file NAME.ON next to NAME.SH (in SCRIPT/RECIPE) makes REMOTE.SH run NAME.SH once at
+# power-on, before the relay loop starts: it deletes NAME.ON, copies NAME.SH to RAM and starts it
+# in the background. Only the first armed name in SOLO_ARMS runs per power-on. The script feeds
+# the RTOS through the pull relay like the shell CGI (one batch at a time, the next after the
+# ack), but with any engineering-shell line: it comes from the card, not from Wi-Fi. Its log
+# lines go to RECIPE.LOG ("solo ..."), written by PULL.SH as every other log line.
+SOLO_ARMS = ("SMOKE", "SESSION")
+
+
+def solo_lib() -> str:
+    """Shell functions for solo scripts, kept in RAM: log, b (one relay batch from stdin)."""
+    return (
+        f"w={WWW}\n"
+        "log() { read t _ </proc/uptime; echo \"solo $* $t\" >>$w/log.pending; }\n"
+        "no() { log \"stop: $*\"; exit 1; }\n"
+        "nap() { sleep 0.2 2>/dev/null || sleep 1; }\n"
+        "b() {\n"
+        " k=0; while [ -e $w/relay.next ]; do nap; k=$((k + 1)); [ $k -lt 600 ] || no relay.next not fetched; done\n"
+        " q=$(cat $w/relay.seq 2>/dev/null); q=$((${q:-0} + 1))\n"
+        " o=$w/solo.tmp; echo \"rseq = $q\" >$o; echo \"if rseq = rdone goto rskip$q\" >>$o\n"
+        " cat >>$o\n"
+        " echo 'rdone = rseq' >>$o\n"
+        f" echo \"sendln 'lcmd sh {WWW}/RACK.SH $q'\" >>$o; echo \":rskip$q\" >>$o\n"
+        + "".join(" " + l + "\n" for l in RELAY_PAD_SH.strip().split("\n")) +
+        " echo $q >$w/relay.seq; mv $o $w/relay.next\n"
+        " k=0; while :; do a=; [ -f $w/relay.ack ] && read a _ <$w/relay.ack; [ \"$a\" = $q ] && break\n"
+        "  nap; k=$((k + 1)); [ $k -lt 1200 ] || no batch $q not acknowledged; done\n"
+        "}\n")
+
+
+def solo_frame_bytes() -> int:
+    q = 99999
+    return (len(f"rseq = {q}\n") + len(f"if rseq = rdone goto rskip{q}\n") + len("rdone = rseq\n")
+            + len(f"sendln 'lcmd sh {WWW}/RACK.SH {q}'\n") + len(f":rskip{q}\n"))
+
+
+def solo_script(name: str, steps) -> bytes:
+    """NAME.SH for a solo run. steps: ("log", text) or ("cmd", engineering-shell line, pause ms).
+    Commands between two log steps are packed into as few relay batches as fit one sector."""
+    budget = RELAY_SIZE - 24 - solo_frame_bytes()
+    out = [f"# solo run {name}: generated, see recipe_card.py solo_script\n", f". {WWW}/SOLO.LIB\n",
+           f"log start {name}\n"]
+    cur = []
+
+    def flush():
+        if cur:
+            out.append("b <<'END_B'\n" + "".join(cur) + "END_B\n")
+            cur.clear()
+
+    for st in steps:
+        if st[0] == "log":
+            text = st[1]
+            if any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ._+-,=" for c in text):
+                raise ValueError(f"log text with unsafe characters: {text!r}")
+            flush()
+            out.append(f"log {text}\n")
+            continue
+        _, line, pause = st
+        if "'" in line or "\n" in line:
+            raise ValueError(f"bad command: {line!r}")
+        ttl = f"sendln '{line}'\nmpause {int(pause)}\n"
+        if len(ttl) > budget:
+            raise ValueError(f"command too long for one relay batch: {line}")
+        if sum(map(len, cur)) + len(ttl) > budget:
+            flush()
+        cur.append(ttl)
+    flush()
+    out.append(f"log done {name}\n")
+    return "".join(out).encode("ascii")
+
+
 # ---- card --------------------------------------------------------------------------
 
 def startup_ttl() -> bytes:
@@ -109,6 +181,16 @@ def card_files() -> dict:
     here = "".join(f"cat >{WWW}/cgi-bin/{k} <<'END_{k.upper()}'\n{v}END_{k.upper()}\n" for k, v in cgi.items())
     here += f"cat >{WWW}/RACK.SH <<'END_RACK'\n{rack_sh}END_RACK\n"
     here += f"cat >{WWW}/PULL.SH <<'END_PULL'\n{pull_sh_text}END_PULL\n"
+    here += f"cat >{WWW}/SOLO.LIB <<'END_SOLO'\n{solo_lib()}END_SOLO\n"
+    # At boot the relay loop has not started, so this is the one time REMOTE.SH may touch the card.
+    solo = ("solo() {\n"
+            f"for s in {' '.join(SOLO_ARMS)}; do\n"
+            " [ -f $d/$s.ON ] && [ -f $d/$s.SH ] || continue\n"
+            f" rm -f $d/$s.ON; cat $d/$s.SH >{WWW}/solo.sh; echo \"$u solo $s armed\" >>$d/RECIPE.LOG; sync\n"
+            f" sh {WWW}/solo.sh </dev/null >/dev/null 2>>{WWW}/err.log &\n"
+            " return\n"
+            "done\n"
+            "}\n")
     remote = (
         f"d={D}\n"
         "exec 2>>$d/ERR.LOG\n"
@@ -122,8 +204,9 @@ def card_files() -> dict:
         f"busybox chmod 755 {WWW}/cgi-bin/*\n"
         f"echo 'GR recipe endpoint: /cgi-bin/uptime status log shell' >{WWW}/index.html\n"
         "}\n"
+        + solo +
         "case $1 in\n"
-        f"start) rm -f $d/HTTPD.DEAD; setup; busybox httpd -p {REMOTE_PORT} -h {WWW}; echo \"$u start $?\" >>$d/RECIPE.LOG ;;\n"
+        f"start) rm -f $d/HTTPD.DEAD; setup; busybox httpd -p {REMOTE_PORT} -h {WWW}; echo \"$u start $?\" >>$d/RECIPE.LOG; solo ;;\n"
         f"check) if netstat -ltn | grep -q ':{REMOTE_PORT} '; then echo \"$u up\" >>$d/RECIPE.LOG; "
         "else echo dead >$d/HTTPD.DEAD; echo \"$u dead\" >>$d/RECIPE.LOG; fi ;;\n"
         f"fg) echo \"$u fg\" >>$d/RECIPE.LOG; sync; busybox httpd -f -p {REMOTE_PORT} -h {WWW} ;;\n"
