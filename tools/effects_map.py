@@ -18,6 +18,8 @@ Gates that keep grain off the colour controls:
   RAW development: capability table 0x53b5a750 (13 rows x 17 slots), column 15, which the setter
   checks; and the row lists 0x53b3476c of RawDevelopmentImageControlDetailSetController, which
   decide the rows the screen shows (grain, row 15, only in the monotone lists);
+  both: ImageTuning 0x536db7dc writes the grain byte back as 0 for every colour tone, so a
+  stored grain value never reaches the filter;
   shooting: ImageControlModel::SetParticle 0x532c1784 stores only for the four monotone controls
   and Negative Film, and the still planner 0x535131c0 runs the digital-filter stage for the colour
   controls only when shading or clarity is set.
@@ -60,6 +62,21 @@ GRAIN_ROW_CONTROLS = (0, 1, 6, 7, 8, 9, 11)  # every colour control but HDR Tone
 # before the card's patch, so no list may grow beyond that.
 ROW_MAX = 11
 
+# ---- ImageTuning: per-tone copy of the parameters (shared code) ------------------------------
+# 0x536db7dc switches on the image tone +0x77c; each branch fills a tuning block and leaves
+# shading, clarity, grain and HDR strength in sl, sb, r6, r2 for the shared tail 0x536db9c0, which
+# stores them back into the property. Monotone and Negative Film load r6 from +0x795; the colour
+# branches set it from a register holding 0. The patch gives them Negative Film's load.
+TUNING = 0x536DB7DC
+TUNING_KEEP_GRAIN = 0xE5D36795  # ldrb r6, [r3, #0x795], the word at 0x536dc0b8
+TUNING_SITES = (  # (address, stock word, image tones of the branch)
+    (0x536DB9A8, 0xE1A06001, "0x0c, 0x11"),  # mov r6, r1 (r1 = 0)
+    (0x536DBB48, 0xE1A06001, "0x0b"),        # mov r6, r1
+    (0x536DBDAC, 0xE1A06005, "0x12"),        # mov r6, r5 (r5 = 0)
+    (0x536DBE88, 0xE1A06001, "0x13"),        # mov r6, r1
+    (0x536DC000, 0xE1A06005, "0x15"),        # mov r6, r5
+)
+
 # ---- grain strength (shared code: RAW development and shooting) --------------------------------
 # 0x5367ad3c: r5 = level from DigitalFilterConfig +4 (1 High, 2 Mid, 3 Low; the settings codes)
 GRAIN_SCALE_SITES = {  # level -> (address, stock word, condition, stock scale)
@@ -101,6 +118,14 @@ FACTS = [
     (0x531902a0, "cmp r3, #0x11"),                    # ... one case per row id 0-17
     (0x5318e1e4, "add r0, r3, #0x120"),               # longest list over the 3 x 12 entries
     (0x53288488, "ldrb r3, [r3, #7]"),                # grain row setter: capability check
+    (0x536db7f8, "ldrb r2, [r3, #0x77c]"),            # ImageTuning switches on the image tone
+    (0x536dc0b8, "ldrb r6, [r3, #0x795]"),            # ... Negative Film keeps the grain
+    (0x536db9c8, "strb r6, [r3, #0x795]"),            # ... the tail writes it back
+    (0x536db948, "mov r1, #0"),                       # ... the 0x0c/0x11 branch writes 0
+    (0x536dbae8, "mov r1, #0"),                       # ... 0x0b
+    (0x536dbd4c, "mov r5, #0"),                       # ... 0x12
+    (0x536dbe5c, "mov r1, #0"),                       # ... 0x13
+    (0x536dbfa0, "mov r5, #0"),                       # ... 0x15
 ]
 
 
@@ -175,6 +200,10 @@ def row_sites(controls=GRAIN_ROW_CONTROLS, row=SLOT_GRAIN, max_rows=ROW_MAX):
     return [(wa, word(wa), new) for wa, new in sorted(words.items())]
 
 
+def tuning_sites():
+    return [(a, stock, TUNING_KEEP_GRAIN) for a, stock, _ in TUNING_SITES]
+
+
 def grain_scale_sites(low=0x40, mid=0x80, high=0x100):
     out = []
     for name, value in (("low", low), ("mid", mid), ("high", high)):
@@ -219,6 +248,11 @@ def check():
             bad.append(f"row list {i}: at 0x{p:08x}, {n} rows")
         if any(p + n <= q < (p + n + 3) & ~3 for q in ptrs) or any(ra.d[ra.fo(p) + n:ra.fo((p + n + 3) & ~3)]):
             bad.append(f"row list {i}: the bytes after it are not free padding")
+    for a, stock, _ in TUNING_SITES:
+        if word(a) != stock:
+            bad.append(f"tuning 0x{a:08x}: 0x{word(a):08x}, expected 0x{stock:08x}")
+    if word(0x536DC0B8) != TUNING_KEEP_GRAIN:
+        bad.append("tuning: Negative Film's grain load differs")
     up, down = (struct.unpack_from("<256h", ra.d, ra.fo(GRAIN_CURVES[k])) for k in ("up", "down"))
     if not (max(v - i for i, v in enumerate(up)) == 33 and min(v - i for i, v in enumerate(down)) == -33):
         bad.append("grain curves differ from the 1.60 values (±33 at most)")
@@ -241,7 +275,7 @@ def main():
     for c in range(ROW_CONTROLS):
         print(f"  {c:2d} {ROW_CONTROL_NAMES[c]:15s} {row_list(c)}")
     if args.sites:
-        groups = [("A  grain on colour controls, RAW development (data)", cap_sites() + row_sites()),
+        groups = [("A  grain on colour controls, RAW development (data)", cap_sites() + row_sites() + tuning_sites() + planner_sites()),
                   ("B  grain scale example: Low 0x100, Mid 0x200, High 0x300", grain_scale_sites(0x100, 0x200, 0x300)),
                   ("C1 planner: grain triggers the filter stage for colour controls", planner_sites())]
         for title, sites in groups:

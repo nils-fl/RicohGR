@@ -377,6 +377,53 @@ is set (§3), so the grain value is stored but never applied. Check
 without a patch: develop again with grain High and clarity +1. If grain
 then shows, the planner is the gate, and C1 (§4) lifts it.</p>
 
+<h3 id="a-tuning">Third gate: ImageTuning writes grain back as 0 (Read)</h3>
+<p>Two more developments of R0007217 as Positive Film with Clarity +1, one
+with Grain High (R0007229) and one with Grain Off (R0007230), are pixel
+for pixel the same. So the planner (§3) is not the only gate. Everything
+from the screen to the filter passes grain for any control:</p>
+<ul>
+<li>the row setter <code>0x5328843c</code> and the dispatcher
+<code>0x53288390</code> check the capability table (arm A);</li>
+<li>the property check <code>0x535542cc</code> rejects grain only when
+<code>+0x6c0</code> is 2, whatever the control;</li>
+<li><code>SetEffectParameter</code> and the effect routine
+<code>0x53680dbc</code> apply any level from 1 to 3.</li>
+</ul>
+<p>The gate is <code>ImageTuning.cpp</code> <code>0x536db7dc</code>. It
+switches on the image tone <code>+0x77c</code>, fills a tuning block per
+tone, and its shared tail <code>0x536db9c0</code> stores shading,
+clarity, grain and HDR strength back into the property. The monotone
+and Negative Film branches load grain from <code>+0x795</code>
+(<code>0x536dc0b8</code>). The colour branches (tones 0x0b, 0x0c/0x11,
+0x12, 0x13, 0x15) hand the tail a register they set to 0, so grain is
+erased before the filter reads it. Arm A now also replaces those five
+<code>mov r6, rX</code> with Negative Film's
+<code>ldrb r6, [r3, #0x795]</code>. In every branch r3 still holds the
+property there, and r6 is used only by the tail.</p>
+<p>ImageTuning also runs when shooting. While A is in RAM, a colour shot
+with shading or clarity set may therefore keep a grain byte left over
+from an earlier monotone or Negative Film setting (Inferred, not
+tested).</p>
+
+<h3 id="a-works">Grain on Positive Film, 2026-11-25</h3>
+<p>With the 37 words in RAM, R0007217 developed as Positive Film with
+Grain High (Read from the JPEGs, centre crop):</p>
+<table>
+<thead><tr><th>Development</th><th>Grain measure</th><th>Flat-area noise</th></tr></thead>
+<tbody>
+<tr><td>Clarity 0 (R0007231, R0007232: identical)</td><td>7.4</td><td>4.1</td></tr>
+<tr><td>Clarity +1 (R0007233)</td><td>14.4</td><td>8.2</td></tr>
+<tr><td>Negative Film shot, stock High (R0007222)</td><td>14.2</td><td>8.2</td></tr>
+</tbody>
+</table>
+<p>So the ImageTuning patch works, and the grain matches Negative Film's
+stock High. Without clarity there is no grain: RAW development goes
+through the still planner too, which for colour tones runs the filter
+stage only when shading or clarity is off neutral (raw value 4). Arm A
+therefore now also carries C1, the three planner branches
+(40 words in all).</p>
+
 <h2 id="open">6. Open, to settle on the camera</h2>
 <ol>
 <li>Arm A on the RAM card (§5a): does the RAW-development screen show a

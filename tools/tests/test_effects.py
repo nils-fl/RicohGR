@@ -23,7 +23,7 @@ def text(a, w):
 
 
 def all_sites():
-    return em.cap_sites() + em.row_sites() + em.grain_scale_sites(0x100, 0x200, 0x300) + em.planner_sites()
+    return em.cap_sites() + em.row_sites() + em.tuning_sites() + em.grain_scale_sites(0x100, 0x200, 0x300) + em.planner_sites()
 
 
 def test_map_matches_the_official_image():
@@ -78,6 +78,15 @@ def test_row_sites_write_only_padding_and_counts():
         else:
             diff = [k for k in range(4) if (old >> 8 * k) & 0xFF != (new >> 8 * k) & 0xFF]
             assert len(diff) == 1 and (old >> 8 * diff[0]) & 0xFF == 0 and (new >> 8 * diff[0]) & 0xFF == em.SLOT_GRAIN
+
+
+def test_tuning_words_load_the_grain_byte_like_negative_film():
+    sites = em.tuning_sites()
+    assert len(sites) == 5
+    for a, old, new in sites:
+        assert text(a, old).startswith("mov r6, r")
+        assert text(a, new) == "ldrb r6, [r3, #0x795]" == em.insn_text(0x536DC0B8)
+        assert em.TUNING < a < 0x536DB9C0 or 0x536DBAA4 <= a < 0x536DC024
 
 
 def test_grain_scale_words():

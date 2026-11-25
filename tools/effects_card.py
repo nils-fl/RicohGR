@@ -10,7 +10,11 @@ of every arm whose .ON file is on the card, through /dev/mem, and logs the resul
 
   A  grain on the colour controls but HDR Tone in RAW development: 6 data words of the
      capability table 0x53b5a750 (the setter's check) and 26 of the row lists 0x53b3476c
-     (the Grain row the screen shows; Negative Film gets it too)
+     (the Grain row the screen shows; Negative Film gets it too), and 5 code words in
+     ImageTuning 0x536db7dc that stop the colour tones writing grain back as 0, and 3 in the
+     still planner 0x535131c0 so that grain alone runs the filter stage for them (C1). Both
+     are shared with shooting: with A in RAM a colour shot may pick up the grain byte left
+     from an earlier monotone or Negative Film setting
   B  grain strength: scales for Low, Mid and High (stock 0x40, 0x80, 0x100; default here
      0x100, 0x200, 0x300). Shared code: it also changes grain in shots taken with Monotone,
      the other monotone controls or Negative Film, and in RAW development.
@@ -42,7 +46,7 @@ STOCK_GRAIN = (0x40, 0x80, 0x100)
 
 
 def arm_sites(grain=DEFAULT_GRAIN):
-    return {"A": em.cap_sites() + em.row_sites(), "B": em.grain_scale_sites(*grain)}
+    return {"A": em.cap_sites() + em.row_sites() + em.tuning_sites() + em.planner_sites(), "B": em.grain_scale_sites(*grain)}
 
 
 def apply_sh(arms):
