@@ -54,3 +54,20 @@ def test_script_parses(built):
     _, script, _ = built
     r = subprocess.run(["sh", "-n"], input=script, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_leak_session_loads_a_after_the_baseline_and_restores_it():
+    files, steps, plan = es.card_files(user_recipe=None, test="leak")
+    script = files[f"{rc.CARD_DIR}/SESSION.SH"].decode()
+    order = re.findall(r"^(log shot \d+ \w+|sleep .*BIN(?: restore)?;)", script, re.M)
+    marks = [o.split("/")[-1] for o in order if "BIN" in o]
+    assert marks == ["A.BIN;", "A.BIN restore;"]
+    assert order[0].endswith("stock") and order[1].endswith("A.BIN;")
+    assert order[-1].endswith("A.BIN restore;")
+    colour = [p for p in plan if p["grain"] is None]
+    assert {p["control"] for p in colour} == {"positive_film", "standard", "retro"}
+    assert all("grain" not in p["recipe"] for p in colour)
+    # every colour shot after the baseline follows a grain shot or another colour shot
+    assert [p["control"] for p in plan[2:4]] == ["monotone", "positive_film"] and plan[2]["grain"] == 3
+    r = subprocess.run(["sh", "-n"], input=script, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr

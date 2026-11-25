@@ -2,7 +2,7 @@
 """Automated grain test (arm B, docs/image-effects.html §5a): the camera shoots stock and patched
 grain by itself after power-on, using the recipe card's solo runs (tools/recipe_card.py).
 
-    python3 tools/effects_solo.py card [--out work/effects-solo] [--grain LOW,MID,HIGH]
+    python3 tools/effects_solo.py card [--test grain|leak] [--out work/effects-solo] [--grain LOW,MID,HIGH]
         writes the card root (copy SCRIPT/ onto the card, keep its other files) and plan.json
     python3 tools/effects_solo.py import CARD_DCIM_FOLDER --first R0001234 [--log CARD/SCRIPT/RECIPE/RECIPE.LOG]
         after the run: copies the photos to work/effects-tests/<run>/, checks image control and
@@ -20,6 +20,15 @@ The solo run SESSION (one power-on; SESSION.ON is deleted when it starts):
              development check by hand (Positive Film: is there a Grain row?)
   end:       Custom 1 gets the user's recipe back, Highlight Correction Auto, EV 0, ISO Auto; the
              AF lamp stays on for 10 s
+The leak test (--test leak, same countdown and end): does a colour shot pick up the grain byte
+of an earlier monotone or Negative Film setting once arm A is in RAM? (A also changes the shared
+ImageTuning and planner code; docs/image-effects.html.)
+  stock:     Positive Film (baseline, A not loaded)
+  A on:      A.BIN, then Positive Film; Monotone grain High, then Positive Film and Standard;
+             Negative Film grain High, then Retro; Monotone grain Off, then Positive Film
+  A off:     A.BIN restore (every stock word back)
+A colour shot that measures above the baseline after a grain shot is a leak.
+
 Every shot uses Custom 1, ISO 200, EV 0, Auto WB, every other parameter at 0, Highlight and
 Shadow Correction off. Patched Low (0x100) is the stock High scale, so those two shots should
 measure the same: a check on the measurement itself.
@@ -53,6 +62,7 @@ USER_RECIPE = (ROOT.parent / "GRLab" / "RECIPES.TXT", "Nils' every day")
 FX = "SCRIPT/RECIPE/FX"
 RAM = f"{rc.WWW}/fx"
 CROP = 1024                                    # centre crop for the grain measure, pixels
+LEAK_MARGIN = 3.0                              # grain_std; a leaked High adds about 6, a tone curve 1-2
 
 
 def at_zero(control):
@@ -73,11 +83,28 @@ def at_zero(control):
 GRAIN_NAMES = ("off", "low", "mid", "high")
 
 
-def shots():
-    """[(phase, control, grain index)] in shooting order; phases: stock, B, check."""
+TESTS = ("grain", "leak")
+
+
+def shots(test="grain"):
+    """[(phase, control, grain index or None)] in shooting order. Phases: stock, B, check (grain
+    test); stock, A (leak test). None: a control without a grain setting."""
+    if test == "leak":
+        return [("stock", "positive_film", None), ("A", "positive_film", None),
+                ("A", "monotone", 3), ("A", "positive_film", None), ("A", "standard", None),
+                ("A", "negative_film", 3), ("A", "retro", None),
+                ("A", "monotone", 0), ("A", "positive_film", None)]
     out = [("stock", "monotone", g) for g in (0, 1, 2, 3)] + [("stock", "negative_film", g) for g in (0, 3)]
     out += [("B", "monotone", g) for g in (1, 2, 3)] + [("B", "negative_film", 3)]
     return out + [("check", "monotone", 3)]
+
+
+def shot_body(control, g):
+    return {**at_zero(control), **({} if g is None else {"grain": str(g)}), **SHOOTING}
+
+
+def grain_name(g):
+    return "none" if g is None else GRAIN_NAMES[g]
 
 
 def press():
@@ -110,7 +137,7 @@ def restore_user(user_recipe):
                ("cmd", "Af_Led_On", END_LAMP_MS), ("cmd", "Af_Led_Off", 300)])
 
 
-def steps_for(user_recipe=USER_RECIPE):
+def steps_for(user_recipe=USER_RECIPE, test="grain"):
     # Settings first, with the AF lamp on steadily (they take about 12 s), then the countdown, so
     # the first shutter release follows the last blink at once (a first run was switched off in
     # the silent gap between the countdown and shot 1).
@@ -120,24 +147,24 @@ def steps_for(user_recipe=USER_RECIPE):
              ("cmd", "camctl_set_iso_auto off", 500), ("cmd", f"camctl_set_iso {ISO_APEX}", 500),
              ("cmd", "camctl_set_exp_comp 0.0", EV_PAUSE)]
     sent, plan, phase = {}, [], None
-    ph0, control0, g0 = shots()[0]
-    for ln in recipes.userdata({**at_zero(control0), "grain": str(g0), **SHOOTING}, SLOT)["lines"]:
+    ph0, control0, g0 = shots(test)[0]
+    for ln in recipes.userdata(shot_body(control0, g0), SLOT)["lines"]:
         steps.append(("cmd", ln, UD_PAUSE))
         sent[ln.split()[2]] = ln.split()[3:]
     steps += [("cmd", f"UserData Set StillActiveImageControlSet No{SLOT}", ACTIVATE_PAUSE),
               ("cmd", "Af_Led_Off", 1000), ("log", "countdown")] + blink(COUNTDOWN_S)
-    for n, (ph, control, g) in enumerate(shots(), 1):
+    for n, (ph, control, g) in enumerate(shots(test), 1):
         if ph != phase:
-            if ph == "B":
-                steps.append(patch("B"))
+            if ph in ("A", "B"):
+                steps.append(patch(ph))
             elif ph == "check":
                 steps.append(patch("B", restore=True))
             phase = ph
-        body = {**at_zero(control), "grain": str(g), **SHOOTING}
+        body = shot_body(control, g)
         bad = recipes.check_recipe(f"shot {n}", body)
         if bad:
             raise SystemExit("; ".join(bad))
-        label = f"{ph} {control} grain {GRAIN_NAMES[g]}"
+        label = f"{ph} {control} grain {grain_name(g)}"
         steps.append(("log", f"shot {n} {label}"))
         for ln in recipes.userdata(body, SLOT)["lines"]:
             name, value = ln.split()[2], ln.split()[3:]
@@ -146,8 +173,9 @@ def steps_for(user_recipe=USER_RECIPE):
                 sent[name] = value
         steps.append(("cmd", f"UserData Set StillActiveImageControlSet No{SLOT}", ACTIVATE_PAUSE))
         steps += press()
-        plan.append({"n": n, "phase": ph, "control": control, "grain": g, "label": label, "recipe": body})
-    steps.append(patch("A"))
+        plan.append({"n": n, "test": test, "phase": ph, "control": control, "grain": g, "label": label,
+                     "recipe": body})
+    steps.append(patch("A", restore=True) if test == "leak" else patch("A"))
     return steps + restore_user(user_recipe), plan
 
 
@@ -156,11 +184,11 @@ def seconds(steps):
     return sum(s[2] for s in cmds) / 1000 + 0.6 * (len(cmds) / 5 + sum(s[0] != "cmd" for s in steps))
 
 
-def card_files(grain=ec.DEFAULT_GRAIN, user_recipe=USER_RECIPE):
+def card_files(grain=ec.DEFAULT_GRAIN, user_recipe=USER_RECIPE, test="grain"):
     sites = ec.arm_sites(grain)
     if not sites["B"]:
         raise SystemExit("stock grain scales: nothing to test")
-    steps, plan = steps_for(user_recipe)
+    steps, plan = steps_for(user_recipe, test)
     files = dict(rc.card_files())
     files[f"{rc.CARD_DIR}/SESSION.SH"] = rc.solo_script("SESSION", steps)
     files[f"{rc.CARD_DIR}/SESSION.ON"] = b"armed\n"
@@ -205,17 +233,28 @@ def import_run(a):
                 shutil.copy2(f, out / f.name)
         got = rc.maker_settings(out / jpg.name)
         m, crop = grain_measure(out / jpg.name)
-        crop.save(out / f"{p['n']:02d}-{p['phase']}-{p['control']}-{GRAIN_NAMES[p['grain']]}.png")
+        crop.save(out / f"{p['n']:02d}-{p['phase']}-{p['control']}-{grain_name(p['grain'])}.png")
         flag = "" if got["control"] == p["control"] else f"  MISMATCH control {got['control']}"
         bad += bool(flag)
         rows.append({**p, "file": stem, **m, "slots": maker_slots(out / jpg.name)})
         print(f"{stem}  {p['label']:32s} grain_std {m['grain_std']:7.3f}  mean {m['mean']:6.1f}{flag}")
+    lines = [f"{r['file']}  {r['label']:32s} grain_std {r['grain_std']:7.3f}  mean {r['mean']:6.1f}" for r in rows]
+    if plan[0].get("test") == "leak":
+        base = rows[0]["grain_std"]
+        lines += ["", f"checks (colour shots against the stock Positive Film baseline {base}; "
+                      f"more than {LEAK_MARGIN} above it is a leak):"]
+        prev = rows[0]["label"]
+        for r in rows[1:]:
+            if r["grain"] is None:
+                leak = r["grain_std"] - base > LEAK_MARGIN
+                lines.append(f"  {r['file']} {r['control']:14s} after {prev:30s} {r['grain_std']:7.3f}  "
+                             + ("LEAK" if leak else "clean"))
+            prev = r["label"]
     # which maker-note slot of tag 0x0247 records grain: the one that follows the plan on stock shots
     stock = [r for r in rows if r["phase"] == "stock" and r["control"] == "monotone"]
     cand = [i for i in range(22) if len({r["slots"][i] for r in stock}) == 4]
-    lines = [f"{r['file']}  {r['label']:32s} grain_std {r['grain_std']:7.3f}  mean {r['mean']:6.1f}" for r in rows]
     by = {(r["phase"], r["control"], r["grain"]): r["grain_std"] for r in rows}
-    lines += ["", "checks:",
+    lines += [] if plan[0].get("test") == "leak" else ["", "checks:",
               f"  patched Low vs stock High (same scale 0x100): {by.get(('B', 'monotone', 1))} vs {by.get(('stock', 'monotone', 3))}",
               f"  restore: check High vs stock High: {by.get(('check', 'monotone', 3))} vs {by.get(('stock', 'monotone', 3))}",
               f"  maker-note 0x0247 slot(s) that follow the grain setting: {cand}"]
@@ -233,6 +272,7 @@ def main():
     c = sub.add_parser("card")
     c.add_argument("--out", type=Path, default=ROOT / "work" / "effects-solo")
     c.add_argument("--grain", type=ec.parse_grain, default=ec.DEFAULT_GRAIN)
+    c.add_argument("--test", choices=TESTS, default="grain")
     i = sub.add_parser("import")
     i.add_argument("dcim", type=Path)
     i.add_argument("--first", required=True, help="file stem of the run's first photo, e.g. R0007001")
@@ -245,7 +285,7 @@ def main():
     bad = ec.em.check()
     if bad:
         sys.exit("effects_map.py does not match this image:\n  " + "\n  ".join(bad))
-    files, steps, plan = card_files(a.grain)
+    files, steps, plan = card_files(a.grain, test=a.test)
     if a.out.exists():
         shutil.rmtree(a.out)
     for rel, data in files.items():
@@ -256,7 +296,7 @@ def main():
     r = subprocess.run(["sh", "-n", str(a.out / rc.CARD_DIR / "SESSION.SH")], capture_output=True, text=True)
     if r.returncode:
         sys.exit(r.stderr)
-    print(f"SESSION: {len(plan)} shots, about {seconds(steps) / 60:.1f} min; grain scales "
+    print(f"SESSION ({a.test}): {len(plan)} shots, about {seconds(steps) / 60:.1f} min; grain scales "
           + ", ".join(f"{v:#x}" for v in a.grain))
     for p in plan:
         print(f"  {p['n']:2d}  {p['label']}")
