@@ -171,7 +171,7 @@ MENU while switching on, confirm the update, switch off when it says
 completed. Remove the file from the card afterwards: MENU at power-on also
 starts the update. **To go back**, flash the official 1.60 file the same way.
 
-### 6. Grain on the colour controls and a stronger grain (RAM test, not yet run on a camera)
+### 6. Grain on the colour controls and a stronger grain (RAM test, tested 2026-11-25)
 
 ```sh
 python3 tools/effects_card.py                       # writes work/effects-card/
@@ -181,8 +181,9 @@ python3 tools/effects_card.py --grain 0x80,0x180,0x280   # other Low/Mid/High sc
 Copy `work/effects-card/*` to the root of a card on which SD scripts are
 already on (setup 1), and switch on. The card writes nothing to firmware.
 It writes two changes into RAM:
-- **A**: a Grain row in RAW development for Standard, Vivid, Positive
-  Film, Negative Film, Bleach Bypass, Retro and Cross Process.
+- **A**: a working Grain row in RAW development for Standard, Vivid,
+  Positive Film, Negative Film, Bleach Bypass, Retro and Cross Process
+  (40 words: capability table, row lists, ImageTuning, still planner).
 - **B**: stronger grain levels. By default Low, Mid and High become 1×,
   2× and 3× the stock High. This also applies to shots taken with the
   monotone controls and Negative Film.
@@ -195,8 +196,29 @@ build flashed: no word is shared with it, and no bench is used.
 Automated instead: `python3 tools/effects_solo.py card` writes a recipe card whose
 solo run shoots stock and patched grain by itself after one power-on (11 shots,
 about 3 minutes), and `effects_solo.py import` measures the grain afterwards.
+`effects_solo.py card --test leak` checks that colour shots do not pick up
+grain from an earlier monotone shot while A is loaded (they did not).
 Findings, test order and what is still open:
 [`docs/image-effects.html`](docs/image-effects.html).
+
+### 7. The AF + grain firmware build (flash at your own risk; built, not flashed)
+
+```sh
+python3 tools/effects_firmware.py                    # writes work/firmware-af-effects/FWDC243B.BIN
+python3 tools/effects_firmware.py --grain 0x80,0x180,0x280   # other Low/Mid/High scales
+```
+
+The 19 AF words of setup 5 plus A and B of setup 6 (62 words; B at 1×, 2×
+and 3× the stock High). `tools/gr_repack.py` runs `tools/patch_guard.py`
+with `--allow af --allow effects`. The effects list has no source files:
+it accepts only the exact words tested in RAM (`effects_map.effect_word_kind`).
+Their data must be used only by RAW-development files, and the row lists
+are checked exactly (`effects_map.row_list_proof`). Eight of the words are
+code in shared image-processing functions (ImageTuning, the still planner,
+the grain routine) whose callers cannot all be seen, so the guard vouches
+for them by test, not by unit. The protected ranges stay locked. Flash as
+in setup 5. To undo, flash `work/firmware-af/FWDC243B.BIN` or the official
+file. Details: [`docs/image-effects.html#flash`](docs/image-effects.html#flash).
 
 ## Tools
 
@@ -222,7 +244,8 @@ Findings, test order and what is still open:
 | `af_timing_tally.py` | Summarises AF timings measured from high-speed video |
 | `effects_map.py` | Read-only map of the grain path and the candidate effect words, checked against the 1.60 image |
 | `effects_card.py` | RAM test card for the grain changes A and B (setup 6) |
-| `effects_solo.py` | Automated grain session (stock vs arm B) as a recipe-card solo run, and its `import` with grain measurement |
+| `effects_solo.py` | Automated grain sessions (stock vs arm B; `--test leak`) as recipe-card solo runs, and their `import` with grain measurement |
+| `effects_firmware.py` | AF + grain update file (setup 7), guarded by `patch_guard.py --allow af --allow effects` |
 | `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |
 | `recipe_card.py` | The recipe card of setup 4 and its Mac commands |
 

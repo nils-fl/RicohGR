@@ -217,7 +217,7 @@ def main() -> None:
     parser.add_argument("original", type=Path, help="official update file, e.g. firmware/fwdc243b-v160.bin")
     parser.add_argument("payload", type=Path, help="decoded payload to pack (same length as the original's)")
     parser.add_argument("--out", type=Path, required=True, help="where to write the rebuilt container")
-    parser.add_argument("--allow", action="append", choices=["raw", "af"],
+    parser.add_argument("--allow", action="append", choices=["raw", "af", "effects"],
                         help="patch_guard allow-list (repeatable; default raw)")
     args = parser.parse_args()
 

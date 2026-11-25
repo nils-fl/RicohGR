@@ -450,6 +450,40 @@ every capture (Inferred from the result; <code>BEStillCommand</code>
 <code>0x53513f08</code> store it). All patch steps exited 0, and
 <code>A.BIN restore</code> put the stock words back.</p>
 
+<h2 id="flash">5b. Flash build: AF + A + B</h2>
+<p><code>python3 tools/effects_firmware.py</code> writes
+<code>work/firmware-af-effects/FWDC243B.BIN</code>. It contains the 19
+words of the flashed AF build, A (40 words) and B at
+<code>0x100 / 0x200 / 0x300</code>, 62 words in all. The decoded payload
+differs from the official one in exactly these words plus the checksum
+compensation word. Every AF word equals the flashed AF build.</p>
+<p>How the guard checks it (<code>patch_guard.py --allow af --allow
+effects</code>):</p>
+<ul>
+<li><strong>AF words:</strong> the AF rules as before.</li>
+<li><strong>Effects words:</strong> only the exact (address, stock, new)
+words tested in RAM (<code>effects_map.effect_word_kind</code>). At the
+three grain-scale sites, any <code>mov r6, #scale</code> with the stock
+condition and a scale of at most <code>0x400</code>.</li>
+<li><strong>Capability table:</strong> used only by
+<code>RawDevelopmentModel</code>.</li>
+<li><strong>Row lists:</strong> proven exactly
+(<code>row_list_proof</code>). The table is referenced only by
+<code>RawDevelopmentImageControlDetailSetController</code>, and each list
+is pointed to only from the table. The shooting menu's label table
+<code>0x53b34bd8</code> (row id &le; 17) ends before the first list.
+The guard's usual 0x100-byte look-back wrongly flagged it and two
+white-balance tables.</li>
+<li><strong>Code:</strong> ImageTuning, the still planner and the grain
+routine are shared image-processing functions, and ImageTuning is reached
+only through a function pointer. The unit rule therefore cannot vouch for
+them, and the guard relies on the RAM tests instead. That these functions
+do not run while the updater starts is Inferred, not proven.</li>
+<li><strong>Protected ranges:</strong> unchanged and checked.</li>
+</ul>
+<p>Built, not flashed. Undo: flash <code>work/firmware-af/FWDC243B.BIN</code>
+(AF only) or the official 1.60 file.</p>
+
 <h2 id="open">6. Open, to settle on the camera</h2>
 <ol>
 <li>Arm A on the RAM card (§5a): does the RAW-development screen show a

@@ -217,6 +217,53 @@ def planner_sites():
     return [(a, stock, enc_b(stock >> 28, a, PLANNER_WITH_GRAIN)) for a, stock, _ in PLANNER_SITES]
 
 
+DATA_KINDS = ("capability table", "row list")
+
+
+def row_list_proof(xrefs):
+    """Who can read the row lists, exactly (tools/patch_guard.py uses this instead of its
+    0x100-byte look-back, which also catches the neighbouring label tables). Returns (addresses
+    of the instructions that build a pointer into the table, problems). The lists are reached
+    only through the table: each list address appears as a pointer only inside the table, and
+    no instruction builds a pointer into a list or its padding. The nearest other reader, the
+    shooting menu's label table 0x53b34bd8 (base + row id * 4, row id <= 17), ends at 0x53b34c20."""
+    t0, t1 = ROW_TABLE, ROW_TABLE + 8 * ROW_VARIANTS * ROW_CONTROLS
+    refs = sorted(r for k, rs in xrefs.items() if t0 <= k < t1 for r in rs)
+    problems = []
+    for p in sorted({row_entry(i)[1] for i in range(ROW_VARIANTS * ROW_CONTROLS)}):
+        n = max(row_entry(i)[2] for i in range(ROW_VARIANTS * ROW_CONTROLS) if row_entry(i)[1] == p)
+        end = (p + n + 3) & ~3
+        if any(p <= k < end for k in xrefs):
+            problems.append(f"an instruction points into the row list 0x{p:08x}")
+        if any(not t0 <= q < t1 for q in ra.find_ptr(p)):
+            problems.append(f"the row list 0x{p:08x} is also pointed to from outside the table")
+    if not refs:
+        problems.append("no reference to the row table found")
+    return refs, problems
+
+
+def decode_mov_imm(w):
+    rot, imm = 2 * ((w >> 8) & 0xF), w & 0xFF
+    return ((imm >> rot) | (imm << (32 - rot))) & 0xFFFFFFFF if rot else imm
+
+
+def effect_word_kind(a, old, new):
+    """The kind of tested change the word (address, stock, new) is, or None. tools/patch_guard.py
+    --allow effects accepts exactly these: the A words as tested in RAM (capability table, row
+    lists, ImageTuning, planner), and at the three grain-scale sites any mov r6, #scale with the
+    stock condition and 0 < scale <= 0x400 (B; 0x100/0x200/0x300 tested)."""
+    for kind, sites in (("capability table", cap_sites()), ("row list", row_sites()),
+                        ("ImageTuning", tuning_sites()), ("planner", planner_sites())):
+        for sa, so, sn in sites:
+            if sa == a:
+                return kind if (old, new) == (so, sn) else None
+    for sa, stock, cond, _ in GRAIN_SCALE_SITES.values():
+        if sa == a and old == stock and new >> 28 == cond and new & 0x0FFFF000 == 0x03A06000 \
+                and 0 < decode_mov_imm(new) <= 0x400:
+            return "grain scale"
+    return None
+
+
 def check():
     """Every fact and stock word; returns a list of problems (empty on the official 1.60 image)."""
     bad = []

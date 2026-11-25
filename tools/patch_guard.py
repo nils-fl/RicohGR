@@ -60,7 +60,14 @@ AF_SOURCES = [
 # compiled back to back; for them the allowed range is the whole span from the first function of
 # the first file to the first function of the file that follows the last one (OtherafFactory).
 AF_SPAN_END = b"src/OtherafFactory.cpp"
-ALLOW_SETS = {"raw": ALLOWED_SOURCES, "af": AF_SOURCES}
+# Opt-in third allow-list (--allow effects): no source files, only the exact words of the grain
+# unlock, tools/effects_map.py effect_word_kind(). Their data (capability table, row lists) must
+# be used only by the RAW-development files above. Their code lies in shared image-processing
+# functions (ImageTuning, the still planner, the grain routine in AffineControl) whose callers
+# cannot all be seen (ImageTuning is reached through a function pointer), so the unit rule of
+# the other lists cannot vouch for them: each word was instead tested in RAM on the camera
+# (docs/image-effects.html). The protected ranges apply as always.
+ALLOW_SETS = {"raw": ALLOWED_SOURCES, "af": AF_SOURCES, "effects": []}
 
 MOV_IP_SP = 0xE1A0C00D
 
@@ -181,7 +188,7 @@ def data_users(xrefs, starts, vlo, vhi, lookback=0x100):
 
 
 def guard(old: bytes, new: bytes, exempt=(), allow=("raw",)):
-    """Return (ok, report lines). allow names the allow-lists: "raw" (default), "af"."""
+    """Return (ok, report lines). allow names the allow-lists: "raw" (default), "af", "effects"."""
     if len(old) != len(new):
         return False, ["payload length changed"]
     xrefs = ra.build_xrefs()
@@ -192,6 +199,20 @@ def guard(old: bytes, new: bytes, exempt=(), allow=("raw",)):
         return next((name for lo, hi, name in allowed if lo <= addr < hi), None)
 
     lines, ok = [f"allowed: {len(allowed)} source files ({', '.join(allow)})"], True
+    raw_ranges = allowed_ranges(xrefs, starts, ALLOWED_SOURCES) if "effects" in allow else []
+
+    def effect_kinds(vlo, vhi):
+        """Kinds of the whole words covering vlo..vhi if every one is a tested effects word."""
+        import effects_map
+        kinds = []
+        for a in range(vlo & ~3, vhi, 4):
+            o = a - ra.BASE + RTOS_BLOCK_DATA
+            k = effects_map.effect_word_kind(a, int.from_bytes(old[o:o + 4], "little"),
+                                             int.from_bytes(new[o:o + 4], "little"))
+            if k is None:
+                return None
+            kinds.append(k)
+        return kinds
     diffs = [r for r in changed_ranges(old, new) if not any(lo <= r[0] and r[1] <= hi for lo, hi in exempt)]
     for lo, hi in diffs:
         if not (RTOS_BLOCK_DATA <= lo and hi <= RTOS_BLOCK_DATA + RTOS_BLOCK_SIZE):
@@ -201,6 +222,32 @@ def guard(old: bytes, new: bytes, exempt=(), allow=("raw",)):
         vlo = ra.va(lo)
         vhi = vlo + (hi - lo)
         reasons = [name for a, b, name in PROTECTED_RANGES if vlo < b and a < vhi]
+        kinds = effect_kinds(vlo, vhi) if "effects" in allow else None
+        if kinds is not None:
+            where = "effects word: " + ", ".join(sorted(set(kinds)))
+            if "row list" in kinds:
+                import effects_map
+                refs, problems = effects_map.row_list_proof(xrefs)
+                reasons += problems
+                outside = sorted({enclosing(starts, r) or r for r in refs
+                                  if not any(lo <= r < hi for lo, hi, _ in raw_ranges)})
+                if outside:
+                    reasons.append("row table also used outside the RAW-development files, e.g. "
+                                   + ", ".join(f"0x{f:08x}" for f in outside[:3]))
+            elif any(k in effects_data_kinds() for k in kinds):
+                users = data_users(xrefs, starts, vlo, vhi)
+                outside = sorted(f for f in users if not any(lo <= f < hi for lo, hi, _ in raw_ranges))
+                if not users:
+                    reasons.append("data with no visible user (cannot prove it is safe)")
+                elif outside:
+                    reasons.append("data also used outside the RAW-development files, e.g. "
+                                   + ", ".join(f"0x{f:08x}" for f in outside[:3]))
+            if reasons:
+                ok = False
+                lines.append(f"REJECT 0x{vlo:08x}-0x{vhi:08x} ({where}): " + "; ".join(reasons))
+            else:
+                lines.append(f"ok     0x{vlo:08x}-0x{vhi:08x} ({where}, tested in RAM)")
+            continue
         if ra.is_code(vlo):
             fn = enclosing(starts, vlo)
             where = f"code in function 0x{fn:08x}"
@@ -231,6 +278,11 @@ def guard(old: bytes, new: bytes, exempt=(), allow=("raw",)):
     if not diffs:
         lines.append("no changes besides the exempt ranges")
     return ok, lines
+
+
+def effects_data_kinds():
+    import effects_map
+    return effects_map.DATA_KINDS
 
 
 def main() -> None:
