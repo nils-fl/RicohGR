@@ -171,6 +171,30 @@ MENU while switching on, confirm the update, switch off when it says
 completed. Remove the file from the card afterwards: MENU at power-on also
 starts the update. **To go back**, flash the official 1.60 file the same way.
 
+### 6. Grain on the colour controls and a stronger grain (RAM test, not yet run on a camera)
+
+```sh
+python3 tools/effects_card.py                       # writes work/effects-card/
+python3 tools/effects_card.py --grain 0x80,0x180,0x280   # other Low/Mid/High scales
+```
+
+Copy `work/effects-card/*` to the root of a card on which SD scripts are
+already on (setup 1), and switch on. The card writes nothing to firmware.
+It writes two changes into RAM:
+- **A**: grain on Standard, Vivid, Positive Film, Bleach Bypass, Retro
+  and Cross Process in RAW development.
+- **B**: stronger grain levels. By default Low, Mid and High become 1×,
+  2× and 3× the stock High. This also applies to shots taken with the
+  monotone controls and Negative Film.
+
+Delete `SCRIPT/EFFECTS/A.ON` or `B.ON` to leave one out. The AF lamp
+flashes twice when the changes are in place and stays on for 3 s when
+they failed (see `SCRIPT/EFFECTS/EFFECTS.LOG`). Power off, or start
+without the card, and the camera is stock again. It is safe with the AF
+build flashed: no word is shared with it, and no bench is used.
+Findings, test order and what is still open:
+[`docs/image-effects.html`](docs/image-effects.html).
+
 ## Tools
 
 | Tool | Purpose |
@@ -193,6 +217,8 @@ starts the update. **To go back**, flash the official 1.60 file the same way.
 | `af_tolerance.py` | Focus tolerance on the flashed camera: AF-S lock, motor offset, photo, sharpness per patch |
 | `af_charts.py` | Writes `docs/af-charts.html` from your logs |
 | `af_timing_tally.py` | Summarises AF timings measured from high-speed video |
+| `effects_map.py` | Read-only map of the grain path and the candidate effect words, checked against the 1.60 image |
+| `effects_card.py` | RAM test card for the grain changes A and B (setup 6) |
 | `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |
 | `recipe_card.py` | The recipe card of setup 4 and its Mac commands |
 
@@ -207,6 +233,7 @@ starts the update. **To go back**, flash the official 1.60 file the same way.
 | [`firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) | Whether a modified firmware is accepted (checksum and version rule, no signature) and what a failure means |
 | [`remote-control.html`](docs/remote-control.html) | What the Wi-Fi API and USB can set |
 | [`recipe-format.html`](docs/recipe-format.html) | The `RECIPES.TXT` format, the firmware's value sets and sending recipes to Custom 1/2 |
+| [`image-effects.html`](docs/image-effects.html) | Grain and the digital-filter stage: where grain is gated per control, grain strength, candidate changes |
 | [`gr-mod-landscape.html`](docs/gr-mod-landscape.html) | Community mods (GRKit, GR Mod, others), built-in AF debug logging, recipes via `UserData Set` |
 | [`gr3x-vs-gr4.html`](docs/gr3x-vs-gr4.html) | GR IIIx vs GR IV firmware: container, platform, AF code at address level |
 
