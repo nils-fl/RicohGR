@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Automated grain test (arm B, docs/image-effects.html §5a): the camera shoots stock and patched
-grain by itself after power-on, using the recipe card's solo runs (tools/recipe_card.py).
+grain by itself after power-on, using the recipe card's solo runs (tools/recipes/recipe_card.py).
 
-    python3 tools/effects_solo.py card [--test grain|leak] [--out work/effects-solo] [--grain LOW,MID,HIGH]
+    python3 tools/effects/effects_solo.py card [--test grain|leak] [--out work/effects-solo] [--grain LOW,MID,HIGH]
         writes the card root (copy SCRIPT/ onto the card, keep its other files) and plan.json
-    python3 tools/effects_solo.py import CARD_DCIM_FOLDER --first R0001234 [--log CARD/SCRIPT/RECIPE/RECIPE.LOG]
+    python3 tools/effects/effects_solo.py import CARD_DCIM_FOLDER --first R0001234 [--log CARD/SCRIPT/RECIPE/RECIPE.LOG]
         after the run: copies the photos to work/effects-tests/<run>/, checks image control and
         EV against the plan, measures the grain of a centre crop and writes crops and report.txt
 
@@ -18,7 +18,7 @@ The solo run SESSION (one power-on; SESSION.ON is deleted when it starts):
   B off:     B.BIN restore (stock words back), Monotone High again (must match the stock High)
   A on:      the capability-table and row-list words (A.BIN) stay in RAM until power-off, for the RAW
              development check by hand (Positive Film: is there a Grain row?)
-  end:       Custom 1 gets the user's recipe back, Highlight Correction Auto, EV 0, ISO Auto; the
+  end:       Custom 1 gets the --restore recipe back if given, Highlight Correction Auto, EV 0, ISO Auto; the
              AF lamp stays on for 10 s
 The leak test (--test leak, same countdown and end): does a colour shot pick up the grain byte
 of an earlier monotone or Negative Film setting once arm A is in RAM? (A also changes the shared
@@ -33,7 +33,7 @@ Every shot uses Custom 1, ISO 200, EV 0, Auto WB, every other parameter at 0, Hi
 Shadow Correction off. Patched Low (0x100) is the stock High scale, so those two shots should
 measure the same: a check on the measurement itself.
 
-The patch writers are the multipatch binaries of tools/effects_card.py: they check the build and
+The patch writers are the multipatch binaries of tools/effects/effects_card.py: they check the build and
 every stock word before writing, and log their exit code ("solo patch B 0" in RECIPE.LOG; 0
 written, 6 already, 3 other build, 5 unexpected word). They live in RAM; a power-off undoes them.
 """
@@ -44,13 +44,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_debug_card as card  # noqa: E402
 import effects_card as ec  # noqa: E402
 import recipe_card as rc  # noqa: E402
 import recipes  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 SLOT = 1
 ISO_APEX = "6"                                 # ISO 200
 UD_PAUSE, ACTIVATE_PAUSE, EV_PAUSE = 300, 300, 500
@@ -58,7 +58,6 @@ HALF_MS, FULL_MS, SAVE_MS = 1500, 300, 3500
 COUNTDOWN_S, END_LAMP_MS = 30, 10000
 SHOOTING = {"wb": "auto", "wb_shift_ab": "0", "wb_shift_gm": "0",
             "highlight_correction": "off", "shadow_correction": "off", "peripheral_correction": "on"}
-USER_RECIPE = (ROOT.parent / "GRLab" / "RECIPES.TXT", "Nils' every day")
 FX = "SCRIPT/RECIPE/FX"
 RAM = f"{rc.WWW}/fx"
 CROP = 1024                                    # centre crop for the grain measure, pixels
@@ -137,7 +136,7 @@ def restore_user(user_recipe):
                ("cmd", "Af_Led_On", END_LAMP_MS), ("cmd", "Af_Led_Off", 300)])
 
 
-def steps_for(user_recipe=USER_RECIPE, test="grain"):
+def steps_for(user_recipe=None, test="grain"):
     # Settings first, with the AF lamp on steadily (they take about 12 s), then the countdown, so
     # the first shutter release follows the last blink at once (a first run was switched off in
     # the silent gap between the countdown and shot 1).
@@ -184,7 +183,7 @@ def seconds(steps):
     return sum(s[2] for s in cmds) / 1000 + 0.6 * (len(cmds) / 5 + sum(s[0] != "cmd" for s in steps))
 
 
-def card_files(grain=ec.DEFAULT_GRAIN, user_recipe=USER_RECIPE, test="grain"):
+def card_files(grain=ec.DEFAULT_GRAIN, user_recipe=None, test="grain"):
     sites = ec.arm_sites(grain)
     if not sites["B"]:
         raise SystemExit("stock grain scales: nothing to test")
@@ -273,6 +272,9 @@ def main():
     c.add_argument("--out", type=Path, default=ROOT / "work" / "effects-solo")
     c.add_argument("--grain", type=ec.parse_grain, default=ec.DEFAULT_GRAIN)
     c.add_argument("--test", choices=TESTS, default="grain")
+    c.add_argument("--restore", nargs=2, metavar=("RECIPES_TXT", "NAME"),
+                   help="put this recipe back into Custom 1 at the end (otherwise Custom 1 keeps the "
+                        "last test settings; Highlight Correction, EV and ISO are reset either way)")
     i = sub.add_parser("import")
     i.add_argument("dcim", type=Path)
     i.add_argument("--first", required=True, help="file stem of the run's first photo, e.g. R0007001")
@@ -285,7 +287,9 @@ def main():
     bad = ec.em.check()
     if bad:
         sys.exit("effects_map.py does not match this image:\n  " + "\n  ".join(bad))
-    files, steps, plan = card_files(a.grain, test=a.test)
+    if a.restore and not Path(a.restore[0]).exists():
+        sys.exit(f"{a.restore[0]} not found")
+    files, steps, plan = card_files(a.grain, user_recipe=a.restore, test=a.test)
     if a.out.exists():
         shutil.rmtree(a.out)
     for rel, data in files.items():

@@ -115,7 +115,7 @@ no <code>FWDC*.BIN</code> on it (MENU at power-on is also the firmware
 update start).</li>
 <li>Charge the battery fully.</li>
 <li>Generate the files on the computer:
-<pre><code>python3 tools/af_debug_card.py            # writes work/af-debug-card/{enable,log,disable}</code></pre>
+<pre><code>python3 tools/af/af_debug_card.py            # writes work/af-debug-card/{enable,log,disable}</code></pre>
 <code>--flags CZ</code> also turns on the phase-AF log. Start with
 <code>C</code> alone: each log needs about 10 MB of free camera memory,
 and with too little the camera skips the log without telling you.</li>
@@ -163,7 +163,7 @@ does) and writes it to <code>SCRIPT/AFDBG/MEM.BIN</code>.
 <code>MEM.ERR</code> holds its exit status (0 done; 1 open, 2 map,
 3 create, 4 write). That region holds the
 AF debug flags, the CSV counter and the log slots.
-<code>python3 tools/af_debug_card.py --read-mem MEM.BIN</code> decodes
+<code>python3 tools/af/af_debug_card.py --read-mem MEM.BIN</code> decodes
 it. It shows whether the command set the C flag, whether a log was
 opened, and how many CSVs were written.</li>
 </ol>
@@ -210,7 +210,7 @@ run (only the live first row of the sample table differs; the camera
 dumps again at an AF start without a new search). <code>MEM.SH</code>'s
 <code>mv</code> failed every time with <code>Input/output error</code>
 (the RTOS has the card mounted as well), so <code>MEMRD.BIN</code> now
-writes <code>MEM.BIN</code> directly. The runs (<code>tools/af_csv.py</code>):</p>
+writes <code>MEM.BIN</code> directly. The runs (<code>tools/af/af_csv.py</code>):</p>
 <table>
 <thead><tr><th>Run</th><th>fps</th><th>Step</th><th>Phase result</th><th>Samples</th><th>Sampling</th><th>Peak at pulse</th><th>Samples after peak</th></tr></thead>
 <tbody>
@@ -257,7 +257,7 @@ stop the search</strong>; a peak in another area alone does not.</p>
 <p>91 CSVs, 20 unique runs (<code>work/af-logs/low-light/</code>). With the
 1 s re-arm the camera also dumps <em>during</em> a search (12 files without a
 search header, sample counts growing to the final dump), so slot 5 runs
-during searches too; <code>tools/af_csv.py</code> leaves those out.</p>
+during searches too; <code>tools/af/af_csv.py</code> leaves those out.</p>
 <table>
 <thead><tr><th></th><th>Bright edge (9)</th><th>Low light (20)</th></tr></thead>
 <tbody>
@@ -554,7 +554,7 @@ that work need more samples. The drop to 29 fps in dim light is necessary,
 not an arbitrary limit, and a higher gain ceiling (same light per sample)
 would not help either. The test is switched off again.</p>
 <h2 id="why-af-needs-light">Why contrast AF needs light (analysis, 2026-10-29)</h2>
-<p>From all logged sweeps (<code>tools/af_light.py</code>; 340 unique sweeps
+<p>From all logged sweeps (<code>tools/af/af_light.py</code>; 340 unique sweeps
 over all sessions).</p>
 <ul>
 <li><strong>The contrast measure has a noise floor.</strong> Its lowest value in
@@ -652,13 +652,13 @@ start, window end, in-focus pulse, reversal count, drive level, drive state,
 area-0 detector counts, far-end state) every 2 ms for 60 s, with a monotonic
 timestamp, appending to <code>TRACE.DAT</code> in chunks. Switch
 <code>TRACE.ON</code>; started in the background by <code>PATCH.SH</code>;
-decoded with <code>tools/af_debug_card.py --read-trace</code>. Checked in the
+decoded with <code>tools/af/af_debug_card.py --read-trace</code>. Checked in the
 emulator over a real snapshot.</p>
 <h3 id="dim-trace">State trace of a dim AF-S session (2026-10-29)</h3>
 <p>The tracer ran with no patch active, in the dim room used before, AF-S,
 10 half-presses: <code>work/af-logs/dim-trace</code>, 20,500 records (41 s).
 All 10 searches ran at 29 fps; the CSVs of the same session match the runs
-one-to-one. Summary: <code>tools/af_debug_card.py --trace-runs TRACE.DAT</code>.</p>
+one-to-one. Summary: <code>tools/af/af_debug_card.py --trace-runs TRACE.DAT</code>.</p>
 <table>
 <tr><th>Kind</th><th>Runs</th><th>Half-press to result</th><th>Area-0 detector</th></tr>
 <tr><td>Clean</td><td>4</td><td>580–630 ms</td><td>4–7 rises, then 3 falls: peak accepted (action 8, then 128)</td></tr>
@@ -948,7 +948,7 @@ from infinity (smoke check 5)</td></tr>
 AF, another code path; only if <code>SW_sws</code> does nothing)</td></tr>
 </tbody>
 </table>
-<p><code>tools/af_debug_card.py --auto</code> writes a card whose script,
+<p><code>tools/af/af_debug_card.py --auto</code> writes a card whose script,
 after the usual boot gate, runs per press: focus mode <code>inf</code>
 (800 ms), back to the test mode (700 ms), <code>ARM.SH</code>, re-arm the CSV,
 half-press for 2.5 s, release, 1.5 s pause. <code>ARM.SH</code> takes the next
@@ -964,12 +964,12 @@ flush press (it writes the last CSV; the summary counts it as "outside any
 press") and the lamp stays on for 10 s. The tracer is switched on and sized
 for the session (3 × 24 presses: about 10 min, <code>TRACE.DAT</code> up to
 123 MB).</p>
-<pre><code>python3 tools/af_debug_card.py --auto-smoke --out work/af-card-smoke
-python3 tools/af_debug_card.py --auto --auto-patch SCALE75 --out work/af-card-auto
+<pre><code>python3 tools/af/af_debug_card.py --auto-smoke --out work/af-card-smoke
+python3 tools/af/af_debug_card.py --auto --auto-patch SCALE75 --out work/af-card-auto
 #   --auto-mode select|zone|pin|autoarea|follow|cont   (default select)
 #   --auto-defocus inf|snap  --blocks 3  --per-block 24  --light-pause-s 30
 #   --hold-ms 2500  --gap-ms 1500  --full-press  --seed 1
-python3 tools/af_debug_card.py --trace-summary TRACE.DAT --auto-log AUTO.LOG</code></pre>
+python3 tools/af/af_debug_card.py --trace-summary TRACE.DAT --auto-log AUTO.LOG</code></pre>
 <p>With <code>--auto-log</code>, the summary gives each AF run the
 <code>AUTO.LOG</code> entry of its press (set at most 4 s before the run
 started, <code>--join-window</code>; trace time is <code>CLOCK_MONOTONIC</code>, the log
@@ -1139,7 +1139,7 @@ every arm, so either the 3-fall rule is not what ends the sweep in this light
 or the trace cannot resolve it. Every variant, SQRTNS included, is safe in
 this light; it does not tell them apart. That needs light about 3× darker.</p>
 <h3 id="remote-nd1">Remote session over Wi-Fi, ND filter on (2026-11-19)</h3>
-<p>First session driven from the Mac (<code>tools/af_remote.py</code>, card
+<p>First session driven from the Mac (<code>tools/af/af_remote.py</code>, card
 <code>--remote</code>, see <a href="remote-control.html#6-camera-side-probe">remote control §6</a>):
 presses through <code>POST /v1/lens/focus</code>, defocus through <code>PUT
 /v1/params/lens focusSetting=inf</code>, arms through the card's endpoint, results
@@ -1183,8 +1183,8 @@ a hint to repeat with fewer arms, not a result. FALLS2 alone saved nothing.</p>
 <p>Why the first sweep in <a href="#remote-nd2">remote-nd2</a> was rejected
 in every arm, traced through the code and tested on the camera with patches
 uploaded over Wi-Fi (no card swap; see the endpoint in
-<code>tools/af_debug_card.py</code> <code>remote_files</code> and
-<code>tools/af_remote.py</code> <code>put</code> / <code>peek</code>).</p>
+<code>tools/af/af_debug_card.py</code> <code>remote_files</code> and
+<code>tools/af/af_remote.py</code> <code>put</code> / <code>peek</code>).</p>
 <ul>
 <li><strong>The threshold has an absolute floor.</strong> A peak counts when its
 rise and fall exceed <code>+0x28</code> + T (T = <code>+0x4c</code> ×
@@ -1249,7 +1249,7 @@ where the floor matters most. Both are the next sessions. AF-C and the
 return sweep after every turn (grade 0) also use the patched floor.</li>
 </ul>
 <h3 id="remote-g0real">A real grade-0 scene without a usable peak (2026-11-19)</h3>
-<p>The live phase meter (<code>tools/af_remote.py meter</code>: a press every
+<p>The live phase meter (<code>tools/af/af_remote.py meter</code>: a press every
 few seconds, reading the phase value <code>+0x14bac</code> and the grade
 during the AF; phase counts as usable from <code>[0x55012e74]</code> = 180)
 found a scene with phase value 0 and grade 0 on every pass: darker light, a weak
@@ -1279,7 +1279,7 @@ near-stop guard before they are safe; the floor patch does not.</li>
 </ul>
 <h3 id="remote-g1dim">Dim scene with a peak, guards, start offset (2026-11-19)</h3>
 <p>Uploaded patches (all emulated 0/6/0/6/5/3 first; words in
-<code>tools/af_debug_card.py</code>): <code>OFFS4</code>/<code>OFFS2</code>
+<code>tools/af/af_debug_card.py</code>): <code>OFFS4</code>/<code>OFFS2</code>
 (the phase-guided pre-move <code>0x534064e0</code> stops OFFSET short of the
 predicted peak, OFFSET between 2 and 4 drive steps; OFFS4 raises the lower
 clamp to 4 steps at <code>0x534065d4</code>, OFFS2 doubles OFFSET at
@@ -1326,7 +1326,7 @@ grade 0 after it) shift the final position, which points to a biased peak fit
 time and position (third replication).</li>
 </ul>
 <h2 id="opt-study">Parameter search with Optuna (2026-11-19)</h2>
-<p><code>tools/af_optimize.py</code> treats the detector constants as a
+<p><code>tools/af/af_optimize.py</code> treats the detector constants as a
 parameter space. Each trial builds one patch from the trial's values, uploads
 it over Wi-Fi (<code>put</code>, name OPT) and presses 4–5 times per
 condition. Cost per press, lower is better: AF time in s plus 0.01 per pulse
@@ -1549,9 +1549,9 @@ setting (<code>X875+FALLS2+OPT+NO29</code>, see
 and flashed onto the user's camera.</p>
 
 <h3 id="af-flash-build">The file</h3>
-<p><code>tools/af_firmware.py</code> takes the official 1.60 update
+<p><code>tools/af/af_firmware.py</code> takes the official 1.60 update
 (<code>firmware/fwdc243b-v160.bin</code>), checks each stock word, writes 19
-words and repacks with <code>tools/gr_repack.py --allow af</code>. The words
+words and repacks with <code>tools/firmware/gr_repack.py --allow af</code>. The words
 come from the same site lists the RAM patches use:</p>
 <table>
 <thead><tr><th>Change</th><th>Address</th><th>Words</th></tr></thead>
@@ -1565,7 +1565,7 @@ come from the same site lists the RAM patches use:</p>
 <p>The repacker re-ran all container checks of the updater (project,
 magic, type, word sums, frame layout) and decoded its own output: exactly
 the 19 words and the checksum compensation word differ from the official
-payload. The guard (<code>tools/patch_guard.py</code>) got an opt-in AF
+payload. The guard (<code>tools/firmware/patch_guard.py</code>) got an opt-in AF
 allow-list: changes must lie in the contrast-AF units <code>CafProcess</code>,
 <code>CafDetection</code> and <code>CafWobbling</code>, which are compiled back
 to back (<code>0x533f3d18</code> up to <code>OtherafFactory</code> at
@@ -1608,13 +1608,13 @@ arming anything: three locks in 213–258 ms at 200 fps, one fail at 100 fps.
 Then <code>SCRIPT/STARTUP.TTL</code> was renamed <code>STARTUP.OFF</code> and
 the update file removed from the card, so the camera starts like stock.</p>
 <p><strong>For later bench sessions on this camera:</strong> the site lists
-of <code>tools/af_debug_card.py</code> expect stock words, and
+of <code>tools/af/af_debug_card.py</code> expect stock words, and
 <code>arm STOCK</code> writes stock words into RAM, which undoes the flashed
 setting until the next power-on. Adapt the tools before using the bench
 again. To return to stock, flash the official 1.60 file the same way.</p>
 
 <h3 id="af-flash-afc-build">AF-C build (prepared 2026-11-21, not flashed)</h3>
-<p><code>tools/af_firmware.py --afc</code> adds the one word of the
+<p><code>tools/af/af_firmware.py --afc</code> adds the one word of the
 <a href="#afc-fast-patch">AF-C fast-drive patch</a> to the 19:
 <code>0x533f7118</code>, <code>movne r3, #1</code> → <code>mov r3, #1</code>
 (output <code>work/firmware-af-afc/FWDC243B.BIN</code>). In the drive
@@ -1665,7 +1665,7 @@ published.</p>
 <h3 id="focus-tolerance">Focus tolerance: sharpness against lens pulses (2026-11-22)</h3>
 <p>This measures how much a photo loses per pulse away from the AF lock.
 It sets the scale for every lock-position error in this log. Tool:
-<code>tools/af_tolerance.py</code>, hands-free on the flashed camera. Per
+<code>tools/af/af_tolerance.py</code>, hands-free on the flashed camera. Per
 shot:</p>
 <ol>
 <li>AF-S locks on a half-press; the RAM trace records the run.</li>
@@ -1743,7 +1743,7 @@ branch, <code>movne r3, #1</code> (<code>0x13a03001</code>) →
 200 fps CAF drive whatever <code>+0xc484</code> says. The
 <code>+0xc488</code> test and both vetoes stay.</li>
 <li><strong>Patcher:</strong> <code>SCRIPT/AFDBG/AFCFAST.BIN</code> (376 bytes,
-built by <code>tools/af_debug_card.py</code>). It checks the build identity
+built by <code>tools/af/af_debug_card.py</code>). It checks the build identity
 (<code>0x53002038</code> = <code>0x110b3c01</code>, GR IIIx 1.60) and the stock
 word, writes one word through <code>/dev/mem</code>, then runs
 <code>dsb</code> and <code>cacheflush</code> and reads it back, as GRKit's
@@ -1807,7 +1807,7 @@ re-armed the save (every second) before the next run.</li>
 probably written when the next AF starts, so this flushes run 20.</li>
 <li>Switch off. Copy every <code>*.csv</code> from the card root to
 <code>work/af-logs/&lt;condition&gt;/</code>. Delete them from the card.
-<code>python3 tools/af_csv.py work/af-logs/&lt;condition&gt;</code> prints
+<code>python3 tools/af/af_csv.py work/af-logs/&lt;condition&gt;</code> prints
 one row per run and leaves out repeats and files without a search.</li>
 </ol>
 <table>

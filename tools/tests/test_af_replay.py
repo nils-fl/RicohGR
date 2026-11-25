@@ -1,4 +1,4 @@
-"""Tests for tools/af_replay.py (run: pytest tools/tests).
+"""Tests for tools/af/af_replay.py (run: pytest tools/tests).
 
 The synthetic tests run anywhere. The data test needs the recorded sessions in
 work/af-logs (not in the repository) and is skipped without them.
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path[:0] = [str(ROOT / "tools" / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_replay as R  # noqa: E402
 
 

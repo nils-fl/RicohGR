@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Optuna search over the contrast-AF detector constants of the GR IIIx 1.60,
-run hands-free against the remote test card (tools/af_remote.py).
+run hands-free against the remote test card (tools/af/af_remote.py).
 
 Parameter space (each trial becomes one uploaded patch, OPT, plus card patches):
   exponent  margin curve scale = (kb * b / y) ** p in dim light (y < b):
@@ -29,7 +29,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_debug_card as card  # noqa: E402
 import af_remote  # noqa: E402
 

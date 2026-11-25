@@ -6,7 +6,7 @@ Input: a CSV with the header  condition,frames,fps
   frames     video frames counted from half-press to AF confirmation
   fps        frame rate of the video (e.g. 240)
 
-Usage:  python3 tools/af_timing_tally.py timings.csv
+Usage:  python3 tools/af/af_timing_tally.py timings.csv
 Prints, per condition: n, median, quartiles and range in milliseconds.
 Offline arithmetic on your own numbers only. It does not talk to a camera.
 """

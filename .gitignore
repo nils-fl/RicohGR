@@ -1,7 +1,27 @@
-# Firmware and everything derived from it: download it yourself (tools/fetch_firmware.py)
-firmware/
-work/
+# Firmware and everything derived from it: download it yourself
+# (tools/firmware/fetch_firmware.py). work/ holds decoded images, caches, builds,
+# card files, camera logs and photos. Anchored: tools/firmware/ is code.
+/firmware/
+/work/
 /build/
+
+# Firmware update files and camera files, wherever they end up
+*.BIN
+*.bin
+*.DNG
+*.dng
+*.JPG
+*.jpg
+*.RAF
+*.MOV
+
+# Card contents copied out of a camera (SD scripts, logs)
+/SCRIPT/
+/DCIM/
+*.LOG
+
+# A personal recipe library; only the example is tracked
+/RECIPES.TXT
 
 # Python
 __pycache__/
@@ -9,6 +29,11 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+
+# Local settings and secrets
+.env
+.env.*
+.claude/settings.local.json
 
 # Editors and macOS
 .DS_Store

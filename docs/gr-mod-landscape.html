@@ -271,8 +271,8 @@ it off.</li>
 <h2 id="4-gr-iii-210-gr-iiix-160-and-170">4. GR III 2.10, GR IIIx 1.60 and
 1.70</h2>
 <p>We fetched <code>gr3_v210.zip</code> and <code>gr3x_v170.zip</code>
-from Ricoh with <code>tools/fetch_firmware.py</code>, decoded them with
-<code>tools/gr_unpack.py</code>, and compared the images word by word
+from Ricoh with <code>tools/firmware/fetch_firmware.py</code>, decoded them with
+<code>tools/firmware/gr_unpack.py</code>, and compared the images word by word
 (Read).</p>
 <table>
 <thead><tr><th>Comparison</th><th>Result</th></tr></thead>
@@ -579,7 +579,7 @@ contributing there is better than a separate build.</p>
 <tr><td>Extension point for AF</td><td>New core hook group (fork), §6</td>
 <td>Own patch in the firmware image</td></tr>
 <tr><td>Fit with our tools</td><td>Same pinned image and addresses</td>
-<td><code>tools/gr_repack.py</code> output is byte-identical to its build</td></tr>
+<td><code>tools/firmware/gr_repack.py</code> output is byte-identical to its build</td></tr>
 </tbody>
 </table>
 <p>For AF experiments, which will need many attempts, a RAM-only patch
@@ -589,7 +589,7 @@ useful as a reference for the container and the image pipeline.</p>
 <h2 id="9-next-steps">9. Next steps</h2>
 <ol>
 <li>Camera test: <a href="af-debug-log.html">af-debug-log</a> has the
-procedure, and <code>tools/af_debug_card.py</code> writes the card
+procedure, and <code>tools/af/af_debug_card.py</code> writes the card
 files (added 2026-10-29 at the owner's request).</li>
 <li>Done offline on 2026-10-29: CSV file names, counter, memory
 condition and write timing (§5.1); <code>InfocusTimeMeasure</code> is
@@ -624,7 +624,7 @@ Rumors, 2026-10-21</a> on the GR IIIx 1.70 release.</li>
 <li>Our own reads: <code>work/fwdc243b-v160.decoded.bin</code>,
 <code>work/fwdc239b-v210.decoded.bin</code>,
 <code>work/gr3x-v170.decoded.bin</code> with
-<code>tools/rtos_analysis.py</code>.</li>
+<code>tools/firmware/rtos_analysis.py</code>.</li>
 </ul>
 </main>
 </div>

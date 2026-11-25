@@ -1,5 +1,5 @@
 # GR IIIx recipe library (example). Copy to RECIPES.TXT and edit.
-# Check with: python3 tools/recipes.py RECIPES.TXT.example
+# Check with: python3 tools/recipes/recipes.py RECIPES.TXT.example
 format 1
 
 [Warm Slide]

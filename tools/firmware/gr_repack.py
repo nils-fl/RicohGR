@@ -19,7 +19,7 @@ same length, and writes a new container that keeps the official frame layout
   lengths, and its last word balances the whole file to a word sum of 0.
 
 Every check the camera's updater makes (docs/firmware-mod-feasibility.html §1.2),
-the layout checks below and the rescue-path guard (tools/patch_guard.py)
+the layout checks below and the rescue-path guard (tools/firmware/patch_guard.py)
 are re-run on the result, and the result is decoded again and compared.
 Writing the file does not install anything; this tool never talks to a camera.
 """
@@ -29,7 +29,7 @@ import struct
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 from gr_unpack import HEADER_SIZE, checksum, unpack  # noqa: E402
 
 FOOTER_SIZE = 0x18
@@ -237,7 +237,7 @@ def main() -> None:
     guard_ok, report = guard(original_payload, bytes(payload), exempt=[(COMP_OFFSET, COMP_OFFSET + 4)],
                              allow=tuple(args.allow or ["raw"]))
     print("\n".join("guard " + line for line in report))
-    print(f"{'PASS' if guard_ok else 'FAIL'}  rescue path untouched (tools/patch_guard.py)")
+    print(f"{'PASS' if guard_ok else 'FAIL'}  rescue path untouched (tools/firmware/patch_guard.py)")
     ok &= guard_ok
     print(f"identical to original: {container == original}")
     print(f"size: {len(container)} bytes (original {len(original)})")

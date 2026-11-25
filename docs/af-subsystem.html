@@ -195,7 +195,7 @@ other focus rules on recorded sweeps</a></li>
 <h1 id="gr-iiix-autofocus-how-it-works">GR IIIx autofocus: how it
 works</h1>
 <p>Firmware: GR IIIx 1.60 (<code>fwdc243b.bin</code>, version
-1.60.11.17), analysed offline with <code>tools/rtos_analysis.py</code>
+1.60.11.17), analysed offline with <code>tools/firmware/rtos_analysis.py</code>
 (Capstone disassembly of the RTOS image). Nothing was run on or written
 to a camera.</p>
 <p><strong>Evidence labels</strong></p>
@@ -1242,7 +1242,7 @@ found</strong>; continuous AF re-triggers and wobbles instead (5.6,
 4.5b).</li>
 </ul>
 <p>These can be read with the same tools
-(<code>tools/rtos_analysis.py</code>: <code>vtables_for</code>,
+(<code>tools/firmware/rtos_analysis.py</code>: <code>vtables_for</code>,
 <code>report</code>, <code>show</code>).</p>
 <h2 id="9-where-the-time-goes">9. Where the time goes</h2>
 <p>This section is <strong>derived from the code structure. No timings
@@ -1754,10 +1754,10 @@ through more reversals. In the dim AF-C session, with one larger AF area
 <p>Added 2026-11-21. The question was whether the AF math could be done better,
 with statistics or newer methods. The arithmetic is cheap (10.4); what costs
 time is the decision rules (when a peak counts, when to stop). Every new rule
-would cost a camera session, so <code>tools/af_replay.py</code> replays the
+would cost a camera session, so <code>tools/af/af_replay.py</code> replays the
 passes the tracer already recorded: 1,022 presses and 1,487 passes from 25
 remote sessions (<code>work/af-logs/*/tails</code>, tracer v3 with the detector
-arrays). Run <code>python3 tools/af_replay.py all</code> (about 30 s).</p>
+arrays). Run <code>python3 tools/af/af_replay.py all</code> (about 30 s).</p>
 
 <h3 id="replay-rebuilt">11.1 What the replay rebuilds (Read + Measured)</h3>
 <ul>
@@ -1895,7 +1895,7 @@ horizontal, 1 vertical; <code>+0x20</code> the detector mode;
 <code>+0xac</code> copied from the object byte <code>+0x43c0</code>;
 <code>+0xad</code> from <code>+0x4424</code>.</li>
 </ul>
-<p><strong>Gate.</strong> <code>tools/af_replay.py gate</code> runs the
+<p><strong>Gate.</strong> <code>tools/af/af_replay.py gate</code> runs the
 ported accept (candidate, 3 falls, full margin, the late accept; shape tests
 and vetoes assumed passed) on the AF-S passes the horizontal detector
 accepted, in the area the camera chose, and on the rejected passes:</p>
@@ -2092,7 +2092,7 @@ same re-run; then the path-2 decision <code>0x53404878</code> (when
 flag <code>+0x21</code> to 5 samples after the maximum, so a patch moves that
 too); the margin has no constant of its own; the vote shares.</li>
 </ul>
-<p><strong>Gate.</strong> <code>tools/af_replay.py turns</code> runs the
+<p><strong>Gate.</strong> <code>tools/af/af_replay.py turns</code> runs the
 ported flag (area 0, horizontal detector) on the 242 first passes that
 turned: on 193 (80 %) it agrees with the camera, either on the frame of the
 camera's −2 or, where the camera ran to the window end, by not firing

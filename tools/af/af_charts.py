@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Charts of the AF measurements: writes docs/af-charts.html.
 
-Usage:  python3 tools/af_charts.py [--out docs/af-charts.html]
+Usage:  python3 tools/af/af_charts.py [--out docs/af-charts.html]
 Reads the camera's debug CSVs and TRACE.DAT files under work/af-logs (see
 docs/af-debug-log.html) with the parsers in af_csv, af_light and
 af_debug_card, and draws every chart as inline SVG (standard library only).
@@ -13,10 +13,10 @@ import argparse, hashlib, html, json, math, random, re, statistics, sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_csv, af_light, af_debug_card  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 LOGS = ROOT / "work" / "af-logs"
 
 # Traced dim AF-S sessions and the margin each ran with (AB.LOG, *.ERR and
@@ -581,7 +581,7 @@ def chart_curves():
 CAND = "Patched (lower margin + 49 fps)"
 STOCK_ARM = "STOCK"
 # Comparison runs of the candidate (X875+FALLS2+OPT, +NO29 where it matters) against
-# stock, from tools/af_remote.py sessions and the scratchpad ndblocks runs. Each entry:
+# stock, from tools/af/af_remote.py sessions and the scratchpad ndblocks runs. Each entry:
 # label, frame rate stock ran at, [(session, ND filter or None)], reference position,
 # candidate arms. Bright: NO29 does nothing at 100 fps, so both candidate arms pool.
 CAND_RUNS = [
@@ -1047,11 +1047,11 @@ def main():
         ])
         + glossary()
         + f'<details class="more"><summary>About the data</summary><p>Drawn from the raw logs, not copied: '
-          f'{n_csv:,} debug CSV dumps (unique finished sweeps, as in <code>tools/af_csv.py</code>), '
+          f'{n_csv:,} debug CSV dumps (unique finished sweeps, as in <code>tools/af/af_csv.py</code>), '
           f'{len(TRACE_VARIANT) + 2} state traces ({len(ps)} traced presses with brightness data) and the remote '
           f'A/B sessions under <code>work/af-logs</code>. The lab notebook with every run is '
           f'<a href="af-debug-log.html">AF debug log on the camera</a>. Hover a mark for its values; each chart '
-          f'has its numbers under <em>Data</em>. Regenerate with <code>python3 tools/af_charts.py</code>.</p></details>'
+          f'has its numbers under <em>Data</em>. Regenerate with <code>python3 tools/af/af_charts.py</code>.</p></details>'
     )
 
     chapters = [

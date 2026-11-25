@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Offline map of the GR IIIx 1.60 grain (Particle) path and the candidate effect patch sites.
 
-Usage:  python3 tools/effects_map.py            # check every fact against the decoded image, print the map
-        python3 tools/effects_map.py --sites    # also list the candidate words (stock -> new)
+Usage:  python3 tools/effects/effects_map.py            # check every fact against the decoded image, print the map
+        python3 tools/effects/effects_map.py --sites    # also list the candidate words (stock -> new)
 
-Read-only: needs work/fwdc243b-v160.decoded.bin (tools/gr_unpack.py) and capstone. It writes
+Read-only: needs work/fwdc243b-v160.decoded.bin (tools/firmware/gr_unpack.py) and capstone. It writes
 nothing and never talks to a camera. Findings and labels: docs/image-effects.html.
 
 The path, image control to pixels (Read unless noted):
@@ -29,7 +29,7 @@ import struct
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import rtos_analysis as ra  # noqa: E402
 
 # ---- capability table (RAW development) -------------------------------------------------------
@@ -221,7 +221,7 @@ DATA_KINDS = ("capability table", "row list")
 
 
 def row_list_proof(xrefs):
-    """Who can read the row lists, exactly (tools/patch_guard.py uses this instead of its
+    """Who can read the row lists, exactly (tools/firmware/patch_guard.py uses this instead of its
     0x100-byte look-back, which also catches the neighbouring label tables). Returns (addresses
     of the instructions that build a pointer into the table, problems). The lists are reached
     only through the table: each list address appears as a pointer only inside the table, and
@@ -248,7 +248,7 @@ def decode_mov_imm(w):
 
 
 def effect_word_kind(a, old, new):
-    """The kind of tested change the word (address, stock, new) is, or None. tools/patch_guard.py
+    """The kind of tested change the word (address, stock, new) is, or None. tools/firmware/patch_guard.py
     --allow effects accepts exactly these: the A words as tested in RAM (capability table, row
     lists, ImageTuning, planner), and at the three grain-scale sites any mov r6, #scale with the
     stock condition and 0 < scale <= 0x400 (B; 0x100/0x200/0x300 tested)."""

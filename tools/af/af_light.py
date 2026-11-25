@@ -2,7 +2,7 @@
 """How much light each contrast-AF sweep had, how noisy it was, and how far its
 peak stood above the noise and above the camera's threshold.
 
-Usage:  python3 tools/af_light.py [DIR ...]      (default: every work/af-logs/*/csv)
+Usage:  python3 tools/af/af_light.py [DIR ...]      (default: every work/af-logs/*/csv)
 Reads the camera's debug CSVs (see docs/af-debug-log.html) and prints, per
 sensor mode and outcome, medians of:
   px      pixels of AF area 0 (MainAreaSizeH x MainAreaSizeV, in readout lines)
@@ -21,10 +21,10 @@ import re, statistics, sys
 from collections import defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_csv  # noqa: E402  (run, key, samples, first)
 
-LOGS = Path(__file__).resolve().parent.parent / "work" / "af-logs"
+LOGS = Path(__file__).resolve().parents[2] / "work" / "af-logs"
 
 
 def mad_noise(xs):

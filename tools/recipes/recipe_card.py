@@ -4,7 +4,7 @@
 Step 1 of the on-camera recipe idea: the engineering shell's "UserData Set"
 (docs/gr-mod-landscape.html §7) writes a slot's image control and parameters.
 A card script relays shell lines from Wi-Fi to the RTOS, as the AF remote card
-does (tools/af_debug_card.py --remote), but this card has nothing else:
+does (tools/af/af_debug_card.py --remote), but this card has nothing else:
 no AF logging, no patch loader, no RAM uploads, and the relay accepts only
 "UserData" and the AF lamp. Nothing is written to firmware or flash; take the
 card out (or delete SCRIPT/STARTUP.TTL) and the camera boots as before.
@@ -32,7 +32,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import recipes  # noqa: E402
 from af_debug_card import (RELAY_PAD_SH, RELAY_SIZE, REMOTE_PORT, pull_rack_sh, pull_relay_ttl,  # noqa: E402
                            pull_sh, pull_shell_body, ttl_check)

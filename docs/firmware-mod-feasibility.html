@@ -73,7 +73,7 @@ id="toc-21-update-start-up-mode-the-built-in-rescue-path-read">2.1
 Update start-up mode: the built-in rescue path (Read)</a></li>
 <li><a href="#22-guard-toolspatch_guardpy"
 id="toc-22-guard-toolspatch_guardpy">2.2 Guard
-(<code>tools/patch_guard.py</code>)</a></li>
+(<code>tools/firmware/patch_guard.py</code>)</a></li>
 <li><a href="#23-a-route-without-flashing-sd-card-scripts"
 id="toc-23-a-route-without-flashing-sd-card-scripts">2.3 A route without
 flashing: SD-card scripts</a></li>
@@ -88,7 +88,7 @@ far</a>
 id="toc-41-payload-layout-read">4.1 Payload layout (Read)</a></li>
 <li><a href="#42-re-packer-toolsgr_repackpy"
 id="toc-42-re-packer-toolsgr_repackpy">4.2 Re-packer
-(<code>tools/gr_repack.py</code>)</a></li>
+(<code>tools/firmware/gr_repack.py</code>)</a></li>
 <li><a
 href="#43-where-recipes-live-read-from-the-settings-name-list-at-0xb5f488"
 id="toc-43-where-recipes-live-read-from-the-settings-name-list-at-0xb5f488">4.3
@@ -253,7 +253,7 @@ it is written and what that means for recovery</h2>
 <li>The package contains the boot parameter blocks
 (<code>BOOTPARA</code>, <code>DRAMPARA</code>), the RTOS, the Linux
 kernel, device trees and the Linux root file system
-(<code>tools/segments.py</code>) (Read).</li>
+(<code>tools/firmware/segments.py</code>) (Read).</li>
 <li>The updater writes the eMMC <strong>boot area</strong> ("boot area
 write OK", "can't set emmc partition to boot 1!") and user partitions
 (<code>FwPartition</code>) (Structural).</li>
@@ -292,7 +292,7 @@ chip;</li>
 stay inside the camera's own limits.</li>
 </ul>
 <h3 id="22-guard-toolspatch_guardpy">2.2 Guard
-(<code>tools/patch_guard.py</code>)</h3>
+(<code>tools/firmware/patch_guard.py</code>)</h3>
 <p><code>gr_repack.py</code> runs this check and refuses to write a file
 that fails it. It is an allow-list. A change passes only if:</p>
 <ol type="1">
@@ -572,7 +572,7 @@ balances it (Read).</p>
 CODE load error!!", "RTOS START!"). It has no verify step and no
 recovery path, which confirms §2 (Structural).</p>
 <h3 id="42-re-packer-toolsgr_repackpy">4.2 Re-packer
-(<code>tools/gr_repack.py</code>)</h3>
+(<code>tools/firmware/gr_repack.py</code>)</h3>
 <p>The tool rebuilds a container from a payload of the same length and
 keeps the official frame layout: every frame stays at its place with its
 output size. Unchanged frames are copied byte for byte. A frame that

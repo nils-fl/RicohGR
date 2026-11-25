@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a GR IIIx 1.60 update file with the dim-light AF setting built in.
 
-Usage:  python3 tools/af_firmware.py [--afc] [--out FILE]
+Usage:  python3 tools/af/af_firmware.py [--afc] [--out FILE]
 
 Without --afc the output is the 19-word file flashed on 2026-11-20 (work/firmware-af/FWDC243B.BIN).
 --afc adds the AF-C fast-drive word (AFCFAST, docs/af-debug-log.html#afc-patch): 0x533f7118 in the
@@ -13,10 +13,10 @@ The setting is the one tested remotely as "X875+FALLS2+OPT+NO29" (docs/af-debug-
 margin exponent 0.875 (X875), margin base table x 0.32 and rise floor 0.014 (the study's OPT data
 words), FALLS2 (a rising run of 2 instead of 3 arms the detector's return value; the name says
 falls, after an early misreading), and 49 instead of 29 fps (NO29). The words come
-from the same site lists the RAM patches use (tools/af_debug_card.py, tools/af_optimize.py), and
+from the same site lists the RAM patches use (tools/af/af_debug_card.py, tools/af/af_optimize.py), and
 every stock word is checked against the official image before it is replaced.
 
-The container is built by tools/gr_repack.py with the AF allow-list of tools/patch_guard.py
+The container is built by tools/firmware/gr_repack.py with the AF allow-list of tools/firmware/patch_guard.py
 (--allow af): every change must lie in the contrast-AF code (CafProcess, CafDetection,
 CafWobbling) and patched functions may only be called from there. Offline only: writing the file
 installs nothing, and this tool never talks to a camera.
@@ -28,14 +28,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_debug_card as card  # noqa: E402
 import af_optimize as opt  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 OFFICIAL = ROOT / "firmware" / "fwdc243b-v160.bin"
 DECODED = ROOT / "work" / "fwdc243b-v160.decoded.bin"
-BASE, OFF = 0x53000000, 0x10870  # RTOS load address and payload offset (tools/rtos_analysis.py)
+BASE, OFF = 0x53000000, 0x10870  # RTOS load address and payload offset (tools/firmware/rtos_analysis.py)
 
 SETTING = dict(opt.FROZEN3, exponent="0.875", kb=0.32, falls=2, step=8, fps="auto")
 
@@ -72,7 +72,7 @@ def main() -> None:
     if args.out is None:
         args.out = ROOT / "work" / ("firmware-af-afc" if args.afc else "firmware-af") / "FWDC243B.BIN"
     if not DECODED.exists():
-        raise SystemExit(f"{DECODED} missing: run python3 tools/gr_unpack.py {OFFICIAL}")
+        raise SystemExit(f"{DECODED} missing: run python3 tools/firmware/gr_unpack.py {OFFICIAL}")
     s = sites(args.afc)
     print(f"{len(s)} words:")
     for a, old, new in s:

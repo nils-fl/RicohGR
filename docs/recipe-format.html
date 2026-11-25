@@ -64,7 +64,7 @@ file</a></li>
 <p>A recipe is a saved set of image-control settings for the GR IIIx.
 This describes a plain-text file, <code>RECIPES.TXT</code>, that holds a
 library of them, and the offline checker
-<code>tools/recipes.py</code>.</p>
+<code>tools/recipes/recipes.py</code>.</p>
 <p>The file is <strong>not</strong> installed on the camera and needs no
 firmware change. It is a reference you keep on a phone or computer: the
 checker prints each recipe as a dial-in list for the in-camera RAW
@@ -307,12 +307,12 @@ exposure compensation, but that is not confirmed.</li>
 <li><code>iso</code>, <code>iso_max</code>: no <code>UserData</code>
 setting found.</li>
 </ul>
-<p><code>tools/recipe_card.py</code> carries the lines to the camera over
+<p><code>tools/recipes/recipe_card.py</code> carries the lines to the camera over
 Wi-Fi. <code>recipe_card.py card</code> writes a card with
 <code>SCRIPT/STARTUP.TTL</code> and <code>SCRIPT/RECIPE/</code>. The
 script starts a small HTTP endpoint on port 8080 and relays shell lines to
 the RTOS, as the AF remote card does
-(<code>tools/af_debug_card.py --remote</code>). It has nothing else: no
+(<code>tools/af/af_debug_card.py --remote</code>). It has nothing else: no
 AF logging, no patch loader, no RAM access. The relay takes only
 <code>UserData</code>, <code>Af_Led_On</code> and
 <code>Af_Led_Off</code>, at most 8 lines per batch, arguments limited to
@@ -327,7 +327,7 @@ younger than 45 s.</li>
 <code>recipe_card.py raw 'UserData Set StillImageControlNo2ParamStandardSaturation P1'</code>
 (with Custom 2 holding Standard). Check in the Image Control menu that
 Custom 2's saturation is +1.</li>
-<li>A full recipe: <code>recipe_card.py send recipes/ricoh-recipes.txt
+<li>A full recipe: <code>recipe_card.py send ../GRLab/recipes/ricoh-recipes.txt
 "Reggie's Color Negative" --slot 1</code>. Check Custom 1 in the menu,
 take a photo with it, then <code>recipe_card.py verify … </code> reads
 the photo's maker notes and compares them with the recipe.</li>
@@ -336,7 +336,8 @@ stay?</li>
 </ol>
 
 <h2 id="community">Community recipes</h2>
-<p>Three files in <code>recipes/</code> hold recipes published for the GR
+<p>Three files in the <a href="https://github.com/nils-fl/gr-lab/tree/main/recipes">GR Lab</a> repository's <code>recipes/</code> (a checkout
+next to this one: <code>../GRLab/recipes/</code>) hold recipes published for the GR
 III / GR IIIx, read on 2026-11-20, with author and source link for each.
 The values are as published; none were checked on a
 camera. Reggie's Color Negative links to Reggie Ballesteros' own page
@@ -374,7 +375,7 @@ tone "Blue" (Xpro Teal).</li>
 Film values come without white balance.</li>
 </ul>
 <h2 id="checking-a-file">Checking a file</h2>
-<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/recipes.py RECIPES.TXT</span></code></pre></div>
+<div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> tools/recipes/recipes.py RECIPES.TXT</span></code></pre></div>
 <ul>
 <li>On success it prints every recipe as a dial-in list and exits
 0.</li>

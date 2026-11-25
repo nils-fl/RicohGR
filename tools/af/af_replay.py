@@ -3,7 +3,7 @@
 without the camera.
 
 Data: the remote sessions under work/af-logs/<session>/, presses.jsonl plus tails/NNNN.DAT
-(tracer v3, with the detector arrays), as tools/af_remote.py writes them. For every press the
+(tracer v3, with the detector arrays), as tools/af/af_remote.py writes them. For every press the
 tool takes the AF run that af_remote matched, splits it into passes (action 4) and rebuilds,
 for both AF areas (0 narrow, 1 wide):
 
@@ -52,10 +52,10 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_debug_card as card  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 LOGS = ROOT / "work" / "af-logs"
 NF = len(card.TRACE_OFFSETS)
 W = card.TRACE_ARRAY_WORDS

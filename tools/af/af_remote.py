@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drive AF experiments on the GR IIIx from the Mac over the camera's Wi-Fi.
 
-The camera runs a remote card (tools/af_debug_card.py --remote): the AF trace
+The camera runs a remote card (tools/af/af_debug_card.py --remote): the AF trace
 is on, and a small endpoint (busybox httpd + CGI, port 8080) switches the
 patch arms and returns the newest trace records. Presses go through the
 camera's own API, POST /v1/lens/focus on port 80, which runs the same AF as a
@@ -37,7 +37,7 @@ import argparse, hashlib, json, random, socket, statistics, struct, subprocess, 
 from collections import Counter
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_debug_card  # noqa: E402
 from af_debug_card import AF_FPS, AUTO_PATCHES, arm_conflict, multipatch_bin, trace_presses  # noqa: E402
 
@@ -344,7 +344,7 @@ def phase_press(cam, arm, orig):
 # ---- hands-free AF-C trials on the flashed camera ------------------------------------
 
 def flashed_mismatches(cam, afc_fast):
-    """Sites of the flashed build (tools/af_firmware.py) that do not hold the expected word:
+    """Sites of the flashed build (tools/af/af_firmware.py) that do not hold the expected word:
     the 19 flashed words patched, the AF-C word as set for this trial. [] = all as expected."""
     import af_firmware
     bad = []

@@ -1,4 +1,4 @@
-"""Tests for tools/recipes.py (run: pytest tools/tests).
+"""Tests for tools/recipes/recipes.py (run: pytest tools/tests).
 
 A companion app has a copy of recipes.py with the same rules; its
 repository owns the shared test vectors and the app's schema asset.
@@ -7,9 +7,11 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path[:0] = [str(ROOT / "tools" / a) for a in ("firmware", "af", "effects", "recipes")]
 import recipes as r  # noqa: E402
 
 
@@ -176,10 +178,12 @@ def test_format_1_files_stay_format_1():
     assert out["canonical"].startswith("format 1\n")
 
 
-def test_bundled_recipe_files_are_valid():
-    """recipes/*.txt ship in the app as its community collections."""
-    files = sorted((ROOT / "recipes").glob("*.txt"))
-    assert files
+def test_community_recipe_files_are_valid():
+    """The community collections live in GR Lab (recipes/*.txt, shipped in its app); this
+    parser must accept them too. Needs a GRLab checkout next to this repository."""
+    files = sorted((ROOT.parent / "GRLab" / "recipes").glob("*.txt"))
+    if not files:
+        pytest.skip("no GRLab checkout next to this repository")
     for path in files:
         recs = r.parse(path.read_text())
         assert recs, path

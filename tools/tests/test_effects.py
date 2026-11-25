@@ -1,4 +1,4 @@
-"""Grain / effects map (tools/effects_map.py) against the decoded 1.60 image; skipped without it."""
+"""Grain / effects map (tools/effects/effects_map.py) against the decoded 1.60 image; skipped without it."""
 import struct
 import sys
 from pathlib import Path
@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path[:0] = [str(ROOT / "tools" / a) for a in ("firmware", "af", "effects", "recipes")]
 if not (ROOT / "work" / "fwdc243b-v160.decoded.bin").exists():
-    pytest.skip("decoded 1.60 image missing (tools/gr_unpack.py)", allow_module_level=True)
+    pytest.skip("decoded 1.60 image missing (tools/firmware/gr_unpack.py)", allow_module_level=True)
 
 import af_firmware  # noqa: E402
 import capstone  # noqa: E402

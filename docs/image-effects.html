@@ -66,7 +66,7 @@ while shooting? Offline analysis of the decoded 1.60 image, 2026-11-25.
 Nothing has been run on a camera. Labels: <strong>Read</strong>,
 <strong>Structural</strong>, <strong>Inferred</strong>, as in the other
 documents. Every Read address below is checked by
-<code>tools/effects_map.py</code>.</p>
+<code>tools/effects/effects_map.py</code>.</p>
 
 <h2 id="short">Short answer</h2>
 <ul>
@@ -243,7 +243,7 @@ the menu.</li>
 </ul>
 
 <h2 id="card">5a. RAM test card (arms A and B)</h2>
-<p><code>tools/effects_card.py</code> writes <code>work/effects-card/</code>.
+<p><code>tools/effects/effects_card.py</code> writes <code>work/effects-card/</code>.
 Nothing has been run on a camera yet. The card needs SD scripts already
 turned on (README, setup 1). It has nothing else on it: no Wi-Fi bench,
 no relay, no AF words.</p>
@@ -279,8 +279,8 @@ further. Other values: <code>--grain 0x80,0x180,0x280</code>.
 <code>--grain 0x40,0x80,0x100</code> (stock) leaves arm B off the
 card.</li>
 </ul>
-<p><strong>Automated (arm B):</strong> <code>tools/effects_solo.py card</code>
-writes a recipe card (<code>tools/recipe_card.py</code>) with one solo run.
+<p><strong>Automated (arm B):</strong> <code>tools/effects/effects_solo.py card</code>
+writes a recipe card (<code>tools/recipes/recipe_card.py</code>) with one solo run.
 After a single power-on, the camera works through it by itself:</p>
 <ul>
 <li>stock grain on Monotone (Off, Low, Mid, High) and Negative Film (Off,
@@ -451,7 +451,7 @@ every capture (Inferred from the result; <code>BEStillCommand</code>
 <code>A.BIN restore</code> put the stock words back.</p>
 
 <h2 id="flash">5b. Flash build: AF + A + B</h2>
-<p><code>python3 tools/effects_firmware.py</code> writes
+<p><code>python3 tools/effects/effects_firmware.py</code> writes
 <code>work/firmware-af-effects/FWDC243B.BIN</code>. It contains the 19
 words of the flashed AF build, A (40 words) and B at
 <code>0x100 / 0x200 / 0x300</code>, 62 words in all. The decoded payload
@@ -503,9 +503,9 @@ per-capture fill is not yet traced (Structural).</li>
 </ol>
 
 <h2 id="repro">7. Reproducing</h2>
-<pre><code>python3 tools/effects_map.py           # checks every address above against the 1.60 image
-python3 tools/effects_map.py --sites   # candidate words, stock -&gt; new
-python3 tools/effects_card.py          # RAM test card in work/effects-card/ (arms A and B)
+<pre><code>python3 tools/effects/effects_map.py           # checks every address above against the 1.60 image
+python3 tools/effects/effects_map.py --sites   # candidate words, stock -&gt; new
+python3 tools/effects/effects_card.py          # RAM test card in work/effects-card/ (arms A and B)
 python3 -m pytest tools/tests/test_effects.py tools/tests/test_effects_card.py</code></pre>
 </main>
 </div>

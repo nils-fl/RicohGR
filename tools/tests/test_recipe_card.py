@@ -1,4 +1,4 @@
-"""Tests for tools/recipe_card.py solo runs (run: pytest tools/tests)."""
+"""Tests for tools/recipes/recipe_card.py solo runs (run: pytest tools/tests)."""
 import re
 import subprocess
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path[:0] = [str(ROOT / "tools" / a) for a in ("firmware", "af", "effects", "recipes")]
 import recipe_card as rc  # noqa: E402
 
 

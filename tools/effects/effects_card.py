@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """RAM-only test card for the grain changes A and B (docs/image-effects.html §4).
 
-Usage:  python3 tools/effects_card.py [--out DIR] [--grain LOW,MID,HIGH]
+Usage:  python3 tools/effects/effects_card.py [--out DIR] [--grain LOW,MID,HIGH]
 
 Writes a card root into DIR (default work/effects-card/), never to a card directly. Copy its
-contents to the root of a card on which SD scripts are already on (tools/af_debug_card.py,
+contents to the root of a card on which SD scripts are already on (tools/af/af_debug_card.py,
 enable/). At each power-on SCRIPT/STARTUP.TTL waits for Linux, then APPLY.SH writes the words
 of every arm whose .ON file is on the card, through /dev/mem, and logs the result:
 
@@ -33,11 +33,11 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_debug_card as card  # noqa: E402
 import effects_map as em  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 DIR = "SCRIPT/EFFECTS"
 D = f"/media/storage1/{DIR}"
 TTL_D = "C:\\SCRIPT\\EFFECTS"

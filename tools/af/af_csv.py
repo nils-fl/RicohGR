@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarise the contrast-AF debug CSVs that the camera writes to the card.
 
-Usage:  python3 tools/af_csv.py DIR [DIR ...]
+Usage:  python3 tools/af/af_csv.py DIR [DIR ...]
 Reads every *.csv in each DIR (files the camera wrote with
 "CAF_Debug SaveDebugFile on", see docs/af-debug-log.html) and prints one row
 per AF run: phase result (direction, defocus, decision grade), sample rate,

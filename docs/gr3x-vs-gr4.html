@@ -94,8 +94,8 @@ Product records (Read)</a></li>
 <h1 id="gr-iiix-vs-gr-iv-firmware-comparison">GR IIIx vs GR IV: firmware
 comparison</h1>
 <p>Offline comparison of two official firmware packages. Both were
-downloaded from Ricoh with <code>tools/fetch_firmware.py</code> and
-decoded with <code>tools/gr_unpack.py</code>. Nothing was run on a
+downloaded from Ricoh with <code>tools/firmware/fetch_firmware.py</code> and
+decoded with <code>tools/firmware/gr_unpack.py</code>. Nothing was run on a
 camera.</p>
 <table>
 <thead>
@@ -172,7 +172,7 @@ nothing was flashed. The test edit was +1 / −1 on two adjacent RTOS words at
 </thead>
 <tbody>
 <tr><td>Parse (<code>Firmware</code>: footer, lengths, both word sums)</td><td>pass</td><td>pass</td></tr>
-<tr><td>Decoded payload equals <code>tools/gr_unpack.py</code>'s</td><td>pass</td><td>pass</td></tr>
+<tr><td>Decoded payload equals <code>tools/firmware/gr_unpack.py</code>'s</td><td>pass</td><td>pass</td></tr>
 <tr><td>Updater checks (<code>verifyContainer</code>)</td><td>pass</td><td>pass</td></tr>
 <tr><td>Section list (<code>sectionsOf</code>)</td><td>13 sections</td><td>14 sections: also <code>FDRVPARA</code> (0x24 bytes, before <code>RES</code>)</td></tr>
 <tr><td>Repack without change is byte-identical</td><td>pass</td><td>pass</td></tr>
@@ -192,7 +192,7 @@ partial frame, with 308 stored. GR IIIx has one 0x8000 frame,
 in both files are full 0x6000 frames (prefix <code>E0 00</code>), the only
 form GR Mod writes.</li>
 <li>For the test edit, GR Mod stored 1 frame (it re-decodes to find
-frames whose back-references reach the change). <code>tools/gr_repack.py</code>
+frames whose back-references reach the change). <code>tools/firmware/gr_repack.py</code>
 (the earlier version, before 2026-10-15) stored 2 frames, of 0x7FFF and 0x4001 bytes, because it marks the whole
 8 KB back-reference window. Both outputs pass both tools' updater checks
 and decode to the same payload. GR Mod's self-check rejected ours
@@ -296,7 +296,7 @@ split between the domains.</p>
 </table>
 <p>|</p>
 <p>Source-file and class names come from the strings in each RTOS image
-(<code>tools/strings_index.py</code>, output in
+(<code>tools/firmware/strings_index.py</code>, output in
 <code>work/index-gr3x.json</code> and <code>work/index-gr4.json</code>).
 Name counts are <strong>Structural</strong>: they show which code exists
 in the image, not what it does.</p>
@@ -514,7 +514,7 @@ with addresses removed. The 75 functions that <a
 href="af-subsystem.html">af-subsystem</a> cites by address were then
 matched to the GR IV image, and their instruction sequences and
 immediate constants were compared by hand where they differed. Load
-<code>tools/rtos_analysis.py</code> with
+<code>tools/firmware/rtos_analysis.py</code> with
 <code>GR_FW=work/fwdc248b-v111.decoded.bin</code> and set
 <code>OFF = 0x17D10</code> to read the GR IV image with the same
 helpers.</p>

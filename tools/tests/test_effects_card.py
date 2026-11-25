@@ -1,4 +1,4 @@
-"""RAM test card for grain arms A and B (tools/effects_card.py); needs the decoded 1.60 image."""
+"""RAM test card for grain arms A and B (tools/effects/effects_card.py); needs the decoded 1.60 image."""
 import argparse
 import struct
 import sys
@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path[:0] = [str(ROOT / "tools" / a) for a in ("firmware", "af", "effects", "recipes")]
 if not (ROOT / "work" / "fwdc243b-v160.decoded.bin").exists():
-    pytest.skip("decoded 1.60 image missing (tools/gr_unpack.py)", allow_module_level=True)
+    pytest.skip("decoded 1.60 image missing (tools/firmware/gr_unpack.py)", allow_module_level=True)
 
 import effects_card as ec  # noqa: E402
 

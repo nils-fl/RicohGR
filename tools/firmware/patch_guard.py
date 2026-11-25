@@ -24,7 +24,7 @@ import bisect
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import rtos_analysis as ra  # noqa: E402
 
 # payload block holding the RTOS image (docs/firmware-mod-feasibility.html §4.1); equals ra.OFF
@@ -61,7 +61,7 @@ AF_SOURCES = [
 # the first file to the first function of the file that follows the last one (OtherafFactory).
 AF_SPAN_END = b"src/OtherafFactory.cpp"
 # Opt-in third allow-list (--allow effects): no source files, only the exact words of the grain
-# unlock, tools/effects_map.py effect_word_kind(). Their data (capability table, row lists) must
+# unlock, tools/effects/effects_map.py effect_word_kind(). Their data (capability table, row lists) must
 # be used only by the RAW-development files above. Their code lies in shared image-processing
 # functions (ImageTuning, the still planner, the grain routine in AffineControl) whose callers
 # cannot all be seen (ImageTuning is reached through a function pointer), so the unit rule of

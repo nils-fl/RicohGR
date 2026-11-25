@@ -1,4 +1,4 @@
-"""Automated grain session (tools/effects_solo.py); needs the decoded 1.60 image."""
+"""Automated grain session (tools/effects/effects_solo.py); needs the decoded 1.60 image."""
 import re
 import subprocess
 import sys
@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path[:0] = [str(ROOT / "tools" / a) for a in ("firmware", "af", "effects", "recipes")]
 if not (ROOT / "work" / "fwdc243b-v160.decoded.bin").exists():
-    pytest.skip("decoded 1.60 image missing (tools/gr_unpack.py)", allow_module_level=True)
+    pytest.skip("decoded 1.60 image missing (tools/firmware/gr_unpack.py)", allow_module_level=True)
 
 import effects_card as ec  # noqa: E402
 import effects_solo as es  # noqa: E402

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build a GR IIIx 1.60 update file with the AF setting and the grain effects built in.
 
-Usage:  python3 tools/effects_firmware.py [--grain LOW,MID,HIGH] [--out FILE]
+Usage:  python3 tools/effects/effects_firmware.py [--grain LOW,MID,HIGH] [--out FILE]
 
-The output is the flashed AF build (tools/af_firmware.py, 19 words) plus the grain changes
-tested in RAM (docs/image-effects.html, tools/effects_card.py):
+The output is the flashed AF build (tools/af/af_firmware.py, 19 words) plus the grain changes
+tested in RAM (docs/image-effects.html, tools/effects/effects_card.py):
 
   A  grain on the colour controls but HDR Tone in RAW development: capability table and row
      lists (data used only by the RAW-development files), ImageTuning (5 words) and the still
@@ -14,8 +14,8 @@ tested in RAM (docs/image-effects.html, tools/effects_card.py):
      controls and Negative Film.
 
 Default output: work/firmware-af-effects/FWDC243B.BIN. Every stock word is checked against the
-official image before it is replaced. tools/gr_repack.py re-runs the updater's container checks
-and tools/patch_guard.py with --allow af --allow effects: the AF words must lie in the
+official image before it is replaced. tools/firmware/gr_repack.py re-runs the updater's container checks
+and tools/firmware/patch_guard.py with --allow af --allow effects: the AF words must lie in the
 contrast-AF units, and every other changed word must be one of the tested effects words
 (effects_map.effect_word_kind). The protected ranges (entry, updater, start-up control) stay
 untouched. Offline only: writing the file installs nothing, and this tool never talks to a
@@ -27,11 +27,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path[:0] = [str(Path(__file__).resolve().parents[1] / a) for a in ("firmware", "af", "effects", "recipes")]
 import af_firmware as af  # noqa: E402
 import effects_card as ec  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 ALLOW = ("af", "effects")
 
 
@@ -63,7 +63,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=ROOT / "work" / "firmware-af-effects" / "FWDC243B.BIN")
     args = ap.parse_args()
     if not af.DECODED.exists():
-        raise SystemExit(f"{af.DECODED} missing: run python3 tools/gr_unpack.py {af.OFFICIAL}")
+        raise SystemExit(f"{af.DECODED} missing: run python3 tools/firmware/gr_unpack.py {af.OFFICIAL}")
     bad = ec.em.check()
     if bad:
         raise SystemExit("effects_map.py does not match this image:\n  " + "\n  ".join(bad))

@@ -88,7 +88,7 @@ remote control: what Wi-Fi and USB can set</h1>
 <p>Question behind this document: can a computer or phone write a full
 image "recipe" (image control plus its fine parameters) to a GR IIIx
 without modified firmware? Firmware 1.60, Linux user space taken from
-the initramfs with <code>tools/initramfs.py</code>.</p>
+the initramfs with <code>tools/firmware/initramfs.py</code>.</p>
 <p>Labels as in the other documents: <strong>Read</strong> (from code or
 data), <strong>Structural</strong> (from names, strings and
 dependencies), <strong>Inferred</strong> (interpreted). Section 3.5 also
@@ -347,7 +347,7 @@ stored</td>
 </tbody>
 </table>
 <h2 id="6-camera-side-probe">6. From inside the camera: USB and the HTTP API (measured, 2026-11-19)</h2>
-<p>An SD-card probe (<code>tools/af_debug_card.py --probe</code>, Linux side via
+<p>An SD-card probe (<code>tools/af/af_debug_card.py --probe</code>, Linux side via
 <code>lcmd</code>) listed what the camera offers for a link to a computer. Evidence
 in <code>work/af-logs/usb-probe2</code>–<code>4</code>.</p>
 <ul>
@@ -397,9 +397,9 @@ number, one <code>sendln</code> per line, and a call to <code>RACK.SH</code>,
 which writes the acknowledgement that <code>status</code> shows as
 <code>relay_ack</code>. A guard inside the file skips a sequence number the
 script has already run. Only commands in <code>SHELL_ALLOW</code>
-(<code>tools/af_debug_card.py</code>) pass, with arguments from
+(<code>tools/af/af_debug_card.py</code>) pass, with arguments from
 <code>[A-Za-z0-9 ._-]</code>; the Mac checks the same list. The acknowledgement
-takes about 0.5 s. Client: <code>tools/af_remote.py shell 'LINE' …</code> and
+takes about 0.5 s. Client: <code>tools/af/af_remote.py shell 'LINE' …</code> and
 <code>nd on|off</code>. Once, the relay stopped after its second command, before
 a press and <code>ND_open</code>; after a power cycle the same sequence ran
 without a problem (cause unknown). Every call reports whether it was
@@ -412,7 +412,7 @@ three were written 0.45&ndash;0.50&nbsp;s after the previous acknowledgement, wh
 when the loop reads the file next (11 batches in that window, 3 stalled; 85 outside it,
 none). Holding the Mac's writes out of that window cut the rate, but writes at other
 moments still met the loop's routine reads (seq 92, 23 and 67, 5.6&ndash;6.9&nbsp;s after an
-acknowledgement). The recipe card (<code>tools/recipe_card.py</code>) therefore no longer
+acknowledgement). The recipe card (<code>tools/recipes/recipe_card.py</code>) therefore no longer
 lets Linux write the card on its own. The <code>shell</code> CGI only queues the batch in
 RAM (<code>/tmp/recipewww/relay.next</code>, <code>busy</code> while one is pending).
 Each round the loop runs <code>lcmd sh /tmp/recipewww/PULL.SH</code>, waits 400&nbsp;ms,

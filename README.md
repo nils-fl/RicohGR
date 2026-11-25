@@ -10,8 +10,11 @@ firmware 1.60, and the tools built on it:
 - **SD-card setups** that use the camera's own script and engineering-shell
   features: the built-in AF debug log, a Wi-Fi test bench for AF patches in
   RAM, and a card that writes recipes into the Custom 1/2 image-control slots.
-- **A firmware build** with a tested dim-light AF setting
-  (`tools/af_firmware.py`), flashed on the maintainer's camera on 2026-11-20.
+- **Image effects**: grain on the colour controls and stronger grain levels,
+  found offline and tested on the camera in RAM (`tools/effects/`).
+- **Firmware builds** with a tested dim-light AF setting
+  (`tools/af/af_firmware.py`, flashed on the maintainer's camera on 2026-11-20)
+  and AF plus grain (`tools/effects/effects_firmware.py`, built).
 
 Everything is for the **GR IIIx with firmware 1.60** only. Other models and
 versions are refused by the tools or simply not covered.
@@ -33,14 +36,32 @@ versions are refused by the tools or simply not covered.
 | Path | What |
 | --- | --- |
 | `docs/` | The documents, as HTML. Start at [`docs/index.html`](docs/index.html) |
-| `tools/` | Python tools (table below); `tools/tests/` for pytest |
-| `recipes/`, `RECIPES.TXT.example` | Community recipes and the recipe file format |
+| `tools/firmware/` | Firmware container and RTOS: download, unpack, repack, patch guard, analysis helpers |
+| `tools/af/` | Autofocus: SD-card setups, Wi-Fi bench, log analysis, parameter search, AF build |
+| `tools/effects/` | Grain effects: map, RAM test card, automated sessions, AF + grain build |
+| `tools/recipes/` | Recipe library checks and the recipe card for Custom 1/2 |
+| `tools/tests/` | pytest for all of the above (`pytest tools/tests`) |
+| `RECIPES.TXT.example` | The recipe file format. Community recipe collections live in the companion repository [GR Lab](https://github.com/nils-fl/gr-lab) (`recipes/`) |
 | `site/` | Static summary page (Cloudflare Workers assets); the maintainer's deployment |
-| `firmware/` | *Ignored.* Official update files, downloaded by `tools/fetch_firmware.py` |
+| `firmware/` | *Ignored.* Official update files, downloaded by `tools/firmware/fetch_firmware.py` |
 | `work/` | *Ignored.* Everything generated: decoded images, caches, card files, camera logs |
 
 The repository contains no firmware and none of its decoded content. Each
 developer downloads the official file from Ricoh.
+
+Run every tool from the repository root (`python3 tools/<folder>/<tool>.py`).
+The tools import each other by module name across the four folders.
+
+What ends up in `work/` (ignored, never committed):
+
+| Path in `work/` | Written by |
+| --- | --- |
+| `*.decoded.bin`, `xrefs*.pkl`, `index*.json`, `segments/`, `initramfs/` | firmware tools: decoded images and analysis caches |
+| `firmware-af/`, `firmware-af-afc/`, `firmware-af-effects/` | the firmware builds (`FWDC243B.BIN`) |
+| `firmware-stock/` | the official 1.60 file named for flashing (`FWDC243B.BIN`) |
+| `af-debug-card/`, `af-card-*/`, `recipe-card/`, `effects-card/`, `effects-solo/` | card files, to copy onto a card |
+| `af-logs/`, `recipe-tests/`, `effects-tests/` | what came back from the camera: logs, photos, measurements |
+| `card-backup-*/` | copies of the scripts card taken before changing it |
 
 ## Setup
 
@@ -57,14 +78,14 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
 # Download the official GR IIIx 1.60 package and extract the .bin into firmware/
-python3 tools/fetch_firmware.py
+python3 tools/firmware/fetch_firmware.py
 
 # Decode the container into work/ and print header, version and checksum
-python3 tools/gr_unpack.py firmware/fwdc243b-v160.bin
+python3 tools/firmware/gr_unpack.py firmware/fwdc243b-v160.bin
 
 # Map the payload regions, index names by subsystem
-python3 tools/segments.py work/fwdc243b-v160.decoded.bin
-python3 tools/strings_index.py work/fwdc243b-v160.decoded.bin
+python3 tools/firmware/segments.py work/fwdc243b-v160.decoded.bin
+python3 tools/firmware/strings_index.py work/fwdc243b-v160.decoded.bin
 
 pytest tools/tests
 ```
@@ -77,7 +98,7 @@ Check the reference values for 1.60:
 Reading the RTOS from Python:
 
 ```python
-import sys; sys.path.insert(0, "tools")
+import sys; sys.path.insert(0, "tools/firmware")
 from rtos_analysis import *          # reads work/fwdc243b-v160.decoded.bin (override with GR_FW)
 show(0x5340ed10, 40)                 # disassemble CalcQuadraticCurve
 vtables_for("ZafCorrelation")        # find a class's virtual methods
@@ -95,7 +116,7 @@ files macOS leaves on exFAT cards before ejecting (`dot_clean -m /Volumes/<card>
 ### 1. Turn SD scripts on (once)
 
 ```sh
-python3 tools/af_debug_card.py      # writes work/af-debug-card/{enable,log,disable}
+python3 tools/af/af_debug_card.py      # writes work/af-debug-card/{enable,log,disable}
 ```
 
 1. Copy the contents of `work/af-debug-card/enable/` to the card root.
@@ -115,17 +136,17 @@ Only one setup can be on a card at a time, since each brings its own
 
 Copy `work/af-debug-card/log/SCRIPT` to the card. At each power-on it turns
 on the camera's own contrast-AF CSV log. Analyse the CSVs with
-`tools/af_csv.py` and `tools/af_light.py`; `tools/af_charts.py` rebuilds
+`tools/af/af_csv.py` and `tools/af/af_light.py`; `tools/af/af_charts.py` rebuilds
 [`docs/af-charts.html`](docs/af-charts.html) from your logs in
 `work/af-logs/`. Procedure, sessions and results:
 [`docs/af-debug-log.html`](docs/af-debug-log.html).
 
 ### 3. Wi-Fi AF test bench (stock firmware only)
 
-`python3 tools/af_debug_card.py --remote` writes a card that serves a small
-endpoint on port 8080. With it `tools/af_remote.py` presses AF through the
+`python3 tools/af/af_debug_card.py --remote` writes a card that serves a small
+endpoint on port 8080. With it `tools/af/af_remote.py` presses AF through the
 camera's Wi-Fi API, switches RAM patches ("arms") and reads the AF trace.
-`tools/af_optimize.py` runs the Optuna parameter search on top of it.
+`tools/af/af_optimize.py` runs the Optuna parameter search on top of it.
 
 - Join the camera's Wi-Fi on the Mac. Requests are pinned to `--iface`
   (default `en0`) in case the wired network uses the same 192.168.0.x range.
@@ -137,8 +158,8 @@ camera's Wi-Fi API, switches RAM patches ("arms") and reads the AF trace.
 ### 4. Recipes into Custom 1 / Custom 2 (test, not yet run on a camera)
 
 ```sh
-python3 tools/recipe_card.py card                      # writes work/recipe-card/
-python3 tools/recipe_card.py lines recipes/ricoh-recipes.txt "Reggie's Color Negative" --slot 1
+python3 tools/recipes/recipe_card.py card                      # writes work/recipe-card/
+python3 tools/recipes/recipe_card.py lines ../GRLab/recipes/ricoh-recipes.txt "Reggie's Color Negative" --slot 1
 ```
 
 Copy `work/recipe-card/*` to the card root, switch on (the AF lamp flashes
@@ -151,14 +172,14 @@ settings that are not sent yet:
 ### 5. The AF firmware build (flash at your own risk)
 
 ```sh
-python3 tools/af_firmware.py        # writes work/firmware-af/FWDC243B.BIN
-python3 tools/af_firmware.py --afc  # + AF-C fast drive: work/firmware-af-afc/FWDC243B.BIN
+python3 tools/af/af_firmware.py        # writes work/firmware-af/FWDC243B.BIN
+python3 tools/af/af_firmware.py --afc  # + AF-C fast drive: work/firmware-af-afc/FWDC243B.BIN
 ```
 
 The build changes 19 words in the contrast-AF code, the setting tested on
 the bench as X875+FALLS2+OPT+NO29: better dim-light AF, 49 instead of 29 fps
-in dim light. `tools/gr_repack.py` re-runs the updater's container checks
-and, with `--allow af`, `tools/patch_guard.py` refuses any change outside
+in dim light. `tools/firmware/gr_repack.py` re-runs the updater's container checks
+and, with `--allow af`, `tools/firmware/patch_guard.py` refuses any change outside
 the contrast-AF units. What changes, the AF-C check before flashing and the
 first results: [`docs/af-debug-log.html#af-flash`](docs/af-debug-log.html#af-flash).
 `--afc` adds one more word: AF-C searches use the 200 fps AF drive instead of
@@ -174,8 +195,8 @@ starts the update. **To go back**, flash the official 1.60 file the same way.
 ### 6. Grain on the colour controls and a stronger grain (RAM test, tested 2026-11-25)
 
 ```sh
-python3 tools/effects_card.py                       # writes work/effects-card/
-python3 tools/effects_card.py --grain 0x80,0x180,0x280   # other Low/Mid/High scales
+python3 tools/effects/effects_card.py                       # writes work/effects-card/
+python3 tools/effects/effects_card.py --grain 0x80,0x180,0x280   # other Low/Mid/High scales
 ```
 
 Copy `work/effects-card/*` to the root of a card on which SD scripts are
@@ -193,7 +214,7 @@ flashes twice when the changes are in place and stays on for 3 s when
 they failed (see `SCRIPT/EFFECTS/EFFECTS.LOG`). Power off, or start
 without the card, and the camera is stock again. It is safe with the AF
 build flashed: no word is shared with it, and no bench is used.
-Automated instead: `python3 tools/effects_solo.py card` writes a recipe card whose
+Automated instead: `python3 tools/effects/effects_solo.py card` writes a recipe card whose
 solo run shoots stock and patched grain by itself after one power-on (11 shots,
 about 3 minutes), and `effects_solo.py import` measures the grain afterwards.
 `effects_solo.py card --test leak` checks that colour shots do not pick up
@@ -204,12 +225,12 @@ Findings, test order and what is still open:
 ### 7. The AF + grain firmware build (flash at your own risk; built, not flashed)
 
 ```sh
-python3 tools/effects_firmware.py                    # writes work/firmware-af-effects/FWDC243B.BIN
-python3 tools/effects_firmware.py --grain 0x80,0x180,0x280   # other Low/Mid/High scales
+python3 tools/effects/effects_firmware.py                    # writes work/firmware-af-effects/FWDC243B.BIN
+python3 tools/effects/effects_firmware.py --grain 0x80,0x180,0x280   # other Low/Mid/High scales
 ```
 
 The 19 AF words of setup 5 plus A and B of setup 6 (62 words; B at 1×, 2×
-and 3× the stock High). `tools/gr_repack.py` runs `tools/patch_guard.py`
+and 3× the stock High). `tools/firmware/gr_repack.py` runs `tools/firmware/patch_guard.py`
 with `--allow af --allow effects`. The effects list has no source files:
 it accepts only the exact words tested in RAM (`effects_map.effect_word_kind`).
 Their data must be used only by RAW-development files, and the row lists
@@ -222,6 +243,8 @@ file. Details: [`docs/image-effects.html#flash`](docs/image-effects.html#flash).
 
 ## Tools
 
+**`tools/firmware/`**
+
 | Tool | Purpose |
 | --- | --- |
 | `fetch_firmware.py` | Downloads an official package from Ricoh (`--package gr3x_v160.zip` by default) and records its SHA-256 |
@@ -231,9 +254,13 @@ file. Details: [`docs/image-effects.html#flash`](docs/image-effects.html#flash).
 | `initramfs.py` | Lists or extracts files from the Linux initramfs (e.g. `webapid`, `mtpd`) |
 | `rtos_analysis.py` | Interactive helpers for reading the RTOS image (disassembly, cross-references, vtables) |
 | `gr_repack.py` | Rebuilds a container from a decoded payload and re-runs the updater's checks (writes a file, installs nothing) |
-| `patch_guard.py` | Allows payload changes only in RAW-development code (default) or contrast-AF code (`--allow af`) |
-| `af_firmware.py` | Builds the AF update file of setup 5 |
-| `af_debug_card.py` | Card files for SD scripts, the AF debug log, the Wi-Fi bench (`--remote`) and AF trace decoding |
+| `patch_guard.py` | Allows payload changes only in RAW-development code (default), contrast-AF code (`--allow af`) or the tested grain words (`--allow effects`) |
+
+**`tools/af/`**
+
+| Tool | Purpose |
+| --- | --- |
+| `af_debug_card.py` | Card files for SD scripts, the AF debug log, the Wi-Fi bench (`--remote`) and AF trace decoding; also the RAM patch writer the other cards use |
 | `af_remote.py` | Drives the Wi-Fi bench from the Mac: presses, arms, sessions, trace fetch |
 | `af_optimize.py` | Optuna search over the contrast-AF detector constants, on the bench |
 | `af_csv.py` | One row per contrast-AF run from the debug CSVs |
@@ -242,10 +269,21 @@ file. Details: [`docs/image-effects.html#flash`](docs/image-effects.html#flash).
 | `af_tolerance.py` | Focus tolerance on the flashed camera: AF-S lock, motor offset, photo, sharpness per patch |
 | `af_charts.py` | Writes `docs/af-charts.html` from your logs |
 | `af_timing_tally.py` | Summarises AF timings measured from high-speed video |
-| `effects_map.py` | Read-only map of the grain path and the candidate effect words, checked against the 1.60 image |
+| `af_firmware.py` | Builds the AF update file of setup 5 |
+
+**`tools/effects/`**
+
+| Tool | Purpose |
+| --- | --- |
+| `effects_map.py` | Read-only map of the grain path and the effect words, checked against the 1.60 image |
 | `effects_card.py` | RAM test card for the grain changes A and B (setup 6) |
 | `effects_solo.py` | Automated grain sessions (stock vs arm B; `--test leak`) as recipe-card solo runs, and their `import` with grain measurement |
 | `effects_firmware.py` | AF + grain update file (setup 7), guarded by `patch_guard.py --allow af --allow effects` |
+
+**`tools/recipes/`**
+
+| Tool | Purpose |
+| --- | --- |
 | `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |
 | `recipe_card.py` | The recipe card of setup 4 and its Mac commands |
 
@@ -290,13 +328,13 @@ data), **Structural** (from names, strings and dependencies) or **Inferred**
 - Never log or commit the camera's Wi-Fi SSID, key, serial or MAC address.
   `/v1/props` returns them; `af_remote.py` drops them (`PRIVATE_PROPS`).
 - Run `pytest tools/tests` before committing. Changes to the recipe rules in
-  `tools/recipes.py` must also go into the companion copy of the file, which
+  `tools/recipes/recipes.py` must also go into the companion copy of the file, which
   has the shared test vectors.
 
 ## Credits and related work
 
 - [yeahnope/gr_unpack](https://github.com/yeahnope/gr_unpack): documentation
-  of the GR III firmware container format that `tools/gr_unpack.py`
+  of the GR III firmware container format that `tools/firmware/gr_unpack.py`
   implements.
 - [radium-wang/ricoh-gr4-firmware-analysis-and-feature-expansion](https://github.com/radium-wang/ricoh-gr4-firmware-analysis-and-feature-expansion):
   GR IV firmware research that prompted this project. No code from it is
@@ -311,7 +349,7 @@ data), **Structural** (from names, strings and dependencies) or **Inferred**
   is included here.
 - [Maxwooow/Ricoh-GRMod](https://github.com/Maxwooow/Ricoh-GRMod): firmware
   modding tool for GR III, GR IIIx and GR IV (GPL-2.0-only). Its container
-  code was used to test `tools/gr_repack.py`; no code from it is included
+  code was used to test `tools/firmware/gr_repack.py`; no code from it is included
   here.
 
 ## Licence and disclaimer

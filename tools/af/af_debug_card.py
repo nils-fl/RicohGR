@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write the SD-card files that turn on the GR IIIx's built-in AF debug log.
 
-Usage:  python3 tools/af_debug_card.py [--out DIR] [--flags C]
+Usage:  python3 tools/af/af_debug_card.py [--out DIR] [--flags C]
 Writes three card roots into DIR (default work/af-debug-card/), never to a
 card directly. Copy the contents of one folder to the card root:
 
@@ -41,7 +41,7 @@ FLAGS = "PCZO"
 # snapshot to Mnnn.BIN (cp works on the card, mv does not). It holds the AF debug object
 # 0x5506b56c (vtable 0x53c15308, flags +0x27..+0x2a, log slots +0x112c), its
 # guard 0x5506b564, the CSV counter 0x5506b568 and the busy bytes 0x5506b56a,
-# 0x5506c765. tools/af_debug_card.py --read-mem decodes it.
+# 0x5506c765. tools/af/af_debug_card.py --read-mem decodes it.
 PROBE_PAGE, PROBE_PAGES = 0x5506b000, 23
 # 23 pages reach the static contrast AF object (0x5506c938) up to +0x156c7:
 # the inputs of the fast-drive selector 0x533f70a4 (+0xc44e, +0xc484, +0xc488,
@@ -158,7 +158,7 @@ AUTO_SMOKE = dict(AUTO_DEFAULTS, blocks=1, per_block=5, steps=True, bare=3, prob
 # USB / HTTP probe: PROBE.SH stages after CAF.OK, then 3 normal presses.
 AUTO_PROBE = dict(AUTO_DEFAULTS, blocks=1, per_block=3, probe_sh=True)
 # Remote mode: no scripted presses. After CAF.OK the card starts a small web
-# endpoint (busybox httpd + CGI) for the Mac (tools/af_remote.py); the Mac
+# endpoint (busybox httpd + CGI) for the Mac (tools/af/af_remote.py); the Mac
 # presses through the camera's own API (POST /v1/lens/focus, the same AF as a
 # half-press, usb-probe4) over the camera's Wi-Fi.
 AUTO_REMOTE = dict(AUTO_DEFAULTS, blocks=1, per_block=1, remote=True, remote_min=45)
@@ -2368,7 +2368,7 @@ RELAY_PAD_SH = (
 
 # ---- bench card for a camera with the flashed AF build (--flashed) ----------------------
 # The --remote card's arm CGI restores every site list first; on a camera that runs
-# tools/af_firmware.py's build that writes stock words over the flashed setting. This card
+# tools/af/af_firmware.py's build that writes stock words over the flashed setting. This card
 # has no arm, no rm and no patch uploads: tools only (AFCFAST.BIN is preinstalled as one),
 # a tracer that writes to RAM and is started per trial (trace CGI), and the pull relay, so
 # Linux writes the card only when the RTOS asks (PULL.SH). See docs/af-debug-log.html.
@@ -2689,9 +2689,9 @@ def main():
     auto.add_argument("--auto-smoke", action="store_true", help="smoke check: 5 automated half-presses, no patch")
     auto.add_argument("--remote", action="store_true",
                       help="remote mode: no scripted presses; after CAF.OK a web endpoint on port "
-                           f"{REMOTE_PORT} for tools/af_remote.py (camera Wi-Fi), trace on")
+                           f"{REMOTE_PORT} for tools/af/af_remote.py (camera Wi-Fi), trace on")
     auto.add_argument("--flashed", action="store_true",
-                      help="bench card for a camera running the flashed AF build (tools/af_firmware.py): "
+                      help="bench card for a camera running the flashed AF build (tools/af/af_firmware.py): "
                            f"no arm, tools only, RAM trace per trial, pull relay; files under {FLASHED_DIR}")
     auto.add_argument("--remote-min", type=int, default=45, metavar="MIN",
                       help="with --remote: trace length in minutes (default %(default)s)")
@@ -2752,7 +2752,7 @@ def main():
             path.write_bytes(data)
             print(f"wrote {path} ({len(data)} bytes)")
         print(f"\nCopy {args.out}/SCRIPT to the card (scripts must already be enabled). "
-              "Drive it with tools/af_remote.py (afc-hold).")
+              "Drive it with tools/af/af_remote.py (afc-hold).")
         return
     flags = args.flags.upper()
     if not flags or any(c not in FLAGS for c in flags) or len(set(flags)) != len(flags):

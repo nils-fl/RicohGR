@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Offline helpers for reading the GR IIIx RTOS image (requires: pip install capstone).
 
-Usage (interactive):  import sys; sys.path.insert(0, "tools"); from rtos_analysis import *
+Usage (interactive):  import sys; sys.path.insert(0, "tools/firmware"); from rtos_analysis import *
 Set GR_FW to the decoded payload path (default work/fwdc243b-v160.decoded.bin).
 RTOS load base 0x53000000 at file offset 0x10870 (GR IIIx 1.60; GR IV uses 0x17D10).
 Read-only: nothing here writes to the firmware or talks to a camera.
 """
 import os
 import array, re, pickle
-FW=os.environ.get("GR_FW","work/fwdc243b-v160.decoded.bin")
+_WORK=os.path.join(os.path.dirname(os.path.abspath(__file__)),"..","..","work")  # repo work/, from any folder
+FW=os.environ.get("GR_FW",os.path.join(_WORK,"fwdc243b-v160.decoded.bin"))
 BASE,OFF=0x53000000,0x10870
 CODE_END=0xc1cb78
 d=open(FW,"rb").read()
@@ -19,7 +20,7 @@ def cstr(v,n=120):
 def arm_imm(x): return ((x>>4)&0xf000)|(x&0xfff)
 def build_xrefs():
     # movw/movt pairs up to 16 instructions apart (8 missed e.g. 0x536e9bdc/0x536e9c08).
-    cache="work/xrefs-w16.pkl" if FW.endswith("fwdc243b-v160.decoded.bin") else None
+    cache=os.path.join(_WORK,"xrefs-w16.pkl") if FW.endswith("fwdc243b-v160.decoded.bin") else None
     if cache is None: raise SystemExit("build_xrefs: no cache path for this firmware; set one first")
     if os.path.exists(cache): return pickle.load(open(cache,"rb"))
     w=array.array("I",d[OFF:CODE_END&~3]); last={}; xr={}
