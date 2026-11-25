@@ -9,8 +9,10 @@ grain by itself after power-on, using the recipe card's solo runs (tools/recipe_
         EV against the plan, measures the grain of a centre crop and writes crops and report.txt
 
 The solo run SESSION (one power-on; SESSION.ON is deleted when it starts):
-  countdown: the AF lamp blinks slowly for 30 s (point the camera at a plain, evenly lit,
-             mid-grey surface, slightly out of focus is fine, and leave it)
+  settings:  the AF lamp is on steadily for about 12 s while Custom 1 is set up
+  countdown: then it blinks slowly for 30 s (point the camera at a plain, evenly lit,
+             mid-grey surface, slightly out of focus is fine, and leave it); the first
+             shutter release follows the last blink, then one shot about every 10 s
   stock:     Monotone grain Off, Low, Mid, High; Negative Film grain Off, High
   B on:      the grain-scale words in RAM (B.BIN), then Monotone Low, Mid, High; Negative Film High
   B off:     B.BIN restore (stock words back), Monotone High again (must match the stock High)
@@ -109,12 +111,21 @@ def restore_user(user_recipe):
 
 
 def steps_for(user_recipe=USER_RECIPE):
+    # Settings first, with the AF lamp on steadily (they take about 12 s), then the countdown, so
+    # the first shutter release follows the last blink at once (a first run was switched off in
+    # the silent gap between the countdown and shot 1).
     steps = [("sh", f"busybox mkdir -p {RAM}; cp {rc.D}/FX/A.BIN {rc.D}/FX/B.BIN {RAM}/; "
                     f"busybox chmod 755 {RAM}/A.BIN {RAM}/B.BIN; log fx copied $?"),
-             ("log", "countdown")] + blink(COUNTDOWN_S)
-    steps += [("cmd", "camctl_set_iso_auto off", 500), ("cmd", f"camctl_set_iso {ISO_APEX}", 500),
-              ("cmd", "camctl_set_exp_comp 0.0", EV_PAUSE)]
+             ("log", "settings"), ("cmd", "Af_Led_On", 300),
+             ("cmd", "camctl_set_iso_auto off", 500), ("cmd", f"camctl_set_iso {ISO_APEX}", 500),
+             ("cmd", "camctl_set_exp_comp 0.0", EV_PAUSE)]
     sent, plan, phase = {}, [], None
+    ph0, control0, g0 = shots()[0]
+    for ln in recipes.userdata({**at_zero(control0), "grain": str(g0), **SHOOTING}, SLOT)["lines"]:
+        steps.append(("cmd", ln, UD_PAUSE))
+        sent[ln.split()[2]] = ln.split()[3:]
+    steps += [("cmd", f"UserData Set StillActiveImageControlSet No{SLOT}", ACTIVATE_PAUSE),
+              ("cmd", "Af_Led_Off", 1000), ("log", "countdown")] + blink(COUNTDOWN_S)
     for n, (ph, control, g) in enumerate(shots(), 1):
         if ph != phase:
             if ph == "B":
