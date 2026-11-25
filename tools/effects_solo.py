@@ -16,7 +16,7 @@ The solo run SESSION (one power-on; SESSION.ON is deleted when it starts):
   stock:     Monotone grain Off, Low, Mid, High; Negative Film grain Off, High
   B on:      the grain-scale words in RAM (B.BIN), then Monotone Low, Mid, High; Negative Film High
   B off:     B.BIN restore (stock words back), Monotone High again (must match the stock High)
-  A on:      the capability-table words (A.BIN) stay in RAM until power-off, for the RAW
+  A on:      the capability-table and row-list words (A.BIN) stay in RAM until power-off, for the RAW
              development check by hand (Positive Film: is there a Grain row?)
   end:       Custom 1 gets the user's recipe back, Highlight Correction Auto, EV 0, ISO Auto; the
              AF lamp stays on for 10 s

@@ -15,7 +15,9 @@ The path, image control to pixels (Read unless noted):
      blends two tone curves (0x538f19d4 up, 0x538f1bd4 down) composited through a noise mask
      with the S-curve 0x538f1dd4.
 Gates that keep grain off the colour controls:
-  RAW development: capability table 0x53b5a750 (13 rows x 17 slots), column 15;
+  RAW development: capability table 0x53b5a750 (13 rows x 17 slots), column 15, which the setter
+  checks; and the row lists 0x53b3476c of RawDevelopmentImageControlDetailSetController, which
+  decide the rows the screen shows (grain, row 15, only in the monotone lists);
   shooting: ImageControlModel::SetParticle 0x532c1784 stores only for the four monotone controls
   and Negative Film, and the still planner 0x535131c0 runs the digital-filter stage for the colour
   controls only when shading or clarity is set.
@@ -39,6 +41,24 @@ ROWS = {1: "standard", 2: "vivid", 3: "monotone", 4: "soft_monotone", 5: "hard_m
 STOCK_GRAIN_ROWS = {3, 4, 5, 6, 7}
 # colour controls that get grain; HDR Tone is left out (its own tone path, no shading or clarity)
 UNLOCK_GRAIN_ROWS = (1, 2, 8, 9, 10, 12)
+
+# ---- row lists of the RAW-development detail screen ------------------------------------------
+# 0x53b3476c: 3 variants x 12 controls of (u8 *rows, u32 count); entry = variant * 12 + control
+# (controller bytes +0x19a and +0x19b, 0x53190268). Row ids are the parameter slots above, plus
+# 17 in variants 1 and 2. Variant 2 shares its lists with variant 1. Lists are 4-byte aligned, so
+# a list whose length is not a multiple of 4 ends in zero padding.
+ROW_TABLE = 0x53B3476C
+ROW_VARIANTS, ROW_CONTROLS = 3, 12
+# table order, Read from the rows each list carries (8 Bleach Bypass toning, 9 Retro toning,
+# 10/16 HDR, 11 Cross Process); 0/1 and 6/7 by their order in the image-control menu (Inferred)
+ROW_CONTROL_NAMES = ("standard", "vivid", "monotone", "soft_monotone", "hard_monotone",
+                     "hi_contrast_bw", "negative_film", "positive_film", "bleach_bypass", "retro",
+                     "hdr_tone", "cross_process")
+STOCK_GRAIN_LISTS = {2, 3, 4, 5}
+GRAIN_ROW_CONTROLS = (0, 1, 6, 7, 8, 9, 11)  # every colour control but HDR Tone
+# 0x5318e1c4 gives the scroll list as many items as the longest list (stock 11). It may run
+# before the card's patch, so no list may grow beyond that.
+ROW_MAX = 11
 
 # ---- grain strength (shared code: RAW development and shooting) --------------------------------
 # 0x5367ad3c: r5 = level from DigitalFilterConfig +4 (1 High, 2 Mid, 3 Low; the settings codes)
@@ -76,6 +96,11 @@ FACTS = [
     (0x5354c58c, "mov r2, #0xc3"),                    # property id of grain
     (0x535131c0, "ldrb r3, [r1, #0x77c]"),            # planner reads the image tone
     (0x53513248, "ldrb r1, [r1, #0x795]"),            # ... and grain only on its mono/NF path
+    (0x5319028c, "movw r3, #0x476c"),                 # detail screen: row-list table
+    (0x53190294, "mla r2, ip, r1, r2"),               # ... entry = variant * 12 + control
+    (0x531902a0, "cmp r3, #0x11"),                    # ... one case per row id 0-17
+    (0x5318e1e4, "add r0, r3, #0x120"),               # longest list over the 3 x 12 entries
+    (0x53288488, "ldrb r3, [r3, #7]"),                # grain row setter: capability check
 ]
 
 
@@ -120,6 +145,36 @@ def cap_sites(rows=UNLOCK_GRAIN_ROWS, slot=SLOT_GRAIN):
     return [(wa, word(wa), new) for wa, new in sorted(words.items()) if new != word(wa)]
 
 
+def row_entry(i):
+    """(entry address, list address, count) of table entry i (variant * 12 + control)."""
+    a = ROW_TABLE + 8 * i
+    return a, word(a), word(a + 4)
+
+
+def row_list(i):
+    _, p, n = row_entry(i)
+    return list(ra.d[ra.fo(p):ra.fo(p) + n])
+
+
+def row_sites(controls=GRAIN_ROW_CONTROLS, row=SLOT_GRAIN, max_rows=ROW_MAX):
+    """Append row `row` to the lists of `controls` in every variant: the id goes into the list's
+    first padding byte, the count word grows by one. Lists without padding, or that would grow
+    beyond max_rows, are left alone."""
+    words = {}
+    for v in range(ROW_VARIANTS):
+        for c in controls:
+            a, p, n = row_entry(v * ROW_CONTROLS + c)
+            if row in row_list(v * ROW_CONTROLS + c) or n % 4 == 0 or n + 1 > max_rows:
+                continue
+            b = p + n
+            wa, shift = b & ~3, 8 * (b & 3)
+            if (word(wa) >> shift) & 0xFF:
+                raise ValueError(f"0x{b:08x} is not padding")
+            words[wa] = (words.get(wa, word(wa)) & ~(0xFF << shift)) | (row << shift)
+            words[a + 4] = n + 1
+    return [(wa, word(wa), new) for wa, new in sorted(words.items())]
+
+
 def grain_scale_sites(low=0x40, mid=0x80, high=0x100):
     out = []
     for name, value in (("low", low), ("mid", mid), ("high", high)):
@@ -154,6 +209,16 @@ def check():
             bad.append(f"planner 0x{a:08x}: 0x{word(a):08x}, expected 0x{stock:08x}")
         elif enc_b(stock >> 28, a, PLANNER_SHADING_CLARITY) != stock:
             bad.append(f"planner 0x{a:08x}: encoder does not reproduce the stock word")
+    ptrs = [row_entry(i)[1] for i in range(ROW_VARIANTS * ROW_CONTROLS)]
+    for i in range(ROW_VARIANTS * ROW_CONTROLS):
+        _, p, n = row_entry(i)
+        c = i % ROW_CONTROLS
+        if (SLOT_GRAIN in row_list(i)) != (c in STOCK_GRAIN_LISTS):
+            bad.append(f"row list {i} ({ROW_CONTROL_NAMES[c]}): grain row {not c in STOCK_GRAIN_LISTS}")
+        if p & 3 or not n <= ROW_MAX:
+            bad.append(f"row list {i}: at 0x{p:08x}, {n} rows")
+        if any(p + n <= q < (p + n + 3) & ~3 for q in ptrs) or any(ra.d[ra.fo(p) + n:ra.fo((p + n + 3) & ~3)]):
+            bad.append(f"row list {i}: the bytes after it are not free padding")
     up, down = (struct.unpack_from("<256h", ra.d, ra.fo(GRAIN_CURVES[k])) for k in ("up", "down"))
     if not (max(v - i for i, v in enumerate(up)) == 33 and min(v - i for i, v in enumerate(down)) == -33):
         bad.append("grain curves differ from the 1.60 values (±33 at most)")
@@ -172,8 +237,11 @@ def main():
     print("\nGrain column of the capability table (RAW development):")
     for r in range(1, CAP_ROWS):
         print(f"  {r:2d} {ROWS[r]:15s} {cap_row(r)[SLOT_GRAIN]}")
+    print("\nRow lists of the RAW-development detail screen (variant 0):")
+    for c in range(ROW_CONTROLS):
+        print(f"  {c:2d} {ROW_CONTROL_NAMES[c]:15s} {row_list(c)}")
     if args.sites:
-        groups = [("A  grain on colour controls, RAW development (data)", cap_sites()),
+        groups = [("A  grain on colour controls, RAW development (data)", cap_sites() + row_sites()),
                   ("B  grain scale example: Low 0x100, Mid 0x200, High 0x300", grain_scale_sites(0x100, 0x200, 0x300)),
                   ("C1 planner: grain triggers the filter stage for colour controls", planner_sites())]
         for title, sites in groups:

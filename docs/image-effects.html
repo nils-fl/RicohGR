@@ -156,6 +156,17 @@ controls, Negative Film). RAW development keeps a full 13 × 17 grid per
 set, so the storage exists for every control. Only RAW-development
 functions read the table (<code>0x5328476c</code>,
 <code>0x53286e44</code>, <code>0x5328803c</code>)</td></tr>
+<tr><td>RAW development screen</td><td>row lists <code>0x53b3476c</code>
+of <code>RawDevelopmentImageControlDetailSetController</code>: 3 variants ×
+12 controls of (row ids, count)</td><td>The screen shows exactly the rows in
+the list of the control (entry = variant × 12 + control,
+<code>0x53190268</code>). Row 15 (grain) is only in the four monotone lists,
+not even in Negative Film's. The screen handles every row id 0–17 for any
+control. The grain row setter <code>0x5328843c</code> checks the capability
+table, its getter <code>0x53284480</code> has no check, and the default
+value for a colour control (<code>0x532c9748</code>) logs and returns 0
+(Off). <code>0x5318e1c4</code> sizes the scroll list to the longest list
+(11 rows).</td></tr>
 <tr><td>Storage when shooting</td><td>settings list, 1044 names</td><td>Particle
 entries exist only as <code>StillImageControlNo{0,1,2}Param&lt;mono&gt;Particle</code>
 and <code>AfterRelease…NegativeFilmParticle</code>. A colour control has
@@ -341,6 +352,30 @@ grain of the monotone controls as Off 0, Low 5, Mid 3, High 1. It does
 not change with arm B, because the stored setting is unchanged. For
 Negative Film, slots 17 and 19 read 8 at both grain Off and High, so
 Negative Film's grain is not recorded in this tag.</p>
+
+<h3 id="a-result">Arm A on the camera, 2026-11-25: no Grain row</h3>
+<p>With the six capability words in RAM (<code>EFFECTS.LOG</code>:
+<code>A=0</code>), RAW development of a Positive Film shot showed no
+Grain row. The capability table is only the setter's check; the rows
+come from the row lists above (Read). Arm A now also writes 26 row-list
+words: row 15 goes into the zero padding after each colour list, and the
+count grows by one. Standard, Vivid and both films get the row in all
+three variants. Bleach Bypass, Retro and Cross Process get it in variant
+0 only, because their variant 1 and 2 lists already have 11 rows, and a
+12th could exceed the scroll list if it was sized before the card ran.
+HDR Tone and the monotone lists stay stock
+(<code>tools/tests/test_effects.py</code>).</p>
+<p>Second try, same day: with the 32 words in RAM the Grain row appears
+for Positive Film. The JPEG developed from R0007217 (R0007228, Positive
+Film, saturation +2, key +1, contrast +3, sharpness +1) shows no grain at
+1:1. The noise in a flat patch is 6.1, against 4.3 for Negative Film
+without grain and 8.2 with stock High, and the higher contrast and
+sharpness may explain the 6.1 alone. Likely cause (Inferred): RAW
+development goes through the same still planner, which runs the
+digital-filter stage for the colour tones only when shading or clarity
+is set (§3), so the grain value is stored but never applied. Check
+without a patch: develop again with grain High and clarity +1. If grain
+then shows, the planner is the gate, and C1 (§4) lifts it.</p>
 
 <h2 id="open">6. Open, to settle on the camera</h2>
 <ol>

@@ -181,8 +181,8 @@ python3 tools/effects_card.py --grain 0x80,0x180,0x280   # other Low/Mid/High sc
 Copy `work/effects-card/*` to the root of a card on which SD scripts are
 already on (setup 1), and switch on. The card writes nothing to firmware.
 It writes two changes into RAM:
-- **A**: grain on Standard, Vivid, Positive Film, Bleach Bypass, Retro
-  and Cross Process in RAW development.
+- **A**: a Grain row in RAW development for Standard, Vivid, Positive
+  Film, Negative Film, Bleach Bypass, Retro and Cross Process.
 - **B**: stronger grain levels. By default Low, Mid and High become 1×,
   2× and 3× the stock High. This also applies to shots taken with the
   monotone controls and Negative Film.

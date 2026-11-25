@@ -8,8 +8,9 @@ contents to the root of a card on which SD scripts are already on (tools/af_debu
 enable/). At each power-on SCRIPT/STARTUP.TTL waits for Linux, then APPLY.SH writes the words
 of every arm whose .ON file is on the card, through /dev/mem, and logs the result:
 
-  A  grain on Standard, Vivid, Positive Film, Bleach Bypass, Retro and Cross Process in
-     RAW development (6 data words of the capability table 0x53b5a750)
+  A  grain on the colour controls but HDR Tone in RAW development: 6 data words of the
+     capability table 0x53b5a750 (the setter's check) and 26 of the row lists 0x53b3476c
+     (the Grain row the screen shows; Negative Film gets it too)
   B  grain strength: scales for Low, Mid and High (stock 0x40, 0x80, 0x100; default here
      0x100, 0x200, 0x300). Shared code: it also changes grain in shots taken with Monotone,
      the other monotone controls or Negative Film, and in RAW development.
@@ -41,7 +42,7 @@ STOCK_GRAIN = (0x40, 0x80, 0x100)
 
 
 def arm_sites(grain=DEFAULT_GRAIN):
-    return {"A": em.cap_sites(), "B": em.grain_scale_sites(*grain)}
+    return {"A": em.cap_sites() + em.row_sites(), "B": em.grain_scale_sites(*grain)}
 
 
 def apply_sh(arms):
