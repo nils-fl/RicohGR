@@ -38,6 +38,15 @@ def test_solo_refuses_unsafe_text():
         rc.solo_script("T", [("cmd", "UserData Set X 'y'", 300)])
 
 
+def test_solo_sh_steps_run_between_batches():
+    steps = [("cmd", "Af_Led_On", 300), ("sh", "$w/B.BIN; log patch B $?"), ("cmd", "Af_Led_Off", 300)]
+    script = rc.solo_script("T", steps).decode()
+    assert len(batches_of(script.encode())) == 2
+    assert script.index("END_B\n$w/B.BIN; log patch B $?\nb <<'END_B'") > 0
+    with pytest.raises(ValueError):
+        rc.solo_script("T", [("sh", "a\nb")])
+
+
 def test_remote_sh_and_solo_parse():
     files = rc.card_files()
     remote = files[f"{rc.CARD_DIR}/REMOTE.SH"].decode()

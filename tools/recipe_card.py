@@ -85,8 +85,9 @@ def solo_frame_bytes() -> int:
 
 
 def solo_script(name: str, steps) -> bytes:
-    """NAME.SH for a solo run. steps: ("log", text) or ("cmd", engineering-shell line, pause ms).
-    Commands between two log steps are packed into as few relay batches as fit one sector."""
+    """NAME.SH for a solo run. steps: ("log", text), ("cmd", engineering-shell line, pause ms) or
+    ("sh", a shell line run on Linux between two batches, e.g. a RAM patch writer).
+    Commands between two log or sh steps are packed into as few relay batches as fit one sector."""
     budget = RELAY_SIZE - 24 - solo_frame_bytes()
     out = [f"# solo run {name}: generated, see recipe_card.py solo_script\n", f". {WWW}/SOLO.LIB\n",
            f"log start {name}\n"]
@@ -104,6 +105,12 @@ def solo_script(name: str, steps) -> bytes:
                 raise ValueError(f"log text with unsafe characters: {text!r}")
             flush()
             out.append(f"log {text}\n")
+            continue
+        if st[0] == "sh":
+            if "\n" in st[1] or "END_B" in st[1]:
+                raise ValueError(f"bad shell line: {st[1]!r}")
+            flush()
+            out.append(st[1] + "\n")
             continue
         _, line, pause = st
         if "'" in line or "\n" in line:

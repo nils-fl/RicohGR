@@ -192,6 +192,9 @@ flashes twice when the changes are in place and stays on for 3 s when
 they failed (see `SCRIPT/EFFECTS/EFFECTS.LOG`). Power off, or start
 without the card, and the camera is stock again. It is safe with the AF
 build flashed: no word is shared with it, and no bench is used.
+Automated instead: `python3 tools/effects_solo.py card` writes a recipe card whose
+solo run shoots stock and patched grain by itself after one power-on (11 shots,
+about 3 minutes), and `effects_solo.py import` measures the grain afterwards.
 Findings, test order and what is still open:
 [`docs/image-effects.html`](docs/image-effects.html).
 
@@ -219,6 +222,7 @@ Findings, test order and what is still open:
 | `af_timing_tally.py` | Summarises AF timings measured from high-speed video |
 | `effects_map.py` | Read-only map of the grain path and the candidate effect words, checked against the 1.60 image |
 | `effects_card.py` | RAM test card for the grain changes A and B (setup 6) |
+| `effects_solo.py` | Automated grain session (stock vs arm B) as a recipe-card solo run, and its `import` with grain measurement |
 | `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |
 | `recipe_card.py` | The recipe card of setup 4 and its Mac commands |
 

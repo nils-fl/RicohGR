@@ -268,7 +268,23 @@ further. Other values: <code>--grain 0x80,0x180,0x280</code>.
 <code>--grain 0x40,0x80,0x100</code> (stock) leaves arm B off the
 card.</li>
 </ul>
-<p>Test, one change at a time. Take each comparison twice, with and
+<p><strong>Automated (arm B):</strong> <code>tools/effects_solo.py card</code>
+writes a recipe card (<code>tools/recipe_card.py</code>) with one solo run.
+After a single power-on, the camera works through it by itself:</p>
+<ul>
+<li>stock grain on Monotone (Off, Low, Mid, High) and Negative Film (Off,
+High);</li>
+<li><code>B.BIN</code>, then the same at the patched scales;</li>
+<li><code>B.BIN restore</code>, then one more stock High as a check;</li>
+<li>finally <code>A.BIN</code>, left in RAM for the RAW-development check by
+hand.</li>
+</ul>
+<p>Every patch step first waits 6 s, so that the last photo has finished
+developing. <code>effects_solo.py import</code> copies the photos. It
+measures the fine-detail spread of a 1024 px centre crop, compares
+patched Low with stock High (the same scale, <code>0x100</code>), and
+looks for the maker-note slot that records grain.</p>
+<p>Test by hand, one change at a time. Take each comparison twice, with and
 without the card:</p>
 <ol>
 <li><strong>B while shooting</strong>, no RAW development needed:
