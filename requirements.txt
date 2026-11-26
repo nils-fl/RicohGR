@@ -3,3 +3,5 @@ capstone>=5      # tools/firmware/rtos_analysis.py, tools/firmware/patch_guard.p
 numpy>=1.24      # tools/af/af_replay.py (also pulled in by optuna)
 optuna>=3        # tools/af/af_optimize.py
 pytest>=7        # tools/tests
+Pillow>=10       # photo imports: tools/effects/effects_solo.py, tools/focus/focus_probe.py
+scipy>=1.10      # tools/focus/focus_probe.py (the focus fit)

@@ -40,6 +40,7 @@ versions are refused by the tools or simply not covered.
 | `tools/af/` | Autofocus: SD-card setups, Wi-Fi bench, log analysis, parameter search, AF build |
 | `tools/effects/` | Grain effects: map, RAM test card, automated sessions, AF + grain build |
 | `tools/recipes/` | Recipe library checks and the recipe card for Custom 1/2 |
+| `tools/focus/` | Focus bracketing: the probe cards, the bracket planner and card, frame checks |
 | `tools/tests/` | pytest for all of the above (`pytest tools/tests`) |
 | `RECIPES.TXT.example` | The recipe file format. Community recipe collections live in the companion repository [GR Lab](https://github.com/nils-fl/gr-lab) (`recipes/`) |
 | `site/` | Static summary page (Cloudflare Workers assets); the maintainer's deployment |
@@ -50,7 +51,7 @@ The repository contains no firmware and none of its decoded content. Each
 developer downloads the official file from Ricoh.
 
 Run every tool from the repository root (`python3 tools/<folder>/<tool>.py`).
-The tools import each other by module name across the four folders.
+The tools import each other by module name across the folders.
 
 What ends up in `work/` (ignored, never committed):
 
@@ -59,8 +60,8 @@ What ends up in `work/` (ignored, never committed):
 | `*.decoded.bin`, `xrefs*.pkl`, `index*.json`, `segments/`, `initramfs/` | firmware tools: decoded images and analysis caches |
 | `firmware-af/`, `firmware-af-afc/`, `firmware-af-effects/` | the firmware builds (`FWDC243B.BIN`) |
 | `firmware-stock/` | the official 1.60 file named for flashing (`FWDC243B.BIN`) |
-| `af-debug-card/`, `af-card-*/`, `recipe-card/`, `effects-card/`, `effects-solo/` | card files, to copy onto a card |
-| `af-logs/`, `recipe-tests/`, `effects-tests/` | what came back from the camera: logs, photos, measurements |
+| `af-debug-card/`, `af-card-*/`, `recipe-card/`, `effects-card/`, `effects-solo/`, `focus-probe/`, `focus-bracket/`, `focus-watch/`, `focus-probe3/` | card files, to copy onto a card |
+| `af-logs/`, `recipe-tests/`, `effects-tests/`, `focus-tests/` | what came back from the camera: logs, photos, measurements |
 | `card-backup-*/` | copies of the scripts card taken before changing it |
 
 ## Setup
@@ -241,6 +242,69 @@ for them by test, not by unit. The protected ranges stay locked. Flash as
 in setup 5. To undo, flash `work/firmware-af/FWDC243B.BIN` or the official
 file. Details: [`docs/image-effects.html#flash`](docs/image-effects.html#flash).
 
+### 8. Focus bracketing, probe card (stock firmware; probe 1 run 2026-11-25, probe 2 not yet)
+
+```sh
+python3 tools/focus/focus_probe.py card [--probe 1|2]       # writes work/focus-probe/ (default 2)
+python3 tools/focus/focus_probe.py import /Volumes/…/DCIM/100RICOH --first R000…   # afterwards
+```
+
+Copy `work/focus-probe/SCRIPT` onto a card with SD scripts on (setup 1) and switch
+on. One solo run (about 2.5 minutes) sets Snap focus, blinks the AF lamp for 20 s
+(put the camera on a table or tripod, facing things from about 30 cm to far away)
+and shoots 12 frames at snap distances from 30 cm to infinity. Three of them
+(45, 70, 120 cm) are not in the menu: for those, one instruction of the
+shell's `UserData Set` matcher is rewritten in RAM for the moment of the
+setting. It ends with snap 250 cm and Focus Select (`--snap-after`,
+`--focus-after`). `import` estimates where each frame is focused. Findings:
+[`docs/focus-bracketing.html`](docs/focus-bracketing.html).
+
+### 9. Focus bracket (stock firmware; first run 2026-11-25)
+
+```sh
+python3 tools/focus/focus_bracket.py plan --near 0.25 --far inf --f 5.6   # frames and their sharp zones
+python3 tools/focus/focus_bracket.py card --near 0.25 --far inf --f 5.6   # writes work/focus-bracket/
+python3 tools/focus/focus_bracket.py check /Volumes/…/DCIM/100RICOH --first R000…   # afterwards
+```
+
+The frames are spaced by depth of field from `--near` to `--far` at the f-number you
+shoot at. Set the camera to Av at that f-number and put it on a tripod. Copy
+`work/focus-bracket/SCRIPT` onto a card with SD scripts on, then switch on: after a
+10 s blink (`--countdown`) the camera shoots the frames near to far. Every frame goes
+through ApplySnapDistance with its millimetres rewritten in RAM, seven frames per
+round. `check` reads each photo's lens position from the maker notes and confirms
+that the frames follow the plan.
+
+### 10. Focus modes on the dial (stock firmware; built, not yet run)
+
+```sh
+python3 tools/focus/focus_watch.py card --macro U1 --meter U2   # writes work/focus-watch/
+```
+
+Copy `work/focus-watch/SCRIPT` onto a card with SD scripts on; the watcher runs at every
+power-on. **Macro stack** (U1, saved with AF-S and Av): photo on the nearest point, wait
+for one blink, photo on the farthest point; the camera shoots the frames between them.
+**Snap meter**
+(U2, saved with AF-S and Fn = AF/Snap toggle; set Fn while on U2, then save U2 again, because each
+U mode recalls its own button setup): half-press on the subject and hold about a second;
+a beep, and a few seconds later the camera is in Snap at that distance, or the hyperfocal distance beyond it. The screen
+shows the exact distance (48cm, 1.6m, 12m) on the 0.3/1.5/2.5/3.5 m setting nearest to it; the lens goes to the exact distance. With your
+copyright field empty, Snap photos carry `GRSNAP:<snap mm>:<subject mm>` in EXIF Copyright. To measure again
+press Fn (back to AF) and half-press on the new subject. Use a tripod for U1 and ignore the stock distance labels on screen; a
+bracket cut off by switching off clears its copyright tag at the next power-on. Details and the probe 3
+results behind it: [`docs/focus-bracketing.html` §8](docs/focus-bracketing.html#modes).
+
+### 11. Focus probe 3 (stock firmware; run 2026-11-25)
+
+```sh
+python3 tools/focus/focus_probe3.py card     # writes work/focus-probe3/
+python3 tools/focus/focus_probe3.py import /Volumes/…/DCIM/100RICOH --first R000… --log …/RECIPE.LOG
+```
+
+What the dial focus modes need, in one session: which U mode is set, any distance
+through `CommonFocusPosMm` + Mf, the AF result in mm, and the copyright tag. Steps in the
+script's docstring and in [`docs/focus-bracketing.html` §8](docs/focus-bracketing.html#modes).
+
 ## Tools
 
 **`tools/firmware/`**
@@ -287,6 +351,15 @@ file. Details: [`docs/image-effects.html#flash`](docs/image-effects.html#flash).
 | `recipes.py` | Checks a `RECIPES.TXT` library, prints dial-in lists and `UserData Set` lines (`--userdata N`) |
 | `recipe_card.py` | The recipe card of setup 4 and its Mac commands |
 
+**`tools/focus/`**
+
+| Tool | Purpose |
+| --- | --- |
+| `focus_probe.py` | Probe card for focus bracketing (setup 8): off-menu snap distances, camera state on the card; `import` estimates each frame's focus |
+| `focus_bracket.py` | Focus bracket (setup 9): plan by depth of field, the card, and `check` of the frames' lens positions |
+| `focus_probe3.py` | Probe 3 (setup 11): dial, distance through Mf, AF result, copyright tag |
+| `focus_watch.py` | Focus modes on the dial (setup 10): macro stack and snap meter, a watcher on the recipe card |
+
 ## Documents
 
 | Document | Content |
@@ -297,6 +370,7 @@ file. Details: [`docs/image-effects.html#flash`](docs/image-effects.html#flash).
 | [`af-charts.html`](docs/af-charts.html) | Charts of the AF measurements |
 | [`firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) | Whether a modified firmware is accepted (checksum and version rule, no signature) and what a failure means |
 | [`remote-control.html`](docs/remote-control.html) | What the Wi-Fi API and USB can set |
+| [`focus-bracketing.html`](docs/focus-bracketing.html) | Focus bracketing from the SD card: the snap distance from the shell to the lens, the one-word RAM patch, the probe |
 | [`recipe-format.html`](docs/recipe-format.html) | The `RECIPES.TXT` format, the firmware's value sets and sending recipes to Custom 1/2 |
 | [`image-effects.html`](docs/image-effects.html) | Grain and the digital-filter stage: where grain is gated per control, grain strength, candidate changes |
 | [`gr-mod-landscape.html`](docs/gr-mod-landscape.html) | Community mods (GRKit, GR Mod, others), built-in AF debug logging, recipes via `UserData Set` |

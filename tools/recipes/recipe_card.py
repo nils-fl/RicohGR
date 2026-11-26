@@ -88,9 +88,15 @@ def solo_script(name: str, steps) -> bytes:
     """NAME.SH for a solo run. steps: ("log", text), ("cmd", engineering-shell line, pause ms) or
     ("sh", a shell line run on Linux between two batches, e.g. a RAM patch writer).
     Commands between two log or sh steps are packed into as few relay batches as fit one sector."""
+    return (f"# solo run {name}: generated, see recipe_card.py solo_script\n. {WWW}/SOLO.LIB\n"
+            f"log start {name}\n{solo_body(steps)}log done {name}\n").encode("ascii")
+
+
+def solo_body(steps) -> str:
+    """The shell lines for steps (see solo_script), without the header: also usable inside a shell
+    function of a longer script that sources SOLO.LIB itself (WATCH.SH)."""
     budget = RELAY_SIZE - 24 - solo_frame_bytes()
-    out = [f"# solo run {name}: generated, see recipe_card.py solo_script\n", f". {WWW}/SOLO.LIB\n",
-           f"log start {name}\n"]
+    out = []
     cur = []
 
     def flush():
@@ -122,8 +128,7 @@ def solo_script(name: str, steps) -> bytes:
             flush()
         cur.append(ttl)
     flush()
-    out.append(f"log done {name}\n")
-    return "".join(out).encode("ascii")
+    return "".join(out)
 
 
 # ---- card --------------------------------------------------------------------------
@@ -184,7 +189,11 @@ def card_files() -> dict:
     }
     # Scripts the RTOS runs through lcmd live in RAM, so running them never reads the card.
     rack_sh = pull_rack_sh(WWW)
-    pull_sh_text = pull_sh(WWW, D, "RECIPE.LOG")
+    # The focus watcher's tag marker (tools/focus/focus_watch.py): it asks in RAM, PULL.SH writes
+    # $d/WATCH/TAG, before the batch that sets the tag reaches the RTOS.
+    pull_sh_text = pull_sh(WWW, D, "RECIPE.LOG", before=(
+        f"if [ -f {WWW}/watch/tag.put ]; then cat {WWW}/watch/tag.put >$d/WATCH/TAG; rm -f {WWW}/watch/tag.put; c=1; fi\n"
+        f"if [ -f {WWW}/watch/tag.del ]; then rm -f $d/WATCH/TAG {WWW}/watch/tag.del; c=1; fi\n"))
     here = "".join(f"cat >{WWW}/cgi-bin/{k} <<'END_{k.upper()}'\n{v}END_{k.upper()}\n" for k, v in cgi.items())
     here += f"cat >{WWW}/RACK.SH <<'END_RACK'\n{rack_sh}END_RACK\n"
     here += f"cat >{WWW}/PULL.SH <<'END_PULL'\n{pull_sh_text}END_PULL\n"
@@ -197,6 +206,13 @@ def card_files() -> dict:
             f" sh {WWW}/solo.sh </dev/null >/dev/null 2>>{WWW}/err.log &\n"
             " return\n"
             "done\n"
+            # WATCH.SH, if there, runs at every power-on when no solo arm is armed: it is not
+            # disarmed, and it never writes the card (its log lines go through PULL.SH).
+            # Its files in $d/WATCH are copied to RAM here too, while the card is still Linux's alone.
+            f"[ -f $d/WATCH.SH ] || return\n"
+            f"busybox mkdir -p {WWW}/watch; cp $d/WATCH/* {WWW}/watch/ 2>/dev/null; busybox chmod 755 {WWW}/watch/*\n"
+            f"cat $d/WATCH.SH >{WWW}/watch.sh; echo \"$u watch started\" >>$d/RECIPE.LOG; sync\n"
+            f"sh {WWW}/watch.sh </dev/null >/dev/null 2>>{WWW}/err.log &\n"
             "}\n")
     remote = (
         f"d={D}\n"

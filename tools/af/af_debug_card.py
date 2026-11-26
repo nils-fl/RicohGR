@@ -2559,11 +2559,13 @@ def pull_rack_sh(www):
             f"echo \"ack $1 $t\" >>{www}/log.pending\n")
 
 
-def pull_sh(www, d, log_name):
+def pull_sh(www, d, log_name, before=""):
     """The only Linux writer of the card while the relay loop runs, and only when the RTOS
-    asks: the pending batch into RELAY.TTL, the pending log lines, the error log, then sync."""
+    asks: [before] (shell lines that set c=1 when they wrote), the pending batch into RELAY.TTL,
+    the pending log lines, the error log, then sync."""
     return (f"w={www}; d={d}; c=\n"
             "exec 2>>$w/err.log\n"
+            + before +
             "if [ -f $w/relay.next ]; then cat $w/relay.next 1<>$d/RELAY.TTL; mv $w/relay.next $w/relay.done; c=1; fi\n"
             f"if [ -s $w/log.pending ]; then mv $w/log.pending $w/log.flush; cat $w/log.flush >>$d/{log_name}; rm -f $w/log.flush; c=1; fi\n"
             "if [ -s $w/err.log ]; then cat $w/err.log >>$d/ERR.LOG && : >$w/err.log; c=1; fi\n"

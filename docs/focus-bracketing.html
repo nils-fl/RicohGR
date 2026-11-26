@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus bracketing from the SD card (GR IIIx 1.60)</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1f21;--muted:#5d6166;--line:#e2dfd8;--accent:#9a3412;--code-bg:#f1eee8;--th-bg:#f4f1ea;--side:#f6f4ef}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}}
+:root[data-theme="dark"]{--bg:#16181b;--fg:#e6e4df;--muted:#a3a7ad;--line:#2e3237;--accent:#f0a875;--code-bg:#202328;--th-bg:#1f2226;--side:#1b1d21}
+*{box-sizing:border-box}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Charter,"Iowan Old Style",Georgia,serif;-webkit-text-size-adjust:100%}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);max-width:1240px;margin:0 auto}
+nav#TOC{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px 16px;border-bottom:1px solid var(--line)}
+nav#TOC .home{display:block;margin-bottom:12px;color:var(--muted);text-decoration:none}
+nav#TOC ul{list-style:none;padding-left:0;margin:0}
+nav#TOC ul ul{padding-left:14px}
+nav#TOC li{margin:3px 0}
+nav#TOC a{color:var(--fg);text-decoration:none}
+nav#TOC a:hover{color:var(--accent)}
+main{padding:24px 16px 80px;min-width:0;max-width:820px}
+@media (min-width:1000px){.layout{grid-template-columns:290px minmax(0,1fr);gap:40px}
+ nav#TOC{position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;border-bottom:0;border-right:1px solid var(--line);background:var(--side)}
+ main{padding-top:48px}}
+h1,h2,h3,h4{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.25;letter-spacing:-.01em}
+h1{font-size:2rem;margin:0 0 .6em}
+h2{font-size:1.45rem;margin:2.2em 0 .6em;padding-top:.6em;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin:1.8em 0 .5em}
+a{color:var(--accent)}
+code{font:.86em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code-bg);padding:.1em .35em;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;overflow-wrap:normal}
+.table-wrap{overflow-x:auto;margin:1.2em 0}
+table{border-collapse:collapse;font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-width:60%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--th-bg);font-weight:600}
+hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+blockquote{margin:1em 0;padding:.2em 1em;border-left:3px solid var(--accent);color:var(--muted)}
+strong{font-weight:650}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav id="TOC" aria-label="Contents"><a class="home" href="index.html">← All documents</a>
+<ul>
+<li><a href="#top">Focus bracketing from the SD card</a>
+<ul>
+<li><a href="#short">Short answer</a></li>
+<li><a href="#parts">1. What the camera already has</a></li>
+<li><a href="#snap">2. The snap distance, from the shell to the lens</a></li>
+<li><a href="#patch">3. The one-word RAM patch</a></li>
+<li><a href="#probe">4. The probe card (phase 0)</a></li>
+<li><a href="#measure">5. How the probe is measured</a></li>
+<li><a href="#result">5a. Probe result (2026-11-25)</a></li>
+<li><a href="#apply">5b. ApplySnapDistance and probe 2</a></li>
+<li><a href="#planner">6. The bracket planner and card</a></li>
+<li><a href="#next">6a. Still open</a></li>
+<li><a href="#repro">7. Reproducing</a></li>
+</ul></li>
+</ul>
+</nav>
+<main>
+<h1 id="top">Focus bracketing from the SD card (GR IIIx 1.60)</h1>
+<p>Goal: a focus bracket for focus stacking, from close-ups (about
+12–50 cm) to landscapes, started in the camera without a phone, on the
+stock firmware. Offline analysis of the decoded 1.60 image, 2026-11-25;
+nothing has been run on a camera yet. Labels: <strong>Read</strong>,
+<strong>Structural</strong>, <strong>Inferred</strong>, as in the other
+documents. The addresses in §3 are checked by
+<code>tools/focus/focus_probe.py check</code>.</p>
+
+<h2 id="short">Short answer</h2>
+<ul>
+<li>The camera has no focus bracket: its bracket kinds are exposure, white
+balance and contrast (Read: <code>StillBracketKind</code>,
+<code>StillExposureBracketStep</code>).</li>
+<li>Everything a bracket needs is reachable from an SD-card script on the
+stock firmware: the shutter (<code>SW_sws</code>/<code>SW_swr</code>, as
+in the grain sessions), the Snap focus mode and its distance
+(<code>UserData Set StillFocus Snap</code>,
+<code>StillSnapDistanceCm</code>), and the camera state through the phone
+API on 127.0.0.1 (Read; <a href="remote-control.html">remote control</a>).</li>
+<li>The shell takes only the menu distances 30, 100, 150, 200, 250, 350
+and 500 cm and Infinity. The setter behind it stores any number, and the
+lens path passes centimetres through to a calculation, not to a table
+(Read). One instruction rewritten in RAM therefore allows any distance
+(§3). Whether the lens really goes there is what the probe card finds out
+(§4).</li>
+</ul>
+
+<h2 id="parts">1. What the camera already has</h2>
+<table>
+<thead><tr><th>Need</th><th>How</th><th>Label</th></tr></thead>
+<tbody>
+<tr><td>Shutter release</td><td>engineering shell <code>SW_sws 1</code>,
+<code>SW_swr 1</code>, <code>SW_swr 0</code>, <code>SW_sws 0</code>
+(<code>effects_solo.press()</code>)</td><td>Read, used on the camera</td></tr>
+<tr><td>Focus mode</td><td><code>UserData Set StillFocus</code> with
+<code>AutoArea</code>, <code>AutoAreaM</code>, <code>ZoneSelect</code>,
+<code>Select</code>, <code>Pinpoint</code>, <code>Follow</code>,
+<code>Continuous</code>, <code>Mf</code>, <code>Snap</code>,
+<code>Infinity</code> (matcher <code>0x532ddd7c</code>; <code>Snap</code> → code 10)</td><td>Read</td></tr>
+<tr><td>Focus distance per frame</td><td><code>UserData Set
+StillSnapDistanceCm</code> (§2)</td><td>Read; off-menu values need §3</td></tr>
+<tr><td>Lens motor</td><td>shell <code>AF_drive</code> (direction,
+pulses), <code>AF_hp</code>; lens position is close to linear in
+1/distance (<a href="af-subsystem.html">AF subsystem</a>)</td><td>Read;
+fallback, not used by the probe</td></tr>
+<tr><td>Camera state on the card's Linux side</td><td>webapid answers on
+127.0.0.1:80 with Wi-Fi off: <code>/v1/props</code>,
+<code>/v1/photos</code>; <code>busybox nc</code> is there</td><td>Read, used
+on the camera (AF probe)</td></tr>
+</tbody>
+</table>
+
+<h2 id="snap">2. The snap distance, from the shell to the lens (Read)</h2>
+<table>
+<thead><tr><th>Step</th><th>Where</th><th>What</th></tr></thead>
+<tbody>
+<tr><td>Shell parser</td><td><code>0x53346890</code> (UserData Set,
+parser <code>0x5334688c</code>)</td><td>compares the name, then branches to
+the matcher (<code>0x5334cf88</code>, the only caller)</td></tr>
+<tr><td>Matcher</td><td><code>0x532de3dc</code></td><td>compares the value
+text with <code>30</code>, <code>100</code>, <code>150</code>,
+<code>200</code>, <code>250</code>, <code>350</code>, <code>500</code>,
+<code>Infinity</code>; each branch loads the number (Infinity = −1) and
+calls the setter; anything else prints "argv[3] invalid"</td></tr>
+<tr><td>Setter</td><td><code>0x53242680</code></td><td><code>str r1,
+[r3, #0x130]</code>: stored as given, no range check</td></tr>
+<tr><td>Getter</td><td><code>0x53244008</code></td><td>7 callers</td></tr>
+<tr><td>Lens path</td><td><code>0x53196fe0</code> →
+<code>0x532a9824</code> → <code>0x532af020</code> →
+<code>0x53291ec4</code></td><td><code>0x532af020</code> returns the cm value
+unchanged, except 30 cm, which becomes 40 cm in one mode; the lens code
+turns the distance into pulses by calculation ("Division by Zero. Replace
+snapDistanceMm", <code>af/LensFocusControl.cpp</code>)</td></tr>
+<tr><td>Menu step</td><td><code>0x532af868</code></td><td>looks the value up
+in the list <code>0x53b591e0</code> (30, 100, 150, 200, 250, 350, 500, −1) to
+step up or down; a value not in the list falls through to a compare with
+the last entry, no assert</td></tr>
+<tr><td>Text for the value</td><td><code>0x53352494</code></td><td>a switch
+over the list values; any other value prints nothing</td></tr>
+</tbody>
+</table>
+<p>Inferred: an off-list value shows no distance in the menu and the menu
+step starts from the list's end, but nothing seen crashes on it. The probe
+always puts a menu value back at the end, so an odd value is not saved at
+power-off unless the run is interrupted.</p>
+
+<h2 id="patch">3. The one-word RAM patch (Read)</h2>
+<table>
+<thead><tr><th>Address</th><th>Stock</th><th>Patched</th></tr></thead>
+<tbody>
+<tr><td><code>0x532de4e4</code> (the "30" branch)</td><td><code>e3a0101e</code>
+<code>mov r1, #30</code></td><td><code>movw r1, #N</code>, e.g.
+<code>e300102d</code> for 45 cm (10–10,000 cm)</td></tr>
+</tbody>
+</table>
+<p>Only the compare at <code>0x532de400</code> branches to this
+instruction, and only the shell parser calls the matcher, so shooting code
+does not change. The card writes the word with the multipatch writer of
+the grain sessions (stock word checked first, cache flushed), sends
+<code>UserData Set StillSnapDistanceCm 30</code>, and puts the stock word
+back before the shutter is pressed. A power-off undoes it in any case.</p>
+
+<h2 id="probe">4. The probe card</h2>
+<p><code>python3 tools/focus/focus_probe.py card</code> writes a recipe card
+with one solo run (about 2.5 minutes, one power-on):</p>
+<ol>
+<li>It logs <code>/v1/props</code> and <code>/v1/photos</code> from
+127.0.0.1: field names, values only for focus, drive and mode fields, and
+the number of JPGs. Wi-Fi names and keys, serials, addresses and file
+names are never logged; the filter splits nested objects so each name is
+judged on its own.</li>
+<li>Focus Snap, AF lamp on, then a 20 s slow blink: put the camera on a
+table or tripod, facing things from about 30 cm to far away.</li>
+<li>Twelve frames: 30 cm (stock), 45*, 70*, 100, 120*, 150, 250, 500 cm,
+Infinity, then 45* and 120* again with a switch Focus Infinity → Snap after
+the setting (in case the lens only moves on a mode change), then 30 cm
+again (* = patched). Props are logged once more after the first patched
+value.</li>
+<li>End: snap distance 250 cm and Focus Select (options
+<code>--snap-after</code>, <code>--focus-after</code>), props and photos
+again, lamp on for 10 s.</li>
+</ol>
+
+<h2 id="measure">5. How the probe is measured</h2>
+<p><code>focus_probe.py import</code> splits each photo into 24 × 16 tiles
+and takes the mean absolute Laplacian of each. A fit then gives every tile
+a depth and every patched frame a focus distance, with the stock frames
+held at their menu distances (Inferred model: sharpness falls off as
+1/(1 + (error/w)²) in dioptres, with a floor). The report also gives each
+frame's similarity to the first 30 cm frame: a patched value that the
+camera ignored looks the same as 30 cm. Both checks pass on synthetic
+frames (<code>tools/tests/test_focus_probe.py</code>).</p>
+
+<h2 id="result">5a. Probe result (stock 1.60, 2026-11-25, R0007244–R0007255)</h2>
+<p>The run went through: 12 frames, every patch and restore exited 0,
+and the photo list on 127.0.0.1 grew from 915 to 927 JPGs (Read). The
+props lines are missing: the camera's <code>busybox awk</code> stopped with
+"Call to undefined function", so nothing was logged (no values leaked).</p>
+<p>Frames compared tile by tile (correlation of the relative sharpness
+maps; Read):</p>
+<table>
+<thead><tr><th>Asked</th><th>Same as</th></tr></thead>
+<tbody>
+<tr><td>45 cm*, 70 cm*</td><td>the 100 cm frame (correlation 1.00)</td></tr>
+<tr><td>120 cm*</td><td>the 150 cm frame (1.00)</td></tr>
+<tr><td>45 cm*, 120 cm* after Focus Infinity → Snap</td><td>the 30 cm frame (1.00, 0.99)</td></tr>
+<tr><td>30 cm at the end</td><td>the 30 cm frame at the start (1.00)</td></tr>
+</tbody>
+</table>
+<p>So the patched value reaches the camera and changes the focus, but the
+lens goes to the <strong>next menu distance at or beyond it</strong>
+(Inferred from three values), and after a mode switch an off-list value
+falls back to 30 cm. The rounding is not in the cm lists that the menu and
+display use (<code>0x53b591e0</code>, <code>0x53b59150</code>, the icon
+switch <code>0x53291ec4</code>); the AF side probably keeps its own snap
+positions (<code>AfSnapCount</code>, Structural; not traced). The
+§5 fit did not converge on this scene (floor 0.93) and is not used; the
+correlation table is the result.</p>
+<p>Pace: about 8.5 s per frame as designed (log uptimes), of which 7.3 s
+are the deliberate press and save pauses.</p>
+
+<h3 id="makernote">Maker notes of the probe frames</h3>
+<p>Two Pentax maker-note tags change with the focus (exiftool
+<code>-u</code>; Read on R0007244–R0007255):</p>
+<ul>
+<li><code>0x0099</code>, first byte: the snap <em>setting</em>, not the
+lens: 7 for 30 cm, 1 for 100, 2 for 150, 4 for 250, 5 for 500, 255 for
+Infinity, 0 for every off-list value.</li>
+<li><code>0x0240</code>, second 32-bit word: changes exactly with the
+frame groups of §5a, with magnitudes like the AF logs' lens positions
+(about 15,900–16,300): Infinity 16191, 500 cm 16351, 250 cm 16608, 150 cm
+16961, then 100 cm 19237–19301 and 30 cm 15774–15806. Inferred: the lens
+position at capture. From Infinity to 150 cm it rises steadily with
+1/distance (about 800–1150 per dioptre), but 100 cm and 30 cm do not fit
+that line, so the scale is not settled.</li>
+</ul>
+
+<h2 id="apply">5b. ApplySnapDistance and probe 2</h2>
+<p><code>ApplySnapDistance</code> (<code>0x532af3d8</code>,
+<code>Model/FocusModel.cpp</code>; Read) runs in Snap mode (focus code 10;
+11 = Infinity sends −1). It reads the stored cm (through
+<code>0x532af07c</code>, which turns 30 into 40 in one mode) and maps it
+in a switch to millimetres: 30 → 300, 40 → 400, 100 → 1000, 150 → 1500,
+200 → 2000, 250 → 2500, 350 → 3500, 500 → 5000. It then sends the mm to
+the lens task (<code>0x532aeb68</code>, message <code>0x4241080b</code>).
+Any other cm value reaches an assert ("false") and sends nothing. That
+fits the probe: after the Infinity → Snap switch, 45 and 120 cm ended at
+30 cm (Inferred: the fallback on the failed apply). No direct caller was
+found (reached through a pointer). <code>AfSnapCount</code> is only a
+usage counter in the camera log, not a table.</p>
+<p>Probe 2 (<code>focus_probe.py card --probe 2</code>, 9 frames) patches
+the mm of the 30 cm case (<code>0x532af4d4</code> <code>moveq r1,
+#300</code>) and of 40 cm (<code>0x532af4f8</code> <code>mov r1,
+#400</code>) to the asked mm, sends <code>30</code>, switches Focus
+Infinity → Snap, restores the words and shoots: 30 (stock), 45*, 70*, 100,
+120*, 150, 20 cm* (closer than the menu), Infinity, 30, every frame with
+the switch. If the lens takes the sent mm, the patched frames land between
+their stock neighbours.</p>
+<p>Probe 1 also lost its props lines to a busybox awk rule: "name (" is
+read as a call of a user function. The filter no longer does that (and a
+test checks it).</p>
+
+<h3 id="result2">Probe 2 result (stock 1.60, 2026-11-25, R0007256–R0007264)</h3>
+<p>All 9 frames shot, every patch and restore exited 0, and the props
+readout worked (focus fields logged; SSID, key, serial, MAC and names
+hidden). In Snap mode the API reports <code>focusMode=mf</code>,
+<code>focusSetting=snap</code>; it also has <code>focused</code>,
+<code>stateStill</code>, <code>shootMode</code> and
+<code>onePushBracket</code>, which a trigger can watch.</p>
+<p>Lens position (maker note <code>0x0240</code>, word 1; Read):</p>
+<table>
+<thead><tr><th>Asked</th><th>Position</th><th>Above Infinity per dioptre</th></tr></thead>
+<tbody>
+<tr><td>20 cm*</td><td>23950</td><td>1289</td></tr>
+<tr><td>30 cm</td><td>21353</td><td>1154</td></tr>
+<tr><td>45 cm*</td><td>20071</td><td>1154</td></tr>
+<tr><td>70 cm*</td><td>19141</td><td>1144</td></tr>
+<tr><td>100 cm</td><td>18724</td><td>1218</td></tr>
+<tr><td>120 cm*</td><td>18564</td><td>1270</td></tr>
+<tr><td>150 cm</td><td>18339</td><td>1249</td></tr>
+<tr><td>Infinity</td><td>17506</td><td>–</td></tr>
+</tbody>
+</table>
+<p>So the patched ApplySnapDistance sends any distance, the lens goes there,
+and 20 cm works, closer than the menu's 30 cm (Read). Position is close to
+linear in 1/distance, about 1,200 per dioptre (Inferred from 8 points),
+as the AF study found. The absolute numbers differ between power-ons
+(Infinity was 16191 in probe 1), so a conversion needs a reference taken in
+the same session. Probe 1's 30 cm and 100 cm positions (15774, 19237) do
+not fit this line; Probe 1 also ran without the mode switch, which may
+explain it (not settled). The sharpness correlations are less clean on this
+scene and are not needed: the maker note shows where the lens was.</p>
+
+<h2 id="planner">6. The bracket planner and card</h2>
+<p><code>tools/focus/focus_bracket.py</code>:</p>
+<ul>
+<li><strong>Plan</strong> (Inferred, thin-lens depth of field in
+dioptres, f = 26.1 mm, circle of confusion 0.02 mm). A frame focused at D
+is sharp from D − h to D + h with h = N·c/f² (f/5.6: h = 0.164 D,
+hyperfocal 6.1 m; exiftool gives 6.18 m for these photos). The first
+frame sits at near − h, the last at far + h, or at the hyperfocal
+distance when far is infinity. The frames between are spaced evenly in
+dioptres, with neighbouring zones overlapping by a quarter of a zone. For
+example, 0.25 m to infinity at f/5.6 takes 16 frames, 1 m to infinity at
+f/8 takes 3, and 0.2–0.5 m at f/8 takes 9.</li>
+<li><strong>Card.</strong> All seven millimetre loads of
+ApplySnapDistance (§5b) are rewritten for a round of up to seven frames, so
+menu value k stands for frame k. Each frame is a <code>UserData Set
+StillSnapDistanceCm</code> with that menu value, Focus Infinity, Focus
+Snap, then the shutter. After each round the stock words go back, and the
+card ends with the settings restored. Probe 2 tested only the 30/40 pair;
+the other six words follow the same pattern (Read) but have not run.</li>
+<li><strong>Check.</strong> <code>check</code> reads each frame's lens
+position (maker note <code>0x0240</code>), fits a line over 1/distance and
+flags frames off it by more than 0.08 D. On probe 2's six frames from 30 to
+150 cm: 1123 per dioptre, no frame off the line.</li>
+<li><strong>Pace</strong> (estimate): about 5 s per frame. That is the
+Focus switch (2 × 0.8 s), a 0.6 s half-press without AF and 1.5 s after
+the shot (<code>--save-ms</code>).</li>
+</ul>
+
+<h3 id="run1">First bracket (stock 1.60, 2026-11-25, R0007265–R0007280)</h3>
+<p>0.25 m to infinity at f/5.6, Av, 16 frames in three rounds. Every patch
+and restore exited 0, and the photo list grew by 16. The frames took 98 s
+from first to last, about 6.1 s each (Read, log uptimes).</p>
+<ul>
+<li><strong>All seven slots work.</strong> The lens positions (maker note
+<code>0x0240</code>) fall frame by frame from 41937 to 33120, on a line
+in 1/distance at 2435 per dioptre (Read). That includes the frames sent
+through the 100–500 cm slots, which had not run before.</li>
+<li>Frame 10 (0.61 m) is 0.09 D off the line, just beyond the 0.08 D
+tolerance. The planned overlap is 0.08 D, so that step has about none
+(Read; cause not known).</li>
+<li>The slope is twice that of probe 2 (about 1200 per dioptre), and the
+absolute values differ again. The scale of the position word may depend
+on the lens state or the aperture: the probes ran in P mode, this run at
+f/5.6 (Inferred, not settled). <code>check</code> fits the line per run,
+so this does not matter for the check.</li>
+<li>Seen in the photos: the blind at about 0.9 m is crisp in frame 12,
+and the window and the view outside are sharper in frame 16. The scene had
+little between 0.25 and 0.7 m, so frames 3–11 are rarely the sharpest
+anywhere; a scene with something at every depth is still needed to judge
+the overlap.</li>
+</ul>
+
+<h2 id="watch">6b. Started in the camera: the self-timer watcher (never run; replaced by §8)</h2>
+<p><code>tools/focus/focus_watch.py card</code> writes a recipe card with a
+<code>WATCH.SH</code>. REMOTE.SH starts it at every power-on, unless a solo
+run is armed, and copies its files to RAM while the card is still
+Linux's alone. After that the watcher only reads RAM and asks webapid; its
+log lines go through PULL.SH like every other solo line.</p>
+<p><strong>Using it:</strong> tripod, Av at the aperture you want, focus
+mode Snap with the snap distance set to the nearest thing that must be
+sharp, self-timer 2 s or 10 s. Press the shutter. The self-timer frame is
+an ordinary photo; once it is saved the AF lamp comes on and the camera
+brackets from that distance to infinity. At the end the snap distance,
+Snap and the self-timer are set back and the lamp stays on for 3 s. With
+the self-timer off, or any other focus mode, nothing happens.</p>
+<p><strong>What it reads (Read, 1.60):</strong></p>
+<table>
+<tr><th>Value</th><th>Where</th><th>Codes</th></tr>
+<tr><td>settings object</td><td><code>0x5320b31c</code> returns
+<code>0x55063f30</code>; the stored values are behind the pointer at
+<code>+4</code></td><td></td></tr>
+<tr><td>focus mode</td><td>byte <code>+0x11c</code> (setter
+<code>0x532730f8</code>)</td><td>Snap = 10</td></tr>
+<tr><td>snap distance</td><td>word <code>+0x130</code> (setter
+<code>0x53242680</code>)</td><td>cm; Infinity assumed −1
+(Inferred)</td></tr>
+<tr><td>self-timer</td><td>byte <code>+0x484</code> (setter
+<code>0x53273278</code>, from the <code>StillSelfTimer</code>
+matcher <code>0x53306d5c</code>)</td><td>Off 0, 2Sec 1, 10Sec 3</td></tr>
+</table>
+<p>It reads them once a second with <code>PEEK.BIN</code> (read-only
+<code>/dev/mem</code>, word-aligned, RTOS range only). While Snap, a
+distance and a self-timer are set, it counts the files in
+<code>/v1/photos</code>; one more starts the bracket. The plan comes from
+the snap distance and the aperture in <code>/v1/props</code>
+(<code>av</code>), rounded to the next wider of f/2.8, 4, 5.6, 8, 11 and
+16, so the frames overlap at least as planned. In P mode probe 2 logged
+<code>av</code> empty; without a value the f/2.8 plan is used (most frames).
+All 42 plans (7 distances × 6 apertures, <code>focus_watch.py plans</code>)
+are prepared on the Mac as patch files, as in §6.</p>
+<p>Not yet confirmed in the camera (Inferred; the first log shows it as
+<code>watch focus F snap C timer T</code>): that the menus store the same
+three values as <code>UserData Set</code>, that the object sits at the same
+address after every power-on, and that <code>av</code> holds the aperture
+in Av mode. If the pointer does not look like RAM, the watcher does
+nothing.</p>
+
+<h2 id="modes">8. Focus modes on the dial (probe 3 run; watcher built, not yet run)</h2>
+<p>The self-timer watcher in §6b gives way to two modes on the mode dial,
+U1 and U2 by default (chosen 2026-11-25; real menu entries would need a
+flash and are left for later):</p>
+<ul>
+<li><strong>Macro stack.</strong> Focus on the nearest point, then on the
+farthest; the camera shoots the frames between them, spaced for the
+aperture.</li>
+<li><strong>Snap meter.</strong> Focus on a subject; the camera goes to a
+fixed focus at that distance, or at the hyperfocal distance when the
+subject is beyond it.</li>
+</ul>
+<p>A street bracket (snap distance ±2 frames) is dropped for now: from the
+card each frame takes 1.5–3 s.</p>
+
+<h3 id="routes">What the firmware offers (Read, 1.60)</h3>
+<table>
+<tr><th>Need</th><th>Found</th></tr>
+<tr><td>Any focus distance without a RAM patch</td><td><code>UserData Set
+CommonFocusPosMm N</code> takes any integer (strtol) and stores it at
+<code>+0x108</code> (setter <code>0x53242608</code>). In focus code 9 (Mf,
+Inferred) <code>0x532af508</code> sends a non-zero <code>+0x108</code> to
+<code>0x532aeb68</code>, the lens command ApplySnapDistance uses.</td></tr>
+<tr><td>The AF result as a distance</td><td><code>0x532af360</code> reads
+the lens distance in mm and stores it in <code>+0x108</code> through
+<code>0x532ae7a0</code> (event codes 0x34, 0x35, 0xAA, 0x15A of the
+dispatcher at <code>0x532b0934</code>). The value it reads is
+<code>[[[[0x553458b0] + 0x518]] + 0x698]</code> (<code>0x53525d5c</code>,
+<code>0x53549250</code>, <code>0x5355128c</code>), which PEEK.BIN can read
+at any time.</td></tr>
+<tr><td>Which U mode is set</td><td>webapid has
+<code>exposure_mode::GetUserMode</code> and the values U0–U5 next to the
+exposure modes, so <code>/v1/props</code> probably names it.</td></tr>
+<tr><td>A tag in each photo</td><td><code>SetupCopyright</code> (handler
+<code>0x53330cd8</code>) stores at <code>+0x945</code> (32 bytes, in all
+eight setting banks, <code>0x5326cbc4</code>);
+<code>SetupCopyrightAttach</code> at <code>+0x967</code> ("On" stores 0,
+"Off" 1). The shell handler copies only <strong>2 characters</strong>
+(<code>strncpy</code> of 3, then <code>buf[2] = 0</code>). Two words
+patched in RAM make it 32 (<code>mov r2, #0x21</code>, end at
+<code>buf[32]</code>); one word, end at <code>buf[0]</code>, stores an
+empty string, which the shell can't otherwise pass.</td></tr>
+</table>
+<p>The tag is written only when the stored copyright is empty (as on this
+camera's recent photos), and set empty again afterwards. A copyright text
+is never read beyond its first byte and never logged.</p>
+
+<h3 id="probe3">Probe 3</h3>
+<p><code>tools/focus/focus_probe3.py card</code>: 16 frames, about 5 min
+plus about 85 s for the dial.</p>
+<ul>
+<li><strong>A:</strong> the dial turned through U1–U3, logging the props
+fields and settings that change.</li>
+<li><strong>B:</strong> four Mf frames at 300, 612, 1000 and 3000 mm, one
+set while already in Mf, one with short pauses, and three Snap frames at
+the menu values for calibration.</li>
+<li><strong>C:</strong> AF-S on targets at a measured 0.5 m and 1.5 m,
+three times each, logging the live lens mm and <code>+0x108</code> after
+switching to Mf.</li>
+<li><strong>D:</strong> the copyright tag (with an empty copyright
+only).</li>
+</ul>
+<p><code>focus_probe3.py import</code> converts each frame's maker-note
+position to a distance with the Snap frames' line and prints the gate
+table.</p>
+
+<h3 id="result3">Probe 3 result (stock 1.60, 2026-11-25, R0007281–R0007295)</h3>
+<table>
+<tr><th>Gate</th><th>Result</th></tr>
+<tr><td>A: dial</td><td><strong>Pass.</strong> <code>/v1/props</code>
+<code>exposureMode</code> reads <code>P</code>, <code>U1</code>,
+<code>U2</code>, <code>U3</code> as the dial turns, and <code>av</code>
+carries the aperture (2.8). The U modes also load their settings (snap
+30 / 200 / 250 cm seen).</td></tr>
+<tr><td>B: distance through Mf</td><td><strong>Fail.</strong>
+<code>CommonFocusPosMm</code> takes the value (read back at
+<code>+0x108</code>; focus code 9 = Mf, Read), but the lens stays: all six
+Mf frames sit at the same maker-note position (0.29–0.30 m), and the live
+lens distance stays 302 mm. Focus keeps going through the ApplySnapDistance
+slots. Snap itself also writes <code>+0x108</code> (300, 1000, 2500).</td></tr>
+<tr><td>C: AF result</td><td><strong>Pass.</strong> The live lens
+distance <code>[[[[0x553458b0] + 0x518]] + 0x698]</code> reads 302, 995
+and 2525 mm at Snap 30, 100 and 250 cm. After AF-S: 430, 429, 439 mm on
+the near target and 1330, 1468, 1381 mm on the far one (tape 0.5 and 1.5
+m, Read). The near frames are sharp on the cup, sharper than the Snap 30 cm
+frame. The maker-note position barely separates 0.30 from 0.43 m, so the
+live value is the measure. Switching to Mf does not store it at
+<code>+0x108</code>.</td></tr>
+<tr><td>D: tag</td><td><strong>Not run.</strong> The read of the word at
+<code>+0x944</code> returned nothing (the attach byte at
+<code>+0x964</code> read 1 = Off), so the part was skipped. The watcher logs
+the PEEK exit code and byte count when this happens; it never logs the
+text.</td></tr>
+</table>
+<p>The focus-mode codes from the StillFocus matcher
+<code>0x532ddd7c</code> (Read): AutoArea 0, Select 1, Pinpoint 4,
+Follow 5, Continuous 6, Mf 9, Snap 10, Infinity 11, AutoAreaM 14,
+ZoneSelect 15.</p>
+
+<h3 id="watcher">The mode watcher (first run failed, fixed, not yet rerun)</h3>
+<p><strong>First run, 2026-11-25:</strong> the dial and the lens distance were read
+(U2 metered 1887 and 12164 mm), but every patch file failed its readback, so no
+lens moved. The camera's BusyBox 1.24.1 <code>dd</code> knows only
+<code>bs count seek skip if of</code>; <code>conv=notrunc</code> worked on the Mac
+only. The file is now rebuilt from two <code>dd</code> reads around the new word.
+Also, that BusyBox's <code>hexdump -C</code> prints only <code>*</code> for an
+all-zero first line, so every zero word read as missing. That includes the copyright
+word, which is empty (probe 3 part D's "none" and the watcher's "unread").
+<code>hexdump -v -C</code> fixes it. The tests' mock BusyBox now rejects unknown
+<code>dd</code> operands and reproduces the hexdump bug, and every applet used must be in
+the camera's applet list. U1 was still on Snap 30 cm (near 304, far 281 mm), so
+the macro mode now refuses Snap, MF and Infinity and logs it.</p>
+<p><strong>Second run:</strong> the files were built and the tag switched on. Both modes
+read AF distances (U1 near 1821 and far 684 mm; U2 652 mm). But the camera would not
+run the rebuilt file: "Permission denied", exit 126. The new file from
+<code>&gt;$1.t</code> has no execute bit. It is now set with <code>chmod 755</code>
+before the <code>mv</code>, and the test mocks run a patch file only when it is
+executable.</p>
+<p><strong>Third run (2026-11-26):</strong> U1 worked.
+<ul>
+<li>AF gave near 863 and far 388 mm. Twelve frames were planned (401 … ~860 mm), and frames
+1–9 were shot about every 8.2 s. Each carries <code>GRFS:7308:&lt;i&gt;/12:&lt;mm&gt;</code> in
+EXIF Copyright.</li>
+<li>Frame 1 (401 mm) is sharp on the keyboard, frame 9 (632 mm) further back, so the slot
+patches moved the lens as planned. The maker-note position reads ~8200 on all of them,
+including the AF photos, so it is no use here.</li>
+<li>The screen shows the stock labels of the rewritten slots (0.3, 1, 1.5 m …). That
+looked wrong, so the camera was switched off at frame 9. This left the tag in the
+camera, with attach On; the next start read "copyright set, attach 0".</li>
+<li>U2 metered 829 mm and switched to Snap, but from Snap a half-press no longer
+focuses, so it could not measure again.</li>
+</ul>
+<p>Changes:</p>
+<ul>
+<li><strong>Tag marker.</strong> Before the tag goes in, the watcher asks for
+<code>WATCH/TAG</code>, holding the original attach byte. The recipe card's PULL.SH writes it to
+the card; PULL.SH is still the only Linux writer while the camera runs. <code>untag</code> asks
+for it to be removed. The boot copies it to RAM, and a start that finds it clears the copyright
+and sets attach back. <code>card --clear-tag Off</code> plants it, to clear this run's
+leftover.</li>
+<li><strong>CPTAG once per bracket</strong> instead of twice per frame. The log now gives the
+bracket's time.</li>
+<li><strong>Lens retry.</strong> The first macro photo after power-on read no lens distance
+twice, so the read is retried for 2 s. If it still fails, the log names the empty pointer
+level.</li>
+<li><strong>U2 = AF-S + Full Press Snap</strong> (<code>StillFullPressSnap</code>). Every settled
+new lens distance re-meters the 30 cm slot. A reading within 2 % of the snap distance is
+ignored: that is where a full-press shot leaves the lens. The meter no longer switches the
+focus mode.</li>
+<li><strong>Dial changes:</strong> each mode recalls its own settings (probe 3: P 250 cm, U1
+30 cm). So when the dial has moved, the watcher sends no settings back and only undoes its RAM
+patches and the tag.</li>
+</ul>
+<p><strong>Fourth run (2026-11-26, U2 only):</strong> the meter measured
+again on every half-press (1.7, 1.7, 1.9, 2.1, 6.0 m, hyperfocal) with
+every patch at rc 0. The user read the snap distance as stuck at 0.3 m.
+The Full Press Snap photo R0007319 (EXIF focus mode Snap) is not focused
+at 0.3 m, though: the objects at 0.3–0.4 m are badly blurred, and a folding
+rule at about 1.5–2 m is nearly sharp. The 0.3 m was the screen label of
+the borrowed 30 cm setting. This fits the firmware: ApplySnapDistance
+(0x532af3d8) only acts in Snap and Infinity, and a Full Press Snap shot
+(shutter path 0x5323a578, event 0x7b instead of 0x7a) is recorded as focus
+mode Snap. The new <code>meter shot</code> log line will confirm it. One
+garbage reading (536870893 mm) right after turning to U2 metered the
+hyperfocal distance. Changes: the meter borrows the setting nearest to the
+distance, lens readings of 1000 m and more are ignored, and each photo
+logs the lens position. This run was on the GR Mod dim-light AF build;
+the multipatch checks of the stock words passed (rc 0).</p>
+<p><strong>Decision after run 4:</strong> U2 switches the camera into
+real Snap after the measurement, as in the second run. To measure again,
+use a stock key function: the custom key options (CustomSwitchFn handler
+0x5332e6ec) include <code>ToggleAfSnap</code>, so the Fn button is set to
+AF/Snap toggle. Fn gives AF-S with the lens still at the snap distance.
+The watcher takes that reading as the base (<code>meter remeasure</code>)
+and meters once the lens has moved and holds for two readings. That
+includes AF settling back on the same distance after hunting. In Snap
+itself the lens is never measured. Full Press Snap is no longer used.</p>
+<p><strong>Fifth run (2026-11-26):</strong> with upper-case template names
+(<code>Ts0.BIN</code> was not found on the camera: every meter logged
+<code>build failed</code>) the meter switched to Snap at the measured
+distance, and photo R0007321 logged lens 5618 mm at snap 5618 mm. A new
+aperture recomputed it each time. Fn did nothing: it had been set to
+AF/Snap toggle in another mode, and U2 recalls its own button setup. Fn
+is stored at settings +0x922 (3 = <code>ToggleAfSnap</code>); the watcher
+logs it on entering U2 (<code>meter fn 3</code>).</p>
+<p><strong>Sixth run:</strong> with Fn on AF/Snap toggle in U2 (log
+<code>meter fn 3</code>), Fn still did nothing. Reason (Read): the toggle
+switches the focus mode <em>in use</em>, settings +0xc6 (setter 0x532b03b4,
+read by 0x5326c5f8, which ApplySnapDistance tests), between Snap and the
+focus <em>setting</em> +0x11c. The watcher had set the setting itself to
+Snap, so the toggle had no AF mode to return to. Now the watcher leaves
+the setting at AF-S: it sets the snap distance and presses Fn itself
+through the remote key <code>SW_fn</code> (next to <code>SW_sws</code> and
+<code>SW_swr</code> in the debug command table). It reads +0xc6 to
+check that Snap came: if not within three polls, it presses again (a
+press while the shutter is still half down may be ignored), three times at
+most. The user presses Fn to go back to AF. Without the toggle on Fn the
+watcher sets the focus mode to Snap as before.</p>
+<p><strong>Seventh run:</strong> the watcher's Fn press (log <code>meter fn
+press</code>) did bring Snap (<code>meter in snap</code>), but afterwards
+the physical Fn no longer went back to AF. Before it, the user's own Fn
+presses had toggled both ways. The remote key handlers (<code>SW_fn</code>,
+like <code>SW_sws</code>) write a separate virtual key state (0x536a7474),
+which may keep overriding the button. Replaced: the focus mode in use has its
+own remote setting, <code>CommonTempFocus</code> (handler 0x532dd620,
+values AutoArea … Snap, Infinity, None = follow the setting), which
+calls the +0xc6 setter and applies the focus (ApplySnapDistance). The meter
+now sends the snap setting, <code>CommonTempFocus Snap</code> and its
+three blinks as one relay batch. Leaving U2 with Snap still in use while the
+new mode's setting is not Snap sends <code>CommonTempFocus None</code>.
+Speed: the run took 4–8 s from AF to Snap, because every round made two web
+requests (props and photos, about 2 s each) and the meter used five relay
+batches (about 2 s each). Now on U2 the lens is read every round (about
+0.5 s), props only every fourth round, and the photo list not at all; a
+measurement needs three equal readings (about 1 s at rest).</p>
+<p><strong>Eighth run:</strong> <code>CommonTempFocus Snap</code> worked
+(log <code>meter focus 10</code> 4 s after the measurement). Fn then put
+the AF-C icon on the screen, but the camera stayed in Snap with no focus
+frame, and the focus mode in use (+0xc6) stayed 10. The toggle keeps its
+own state below the temporary focus. Probe: while the meter's Snap is in
+use, the watcher compares the settings block (+0 to +0xb00) with the
+snapshot taken when Snap came and logs each changed word once
+(<code>meter probe off:old&gt;new</code>). If one of the words read by
+the in-use focus functions (+0x44, +0x110, +0x11c, +0xa3c, +0xa40)
+changes, it sends <code>CommonTempFocus None</code>
+(<code>meter fn seen</code>).</p>
+<p><strong>Ninth run:</strong> the probe found the toggle. Fn changed only
+the word at +0x11c: <code>000d0001&gt;0001000a</code>, i.e. the focus
+setting +0x11c went from Select (1) to Snap (10), and +0x11e, empty (13)
+before, now holds Select. Pressed again, it swaps back. So AF/Snap toggle
+swaps the focus setting with a back-up slot, which has its own remote setting
+<code>StillBackUpFocus</code> (handler 0x532ddf84, setter 0x53242618).
+When the watcher set <code>StillFocus Snap</code> alone, the slot was empty
+and Fn had nothing to return to. The temporary focus of the eighth run sat
+on top of the toggle, so the two fought ("sometimes it worked"). Now the
+meter makes exactly the toggle's state: <code>StillBackUpFocus
+&lt;AF mode&gt;</code>, then <code>StillFocus Snap</code>. The probe,
+<code>CommonTempFocus</code> and the blinks are gone; the batch starts
+with <code>AUD_beep</code> (the AF beep, debug command 0x5302257c)
+as feedback. Snap came 4–5 s after each measurement (relay plus card sync).
+One measurement read 1761 mm where the user had focused at about 5 m; the
+log now lists the readings on the way (<code>path</code>).</p>
+<p><strong>Tenth run:</strong> Fn and Snap worked (six measurements,
+including 6.2 m). Two faults. (1) Snap came back without a half-press:
+in P the aperture follows the light, and every change re-metered and
+sent Snap, even in AF. Now a new aperture counts only while in Snap, and
+only when it moves the snap distance (subject beyond the hyperfocal
+distance); then only the distance is sent, without a beep. (2) The first
+half-press after turning the dial to U2 was missed: the dial is noticed
+at the next poll (2–3 s), and the first lens reading in U2 (the base) was
+already the subject. Now the last lens reading in the previous mode is
+the base.</p>
+<p><strong>Eleventh run:</strong> works (14 measurements from 0.2 m to
+infinity). Three batches in a row were acked but the focus stayed AF;
+the user was half-pressing again around that time. Now Snap is sent once
+more if the focus is still AF 5 s after the batch, twice at most
+(<code>meter snap retry</code>, <code>meter snap failed</code>); Snap
+that came and went is Fn and is left alone. The development log lines
+are gone (lens path, focus in use, remeasure, file list, Fn code); the
+watcher logs the Fn code only when it is not AF/Snap toggle.</p>
+<p><strong>Exact distance on screen and in the photo (next run):</strong>
+the snap label is text. The setting's cm maps to a label id (0x53291ec4:
+30 → 0x3e, 40 → 0x3f, 100 → 0x40, 150 → 0x41, 200 → 0x42, 250 → 0x43,
+350 → 0x44, 500 → 0x45), the widget (setter 0x53396f80, which skips an
+unchanged id) resolves it via <code>[[0x55002bac + 4·language] +
+4·id]</code> to an entry {u16 length with NUL, u16 1, pointer to UTF-16}
+(0x5339666c). The language is the byte at +0x9ba (getter 0x532465dc,
+index switch 0x533963f8). The four-character labels (0.3m, 1.5m, 2.5m,
+3.5m) sit in 12 bytes, so five characters fit with the length 5 → 6.
+The meter now uses 1.5, 2.5 or 3.5 m (not 0.3 m, which 0x532af020 can
+show as 0.4 m), never the one in use, so the new id redraws. It writes
+the text (<code>0.48m</code>, <code>12.2m</code>) with LB2–LB4.BIN
+(only the words that change), and restores it with the mm patch. The patch
+tool checks every stock word first. If the chain does not check out it
+logs <code>meter label off lang N</code> and falls back to the nearest
+stock setting. With the camera's copyright empty, the Snap batch also sets
+<code>GRSNAP:&lt;snap mm&gt;:&lt;subject mm&gt;</code> as the copyright
+(attached), using CPTAG.BIN as the U1 bracket does. Fn back to AF and
+leaving the mode clear it in one batch (CPEMPTY.BIN).</p>
+<p><strong>Twelfth run:</strong> the label patch wrote (exit 0) but the
+screen kept "2.5m"/"3.5m", and the meter's choice of 1.5/2.5/3.5 m
+instead of the nearest setting put the labels far off. Cause: for the
+snap ids (0x3e–0x45, 0xc) the widget setter 0x53396f80 forces language
+0x14 (0x53396f4c: +0x10c = 1, +0x10d = 0x14), and 0x533963f8 maps 0x14 to
+table index 0. So the label always comes from <code>[0x55002bac]</code>,
+not from the table of the language that is set. Neither the size code
+(0x5339666c, cached only while +0xf3 is clear) nor the draw (0x533970a4)
+caches the text. Now: table index 0, and the nearest setting again. The
+text goes in only when the nearest setting is 1.5, 2.5 or 3.5 m. When that
+setting is already in use, 5 m is sent first so that the widget sees a
+new id. The tag then goes in its own batch, because both would not fit
+the 512-byte relay batch.</p>
+<p><strong>Thirteenth run:</strong> one measurement landed on 1.5 m and
+was patched to <code>1.60m</code>. The user saw "1.6", so the label
+draws, perhaps cut to the stock width. The six others landed on settings
+without room (0.3, 1, 2 m). Now every measurement uses the nearest of the
+four settings with four-character labels (0.3, 1.5, 2.5, 3.5 m; for 0.3 m
+both ids 0x3e and 0x3f). The text is at most four characters: under 1 m
+<code>48cm</code>, up to 10 m <code>1.6m</code>, beyond that
+<code>12m</code> (length word 5 → 4). Only words that change are written,
+1 to 6 of them (LB1–LB6.BIN). Photo tag confirmed: R0007322–24 carry
+<code>GRSNAP:346:346</code>, <code>GRSNAP:1089:1089</code>,
+<code>GRSNAP:1730:1730</code>, focus mode Snap.</p>
+<p><code>tools/focus/focus_watch.py card --macro U1 --meter U2</code>.
+REMOTE.SH starts <code>WATCH.SH</code> at every power-on.</p>
+<ul>
+<li><strong>Macro stack:</strong> take a photo on the nearest point (one
+blink), then on the farthest (two blinks). The live lens distance at each
+photo gives near and far. The frames between them are spaced in dioptres
+for the aperture, as in §6, with at least 5 and at most 35. Afterwards the
+focus mode and snap distance are set back. The dial is checked after each
+round; no second photo within 60 s forgets the near point.</li>
+<li><strong>Snap meter:</strong> in AF modes, once the lens has moved
+and holds for two readings, the camera is switched to Snap at that
+distance, or at the hyperfocal distance when the subject lies beyond it.
+Fn (AF/Snap toggle) and a half-press measure again. The stock snap
+setting nearest to it in dioptres (0.3, 1, 1.5, 2, 2.5, 3.5, 5 m) is
+rewritten in RAM to the exact distance and selected, so the screen shows
+about the right label (single-slot templates TS0–TS6.BIN). It stays so
+while the dial is on the meter's U mode; leaving it puts the stock words
+back. After each photo the log notes where the lens was
+(<code>meter shot</code>).</li>
+<li><strong>Millimetres in the camera:</strong> the near and far points
+are only known in the camera, so the card holds multipatch templates
+T1–T7.BIN with placeholder words. The shell writes each
+<code>movw r1, #mm</code> with <code>printf</code> and <code>dd</code>
+and reads it back before running the file. On the Mac the result equals
+the files of §6 byte for byte (tests).</li>
+<li><strong>Tag:</strong> <code>GRFS:&lt;far photo
+number&gt;:&lt;frame&gt;/&lt;frames&gt;:&lt;mm&gt;</code> in EXIF
+Copyright, only when the copyright reads empty; empty again
+afterwards.</li>
+</ul>
+
+<h2 id="next">6a. Still open</h2>
+<ul>
+<li>A scene with detail at every depth, to judge the overlap; and why
+frame 10 of the first bracket sat 0.09 D off.</li>
+<li>Optional: write each frame's distance into XMP sidecars on the Mac,
+for stacking software and GR Lab.</li>
+</ul>
+
+<h2 id="repro">7. Reproducing</h2>
+<pre><code>python3 tools/focus/focus_probe.py check        # the matcher words in the 1.60 image
+python3 tools/focus/focus_probe.py card         # the probe card in work/focus-probe/
+python3 tools/focus/focus_probe.py import /Volumes/…/DCIM/100RICOH --first R000…
+python3 -m pytest tools/tests/test_focus_probe.py</code></pre>
+</main>
+</div>
+<script>
+document.querySelectorAll('main table').forEach(function(t){var w=document.createElement('div');w.className='table-wrap';t.parentNode.insertBefore(w,t);w.appendChild(t);});
+</script>
+</body>
+</html>
