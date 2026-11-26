@@ -286,8 +286,9 @@ power-on. **Macro stack** (U1, saved with AF-S and Av): photo on the nearest poi
 for one blink, photo on the farthest point; the camera shoots the frames between them.
 **Snap meter**
 (U2, saved with AF-S and Fn = AF/Snap toggle; set Fn while on U2, then save U2 again, because each
-U mode recalls its own button setup): half-press on the subject and hold about a second;
-a beep, and a few seconds later the camera is in Snap at that distance, or the hyperfocal distance beyond it. The screen
+U mode recalls its own button setup): half-press on the subject, wait for focus, release;
+the camera then switches to Snap at that distance, or the hyperfocal distance beyond it (in the first
+seconds after power-on only once the card's relay runs). The screen
 shows the exact distance (48cm, 1.6m, 12m) on the 0.3/1.5/2.5/3.5 m setting nearest to it; the lens goes to the exact distance. With your
 copyright field empty, Snap photos carry `GRSNAP:<snap mm>:<subject mm>` in EXIF Copyright. To measure again
 press Fn (back to AF) and half-press on the new subject. Use a tripod for U1 and ignore the stock distance labels on screen; a

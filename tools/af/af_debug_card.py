@@ -659,6 +659,422 @@ def peek_bin():
     return arm_elf(PEEK_S)
 
 
+# SAMP.BIN: RAM words sampled every 5 ms from one process (the snap meter's
+# shell needed 30+ forks per lens reading before). /dev/mem read-only, O_SYNC
+# (uncached); every address word-aligned in 0x53000000..0x5fefffff, one page
+# mapped per address. All numbers hex, no prefix.
+#
+#   SAMP.BIN w TIMEOUT STABLE LENS BASE MOVED FOCUS EXPECT [EXTRA ...]   (at most 8 extras)
+#     Waits until the lens word at LENS (0: none) has left BASE (or MOVED is 1)
+#     and then stood still for STABLE ms (result 0), the low byte at FOCUS (0:
+#     none) is no longer EXPECT (result 2; EXPECT >= 0x100: not checked), or
+#     TIMEOUT ms passed (result 1; TIMEOUT 0 is one snapshot). A lens word 0
+#     or >= 1000000 counts as moving. Writes raw words to stdout: result,
+#     elapsed ms, samples, last lens (0xffffffff: none valid), moved, the
+#     FOCUS word, then one word per EXTRA.
+#   SAMP.BIN t TIMEOUT RECORDS FILE ADDR [ADDR ...]      (1 to 16 addresses)
+#     Appends a record (tv_sec, tv_nsec CLOCK_MONOTONIC, index, old, new) to
+#     FILE for every word that changes, the first address (the lens) looked at
+#     every 50 ms only; first one record per word with its value (old = new).
+#     Opens, writes and closes FILE per record, so the shell may move it away
+#     at any time. Stops after RECORDS records or TIMEOUT ms.
+# Exit status: 0 done, 1 open /dev/mem, 2 mmap, 4 open FILE, 8 bad arguments.
+# Frame (r11): +0 mapped pointers, +64 last values (trace), +128 timespec,
+# +144 output, +256 arguments, +320 start ms (trace), +340 count, +344 temp.
+SAMP_S = r"""    .syntax unified
+    .arm
+    .text
+    .global _start
+_start:
+    b       main
+dev:
+    .asciz  "/dev/mem"
+    .balign 4
+period:
+    .word   0, 5000000
+main:
+    ldr     r9, [sp]                @ argc
+    add     r10, sp, #4             @ argv
+    sub     sp, sp, #512
+    mov     r11, sp
+    cmp     r9, #3
+    blt     badarg
+    adr     r0, dev
+    ldr     r1, =0x101000           @ O_RDONLY | O_SYNC
+    mov     r7, #5                  @ open
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #1
+    bhi     quit
+    mov     r4, r0                  @ r4 = /dev/mem until everything is mapped
+    ldr     r0, [r10, #4]           @ argv[1]: the mode
+    ldrb    r1, [r0, #1]
+    cmp     r1, #0
+    bne     badarg
+    ldrb    r0, [r0]
+    cmp     r0, #116                @ 't'
+    beq     trace
+    cmp     r0, #119                @ 'w'
+    bne     badarg
+    sub     r8, r9, #2              @ hex arguments
+    cmp     r8, #7
+    blt     badarg
+    cmp     r8, #15
+    bgt     badarg
+    mov     r6, #0
+wparse:
+    add     r0, r6, #2
+    ldr     r0, [r10, r0, lsl #2]
+    adr     lr, 1f                  @ no bl: it leaves a relocation
+    b       hex
+1:
+    cmp     r1, #0
+    beq     badarg
+    add     r1, r6, #64
+    str     r0, [r11, r1, lsl #2]
+    add     r6, r6, #1
+    cmp     r6, r8
+    bne     wparse
+    sub     r8, r8, #7
+    str     r8, [r11, #340]         @ extras
+    ldr     r0, [r11, #264]         @ LENS
+    adr     lr, 1f
+    b       mapw
+1:
+    str     r0, [r11]
+    ldr     r0, [r11, #276]         @ FOCUS
+    adr     lr, 1f
+    b       mapw
+1:
+    str     r0, [r11, #4]
+    mov     r6, #0
+2:
+    cmp     r6, r8
+    beq     wstart
+    add     r0, r6, #71
+    ldr     r0, [r11, r0, lsl #2]
+    adr     lr, 1f
+    b       mapw
+1:
+    add     r1, r6, #2
+    str     r0, [r11, r1, lsl #2]
+    add     r6, r6, #1
+    b       2b
+wstart:
+    ldr     r8, [r11, #272]         @ r8 moved
+    mov     r4, #0                  @ r4 samples
+    mvn     r5, #0                  @ r5 last valid lens: none
+    mov     r6, #0                  @ r6 still since (ms)
+    adr     lr, 1f
+    b       msnow
+1:
+    mov     r10, r0                 @ r10 start
+wloop:
+    adr     lr, 1f
+    b       msnow
+1:
+    sub     r9, r0, r10             @ r9 elapsed
+    add     r4, r4, #1
+    ldr     r0, [r11]
+    cmp     r0, #0
+    beq     wfocus
+    ldr     r0, [r0]
+    cmp     r0, #0
+    beq     wbad
+    ldr     r1, =1000000
+    cmp     r0, r1
+    bhs     wbad
+    ldr     r1, [r11, #268]         @ BASE
+    cmp     r0, r1
+    movne   r8, #1
+    cmp     r0, r5
+    beq     wsame
+    mov     r5, r0
+    mov     r6, r9
+    b       wfocus
+wbad:
+    mvn     r5, #0
+    mov     r6, r9
+    b       wfocus
+wsame:
+    cmp     r8, #0
+    beq     wfocus
+    sub     r1, r9, r6
+    ldr     r2, [r11, #260]         @ STABLE
+    cmp     r1, r2
+    movhs   r0, #0
+    bhs     wout
+wfocus:
+    ldr     r0, [r11, #4]
+    cmp     r0, #0
+    beq     wtime
+    ldr     r1, [r11, #280]         @ EXPECT
+    cmp     r1, #256
+    bhs     wtime
+    ldr     r0, [r0]
+    and     r0, r0, #255
+    cmp     r0, r1
+    movne   r0, #2
+    bne     wout
+wtime:
+    ldr     r1, [r11, #256]         @ TIMEOUT
+    cmp     r9, r1
+    movhs   r0, #1
+    bhs     wout
+    adr     r0, period
+    mov     r1, #0
+    mov     r7, #162                @ nanosleep
+    svc     #0
+    b       wloop
+wout:
+    add     r3, r11, #144
+    str     r0, [r3]
+    str     r9, [r3, #4]
+    str     r4, [r3, #8]
+    str     r5, [r3, #12]
+    str     r8, [r3, #16]
+    ldr     r0, [r11, #4]
+    cmp     r0, #0
+    ldrne   r0, [r0]
+    str     r0, [r3, #20]
+    ldr     r6, [r11, #340]
+    mov     r1, #0
+2:
+    cmp     r1, r6
+    beq     3f
+    add     r2, r1, #2
+    ldr     r0, [r11, r2, lsl #2]
+    cmp     r0, #0
+    ldrne   r0, [r0]
+    add     r2, r1, #6
+    str     r0, [r3, r2, lsl #2]
+    add     r1, r1, #1
+    b       2b
+3:
+    mov     r0, #1                  @ stdout
+    mov     r1, r3
+    add     r2, r6, #6
+    lsl     r2, r2, #2
+    mov     r7, #4                  @ write
+    svc     #0
+    mov     r0, #0
+    b       quit
+trace:
+    sub     r8, r9, #5              @ addresses
+    cmp     r8, #1
+    blt     badarg
+    cmp     r8, #16
+    bgt     badarg
+    str     r8, [r11, #340]
+    ldr     r0, [r10, #8]
+    adr     lr, 1f
+    b       hex
+1:
+    cmp     r1, #0
+    beq     badarg
+    str     r0, [r11, #256]         @ TIMEOUT
+    ldr     r0, [r10, #12]
+    adr     lr, 1f
+    b       hex
+1:
+    cmp     r1, #0
+    beq     badarg
+    str     r0, [r11, #260]         @ RECORDS
+    mov     r6, #0
+tparse:
+    add     r0, r6, #5
+    ldr     r0, [r10, r0, lsl #2]
+    adr     lr, 1f
+    b       hex
+1:
+    cmp     r1, #0
+    beq     badarg
+    cmp     r0, #0
+    beq     badarg
+    adr     lr, 1f
+    b       mapw
+1:
+    str     r0, [r11, r6, lsl #2]
+    ldr     r0, [r0]
+    add     r1, r6, #16
+    str     r0, [r11, r1, lsl #2]
+    add     r6, r6, #1
+    cmp     r6, r8
+    bne     tparse
+    mov     r4, #0                  @ r4 records written
+    mov     r6, #0
+tinit:
+    mov     r1, r6
+    add     r0, r6, #16
+    ldr     r2, [r11, r0, lsl #2]
+    mov     r3, r2
+    adr     lr, 1f
+    b       trec
+1:
+    add     r6, r6, #1
+    cmp     r6, r8
+    bne     tinit
+    adr     lr, 1f
+    b       msnow
+1:
+    str     r0, [r11, #320]
+    mov     r9, #0                  @ r9 counts down to the next lens look
+tloop:
+    ldr     r0, [r11, #260]
+    cmp     r4, r0
+    bhs     tdone
+    adr     r0, period
+    mov     r1, #0
+    mov     r7, #162
+    svc     #0
+    subs    r9, r9, #1
+    movmi   r9, #9
+    mov     r6, #0
+tword:
+    cmp     r6, #0
+    bne     2f
+    cmp     r9, #0
+    bne     tnext
+2:
+    ldr     r0, [r11, r6, lsl #2]
+    ldr     r3, [r0]
+    add     r0, r6, #16
+    ldr     r2, [r11, r0, lsl #2]
+    cmp     r2, r3
+    beq     tnext
+    str     r3, [r11, r0, lsl #2]
+    mov     r1, r6
+    adr     lr, 1f
+    b       trec
+1:
+    ldr     r0, [r11, #260]
+    cmp     r4, r0
+    bhs     tdone
+tnext:
+    add     r6, r6, #1
+    cmp     r6, r8
+    bne     tword
+    adr     lr, 1f
+    b       msnow
+1:
+    ldr     r1, [r11, #320]
+    sub     r0, r0, r1
+    ldr     r1, [r11, #256]
+    cmp     r0, r1
+    blo     tloop
+tdone:
+    mov     r0, #0
+quit:
+    mov     r7, #1                  @ exit
+    svc     #0
+badarg:
+    mov     r0, #8
+    b       quit
+trec:                               @ r1 index, r2 old, r3 new; r4 += 1; uses r0-r3, r5, r7, r12
+    mov     r12, lr
+    add     r0, r11, #144
+    str     r1, [r0, #8]
+    str     r2, [r0, #12]
+    str     r3, [r0, #16]
+    mov     r1, r0
+    mov     r0, #1                  @ CLOCK_MONOTONIC
+    ldr     r7, =263                @ clock_gettime
+    svc     #0
+    ldr     r0, [r10, #16]          @ argv[4]: FILE
+    ldr     r1, =0x441              @ O_WRONLY | O_CREAT | O_APPEND
+    ldr     r2, =0x1a4
+    mov     r7, #5
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #4
+    bhi     quit
+    mov     r5, r0
+    add     r1, r11, #144
+    mov     r2, #20
+    mov     r7, #4
+    svc     #0
+    mov     r0, r5
+    mov     r7, #6                  @ close
+    svc     #0
+    add     r4, r4, #1
+    bx      r12
+msnow:                              @ -> r0 monotonic ms (mod 2^32); uses r1-r3, r7, r12
+    mov     r12, lr
+    mov     r0, #1
+    add     r1, r11, #128
+    ldr     r7, =263
+    svc     #0
+    ldr     r0, [r11, #128]
+    ldr     r1, [r11, #132]
+    ldr     r2, =4295               @ nsec * 4295 >> 32 = nsec / 1e6 (no divide instruction)
+    umull   r3, r1, r1, r2
+    mov     r2, #1000
+    mul     r3, r0, r2
+    add     r0, r3, r1
+    bx      r12
+mapw:                               @ r0 address (0: none) -> r0 pointer (0); r4 /dev/mem; uses r1-r3, r5, r7, r12
+    mov     r12, lr
+    cmp     r0, #0
+    bxeq    r12
+    tst     r0, #3
+    bne     badarg
+    ldr     r1, =0x53000000
+    cmp     r0, r1
+    blo     badarg
+    ldr     r1, =0x5ff00000
+    cmp     r0, r1
+    bhs     badarg
+    str     r0, [r11, #344]
+    lsr     r5, r0, #12
+    mov     r0, #0
+    mov     r1, #4096
+    mov     r2, #1                  @ PROT_READ
+    mov     r3, #1                  @ MAP_SHARED
+    mov     r7, #192                @ mmap2
+    svc     #0
+    cmn     r0, #4096
+    movhi   r0, #2
+    bhi     quit
+    ldr     r1, [r11, #344]
+    ldr     r2, =0xfff
+    and     r1, r1, r2
+    add     r0, r0, r1
+    bx      r12
+hex:                                @ r0 string -> r0 value, r1 = digits (0 = bad); uses r2, r3, r12
+    mov     r2, #0
+    mov     r1, #0
+1:
+    ldrb    r3, [r0], #1
+    cmp     r3, #0
+    beq     3f
+    sub     r12, r3, #48
+    cmp     r12, #10
+    blo     2f
+    orr     r12, r3, #0x20
+    sub     r12, r12, #97
+    cmp     r12, #6
+    bhs     4f
+    add     r12, r12, #10
+2:
+    add     r1, r1, #1
+    cmp     r1, #8
+    bhi     4f
+    orr     r2, r12, r2, lsl #4
+    b       1b
+3:
+    mov     r0, r2
+    bx      lr
+4:
+    mov     r1, #0
+    bx      lr
+    .ltorg
+"""
+
+
+def samp_bin():
+    return arm_elf(SAMP_S)
+
+
 def arm_elf(source):
     """Assemble ARM source with clang and wrap its .text in a static ELF."""
     import struct, subprocess, tempfile

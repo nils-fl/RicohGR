@@ -137,23 +137,203 @@ def lbl_str(i):
     return 0x53B80000 + 16 * i
 
 
-def run_watch(t, rows, cpy_first=0, attach=1, limit=None, lens_zero=0, tag_file=None, fn=3, setting=None, lang=None):
+MOCK = r"""
+import json, os, struct, sys
+T = os.environ["T"]
+C = json.load(open(f"{T}/cfg.json"))
+rows = [list(map(lambda v: int(v) if v.lstrip("-").isdigit() else v, l.split())) for l in open(f"{T}/table")]
+
+
+def rd(n, d="0"):
+    try:
+        return open(f"{T}/{n}").read().strip()
+    except FileNotFoundError:
+        return d
+
+
+def wr(n, v):
+    open(f"{T}/{n}", "w").write(f"{v}\n")
+
+
+def row(k=None):
+    k = int(rd("k")) if k is None else k
+    r = rows[0]
+    for x in rows:
+        if x[0] <= k:
+            r = x
+    return r
+
+
+def cam():
+    f, b, c = map(int, rd("cam").split())
+    return [f, b, c]
+
+
+def lens():
+    z = int(rd("lz"))
+    if z > 0:
+        wr("lz", z - 1)
+        return 0
+    return row()[4] & 0xFFFFFFFF
+
+
+def value(a):
+    f, b, c = cam()
+    O = C["obj"]
+    fixed = {C["settings"]: O, O + C["focus"]: f | (b << 16), O + C["snap"]: c, O + C["fn"]: C["fnv"] << 16,
+             O + C["cur"]: f << 16, O + C["pos"]: C["posv"], O + C["cpy"]: C["cpyv"], O + C["att"]: C["attv"],
+             C["lroot"]: C["la"], C["la"] + C["lensa"]: C["lb"], C["lb"]: C["lc"]}
+    fixed.update({int(k): v for k, v in C["extra"].items()})
+    if a == C["lc"] + C["lensmm"]:
+        return lens()
+    if C["s1"] is not None and a == C["s1w"]:
+        n = int(rd("s1"))
+        if n > 0:
+            wr("s1", n - 1)
+            return 1
+        return 0
+    return fixed.get(a)
+
+
+def ok(a):
+    return a % 4 == 0 and 0x53000000 <= a < 0x5FF00000
+
+
+mode = sys.argv[1]
+if mode == "peek":
+    v = value(int(sys.argv[2], 16))
+    if v is None:
+        sys.exit(9)
+    sys.stdout.buffer.write(struct.pack("<I", v & 0xFFFFFFFF) * int(sys.argv[3], 16))
+elif mode == "samp":
+    args = sys.argv[2:]
+    with open(f"{T}/samp.txt", "a") as fh:
+        fh.write(" ".join(args) + "\n")
+    if C["samp_broken"]:
+        sys.exit(8)
+    if args[0] == "t":
+        addrs = [int(x, 16) for x in args[4:]]
+        recs = b"".join(struct.pack("<5I", 100 + i, 5000000 * i, i, 7, 7) for i in range(2))
+        open(args[3], "ab").write(recs)
+        sys.exit(0)
+    to, st, la, base, moved, fa, exp = [int(x, 16) for x in args[1:8]]
+    extras = [int(x, 16) for x in args[8:]]
+    if any(x and not ok(x) for x in [la, fa] + extras):
+        sys.exit(8)
+    f = value(fa) if fa else 0
+    res, out = 1, 0xFFFFFFFF
+    if la:
+        L = lens()
+        valid = 0 < L < 1000000
+        if valid:
+            out = L
+            if L != base:
+                moved = 1
+        if to:
+            prev = rd("prev", "")
+            if valid and moved and str(L) == prev:
+                res = 0
+            wr("prev", L if valid else "")
+    if res == 1 and to and fa and exp < 256 and (f & 255) != exp:
+        res = 2
+    vals = []
+    for x in extras:
+        v = value(x) if x else 0
+        if v is None:
+            sys.exit(9)
+        vals.append(v & 0xFFFFFFFF)
+    sys.stdout.buffer.write(struct.pack("<%dI" % (6 + len(vals)), res, to if res == 1 else 100, 1, out, moved, f & 0xFFFFFFFF, *vals))
+elif mode == "state":
+    print(row()[int(sys.argv[2]) - 1])
+elif mode == "props":
+    k = int(rd("k")) + 1
+    wr("k", k)
+    pf, nf = row(k - 1)[5], row(k)[5]
+    f, b, c = cam()
+    if nf != pf:                                   # the table's focus changed: the user (or the camera)
+        if nf == 10:
+            if f != 10:
+                b, f = f, 10                       # Fn from AF: the AF mode into the back-up
+        elif pf == 10 and nf not in (9, 11):
+            if f == 10:
+                f, b = nf, 13                      # Fn back to AF: 0x532b0b6c writes 13
+        else:
+            f = nf
+    if rd("revnext") == "1" and f == 10:
+        f = b                                      # the camera drops Snap, back-up unchanged
+        wr("revnext", 0)
+    wr("cam", f"{f} {b} {c}")
+    r = row(k)
+    sys.stdout.write('HTTP/1.0 200 OK\r\n\r\n{"ssid":"S","exposureMode":"%s","av":"%s","avList":["2.8"]}\n' % (r[1], r[2]))
+elif mode == "batch":
+    text = open(sys.argv[2]).read()
+    f, b, c = cam()
+    if "StillFocus Snap'" in text and int(rd("dropall")) > 0:
+        wr("dropall", int(rd("dropall")) - 1)
+        sys.exit(0)
+    for line in text.splitlines():
+        if "StillSnapDistanceCm " in line:
+            c = int(line.split("StillSnapDistanceCm ")[1].rstrip("'"))
+        elif "StillBackUpFocus " in line:
+            b = C["codes"][line.split("StillBackUpFocus ")[1].rstrip("'")]
+        elif "StillFocus Snap'" in line:
+            if int(rd("drop")) > 0:
+                wr("drop", int(rd("drop")) - 1)
+            else:
+                f = 10
+                if int(rd("revert")) > 0:
+                    wr("revert", int(rd("revert")) - 1)
+                    wr("revnext", 1)
+    wr("cam", f"{f} {b} {c}")
+"""
+
+S1P, S1Q, S2Q = 0x55001000, 0x55002000, 0x55003000
+
+
+def run_watch(t, rows, cpy_first=0, attach=1, limit=None, lens_zero=0, tag_file=None, fn=3, lang=None, s1=None,
+              s1_class=None, samp=True, samp_broken=False, drop=0, drop_all=0, revert=0, pos=0):
     """rows: (props call k, U mode, av, last photo number, lens mm, focus code, uptime s); the state for props
-    call k is the last row with row k <= k. PEEK and /v1/photos answer from the current state.
+    call k is the last row with row k <= k. Each round on the meter mode is one props call and one SAMP.BIN
+    wait: the lens has settled when a wait sees the same moved lens as the wait before.
+    The camera model ($T/cam: focus, back-up, snap cm) starts with the first row's focus, back-up 13, 250 cm;
+    the relay batches change it as the camera would (drop: that many StillFocus Snap lines ignored; drop_all:
+    that many Snap batches ignored; revert: Snap dropped again by the camera at the next round, back-up kept).
+    A change of the table's focus is the user: to 10 Fn from AF, from 10 to AF Fn back (back-up 13).
     lens_zero: the first that many lens reads give 0. tag_file: a WATCH/TAG the boot copied to RAM.
-    The focus code is the mode in use (+0xc6) and, unless setting is given, the setting (+0x11c).
-    fn: the Fn button setting. lang: the label chain answers (table index 0, whatever the language)."""
+    fn: the Fn button setting. lang: the label chain answers (table index 0, whatever the language). s1: the
+    half-press switch answers, held (1) for that many reads of its state; s1_class: another class word.
+    samp False: no SAMP.BIN (the PEEK path); samp_broken: it exits 8."""
+    import json
     (t / "k").write_text("0\n")
     (t / "lz").write_text(f"{lens_zero}\n")
+    for n, v in (("drop", drop), ("dropall", drop_all), ("revert", revert), ("s1", s1 or 0)):
+        (t / n).write_text(f"{v}\n")
+    (t / "cam").write_text(f"{rows[0][5]} 13 250\n")
     (t / "table").write_text("\n".join(" ".join(map(str, r)) for r in rows) + "\n")
-    x(t / "state", "#!/bin/sh\nk=$(cat $T/k)\nawk -v k=$k -v f=$1 '$1 <= k { v = $f } END { print v }' $T/table\n")
+    extra = {}
+    if lang is not None:
+        extra[fw.LANG_TAB] = LBL_TAB
+        for ids in fw.LABEL_IDS.values():
+            for i in ids:
+                extra.update({LBL_TAB + 4 * i: lbl_ent(i), lbl_ent(i): 261, lbl_ent(i) + 4: lbl_str(i)})
+    if s1 is not None:
+        extra.update({fw.S1_ROOT: S1P, S1P + fw.S1_OFF: S1Q, S1P + fw.S2_OFF: S2Q, S1Q: s1_class or fw.S1_CLASS,
+                      S1Q + 12: fw.S1_EVENT, S1Q + 16: 0})
+    else:
+        extra[fw.S1_ROOT] = 0
+    cfg = dict(obj=OBJ, settings=p3.SETTINGS_PTR, focus=p3.OFF["focus"], snap=p3.OFF["snap"], fn=fw.OFF_FN - 2,
+               fnv=fn, cur=fw.OFF_CUR - 2, pos=p3.OFF["pos"], posv=pos, cpy=p3.OFF_COPYRIGHT - 1, cpyv=cpy_first << 8,
+               att=p3.OFF_ATTACH - 3, attv=attach << 24, lroot=p3.LENS_ROOT, la=LA, lensa=p3.LENS_A, lb=LB, lc=LC,
+               lensmm=p3.LENS_MM, extra={str(k): v for k, v in extra.items()}, s1=s1, s1w=S1Q + 8,
+               samp_broken=samp_broken, codes={n: c for c, n in fw.FOCUS_NAMES.items()})
+    (t / "cfg.json").write_text(json.dumps(cfg))
+    (t / "mock.py").write_text(MOCK)
     b = bindir(t)
     x(b / "mocknc", """#!/bin/sh
 read req path _
 case $path in
-/v1/props) echo $(( $(cat $T/k) + 1 )) >$T/k
- printf 'HTTP/1.0 200 OK\\r\\n\\r\\n{"ssid":"S","exposureMode":"%s","av":"%s","avList":["2.8"]}\\n' $($T/state 2) $($T/state 3) ;;
-/v1/photos) s=$($T/state 4); printf 'HTTP/1.0 200 OK\\r\\n\\r\\n{"dirs":[{"name":"100RICOH","files":["R%07d.JPG","R%07d.DNG","R%07d.JPG"]}]}\\n' $((s - 1)) $s $s ;;
+/v1/props) python3 $T/mock.py props ;;
+/v1/photos) s=$(python3 $T/mock.py state 4); printf 'HTTP/1.0 200 OK\\r\\n\\r\\n{"dirs":[{"name":"100RICOH","files":["R%07d.JPG","R%07d.DNG","R%07d.JPG"]}]}\\n' $((s - 1)) $s $s ;;
 esac
 """)
     w = t / "w"
@@ -164,39 +344,24 @@ esac
     for n, (elf, _) in fw.label_templates().items():
         (w / f"LB{n}.BIN").write_bytes(elf)
         (w / f"LB{n}.BIN").chmod(0o755)
-    lbl = ""
-    if lang is not None:
-        lbl = (f"{fw.LANG_TAB}) v={LBL_TAB} ;;\n"
-               + "".join(f"{LBL_TAB + 4 * i}) v={lbl_ent(i)} ;; {lbl_ent(i)}) v=261 ;; {lbl_ent(i) + 4}) v={lbl_str(i)} ;;\n"
-                         for ids in fw.LABEL_IDS.values() for i in ids))
     for name in ("CPTAG", "CPEMPTY"):
         x(w / f"{name}.BIN", "#!/bin/sh\n")
     if tag_file is not None:
         (w / "TAG").write_text(tag_file)
-    x(w / "PEEK.BIN", f"""#!/bin/sh
-a=$((0x$1))
-# The settings block for the probe: zero words, +0xa40 from table column 8 (a toggle state).
-if [ $a = {OBJ} ]; then f=$($T/state 8); python3 -c "import sys, struct; w = [0] * $2; w[{0xA40 // 4}] = int('${{f:-0}}'); sys.stdout.buffer.write(struct.pack('<%dI' % $2, *w))"; exit 0; fi
-case $a in
-{p3.SETTINGS_PTR}) v={OBJ} ;; {OBJ + p3.OFF['focus']}) v={'$($T/state 6)' if setting is None else setting} ;; {OBJ + p3.OFF['snap']}) v=250 ;; {OBJ + fw.OFF_FN - 2}) v=$(({fn} << 16)) ;; {OBJ + fw.OFF_CUR - 2}) v=$(($($T/state 6) << 16)) ;;
-{OBJ + p3.OFF_COPYRIGHT - 1}) v={cpy_first << 8} ;; {OBJ + p3.OFF_ATTACH - 3}) v={attach << 24} ;;
-{p3.LENS_ROOT}) v={LA} ;; {LA + p3.LENS_A}) v={LB} ;; {LB}) v={LC} ;;
-{lbl}
-{LC + p3.LENS_MM}) z=$(cat $T/lz); if [ $z -gt 0 ]; then echo $((z - 1)) >$T/lz; v=0; else v=$($T/state 5); fi ;;
-*) exit 9 ;;
-esac
-[ $v -lt 0 ] && v=$((v + 4294967296))
-python3 -c "import sys, struct; sys.stdout.buffer.write(struct.pack('<I', $v) * $2)"
-""")
+    x(w / "PEEK.BIN", '#!/bin/sh\nexec python3 $T/mock.py peek "$@"\n')
+    if samp:
+        x(w / "SAMP.BIN", '#!/bin/sh\nexec python3 $T/mock.py samp "$@"\n')
     lib = (f"w={t}\nclobber() {{ t=9; k=9; q=9; o=9; l=9; v=9; a=9; }}\n"
            f"log() {{ echo \"$*\" >>{t}/log.txt; clobber; }}\n"
-           f"b() {{ cat >>{t}/relay.txt; echo ---- >>{t}/relay.txt; clobber; }}\n")
+           f"b() {{ cat >{t}/batch.txt; cat {t}/batch.txt >>{t}/relay.txt; echo ---- >>{t}/relay.txt; "
+           f"python3 $T/mock.py batch {t}/batch.txt; clobber; }}\n")
     s = SCRIPT.replace(f". {rc.WWW}/SOLO.LIB", f". {t}/lib.sh").replace(f"W={fw.RAM}", f"W={w}")
     s = s.replace('pt() { "$@"; }', 'pt() { [ -x "$1" ] || { echo "$(basename $1) not executable" >>$T/patch.txt; return 126; }; echo "$(basename $1) $2" >>$T/patch.txt; }')
-    s = s.replace("zup() { read zq0 _ </proc/uptime; echo ${zq0%.*}; }", "zup() { $T/state 7; }")
+    s = s.replace("zup() { read zq0 _ </proc/uptime; echo ${zq0%.*}; }", "zup() { python3 $T/mock.py state 7; }")
     s = s.replace("sleep 2 )", ":; )")
-    s = s.replace("poll; zpc=4; fi", "poll; zpc=2; fi")                # each table row: two lens reads
-    s = s.replace("while :; do", f"while [ $(cat $T/k) -lt {limit or max(r[0] for r in rows) + 1} ]; do")
+    s = s.replace("then pollbg; else poll; fi", "then poll; else poll; fi")          # each round: one props call
+    s = s.replace("while :; do\n if [ \"$zmode\"", f"while [ $(cat $T/k) -lt {limit or max(r[0] for r in rows) + 1} ]; do\n if [ \"$zmode\"")
+    assert "while [ $(cat $T/k)" in s
     (t / "lib.sh").write_text(lib)
     (t / "watch.sh").write_text(s)
     env = dict(os.environ, T=str(t), PATH=f"{b}:{os.environ['PATH']}")
@@ -279,10 +444,10 @@ def test_meter_sets_snap_after_the_lens_settles_and_restores_on_leaving(tmp_path
                                   "CPTAG.BIN ", "CPTAG.BIN restore", "M.BIN restore", "CPEMPTY.BIN ", "CPEMPTY.BIN restore"]
     assert relay.count("UserData Set StillSnapDistanceCm 500'") == 2   # both near the 5 m label
     # As Fn (AF/Snap toggle) does it: AF mode into the back-up slot, focus Snap. The new aperture comes
-    # in Snap: only the distance, no beep.
+    # in Snap: only the distance.
     assert relay.count("StillBackUpFocus Select'") == 1 and relay.count("StillFocus Snap'") == 1
-    assert relay.count("AUD_beep'") == 1 and "SW_fn" not in relay and "CommonTempFocus" not in relay
-    assert "meter focus 10" in log
+    assert "AUD_beep" not in relay and "SW_fn" not in relay and "CommonTempFocus" not in relay
+    assert "meter set 1 focus 10 backup 1 cm 500" in log                   # read back after the batch
     assert "StillFullPressSnap" not in relay and "StillFocus Select" not in relay   # leaving: P recalls its own
     assert "SW_sws" not in relay                                           # the meter never presses
     assert "meter fn" not in log                                           # Fn = AF/Snap toggle in U2: quiet
@@ -295,7 +460,7 @@ def test_a_new_aperture_in_af_does_not_switch_to_snap(tmp_path):
             (5, "U2", "2.8", 7000, 5000, 1, 104), (6, "U2", "8", 7000, 5000, 1, 105),
             (7, "U2", "8", 7000, 5000, 1, 106)]
     log, relay, patch = run_watch(tmp_path, rows, limit=8)
-    assert "meter focus 1\n" in log.split("meter focus 10")[1] and "meter av" not in log
+    assert "meter focus 1 backup 13" in log and "meter av" not in log
     assert relay.count("StillFocus Snap'") == 1
 
 
@@ -331,13 +496,19 @@ def test_card_and_script():
 
 
 def test_meter_batch_fits_the_relay():
-    meter = re.search(r'printf "([^"]*StillFocus Snap[^"]*)" \$3 ', SCRIPT).group(1).replace("\\n", "\n").replace("%s", "ZoneSelect")
-    assert meter.index("AUD_beep") < meter.index("StillBackUpFocus") < meter.index("StillFocus Snap")
+    """The largest Snap batch (the redraw, cm, the longest back-up name, Snap) and the tag batch."""
+    sub = fw.watch_sh()
+    pre = fw.ttl("UserData Set StillSnapDistanceCm 500", fw.MSET_MS)
+    cm = fw.ttl("UserData Set StillSnapDistanceCm 350", fw.MSET_MS)
+    longest = max(fw.FOCUS_NAMES.values(), key=len)
+    bk = fw.ttl(f"UserData Set StillBackUpFocus {longest}", fw.MSET_MS)
+    snap = fw.ttl("UserData Set StillFocus Snap", fw.MSNAP_MS)
+    assert pre.replace("500", "%s") in sub and bk.replace(longest, "%s") in sub and snap in sub
+    frame = rc.solo_frame_bytes()
+    assert len(pre + cm + bk + snap) + frame <= rc.RELAY_SIZE - 7
     tag = re.search(r'printf "([^"]*SetupCopyrightAttach On[^"]*)" GRSNAP', SCRIPT).group(1).replace("\\n", "\n")
-    tag = tag.replace("%s", "GRSNAP:65535:999999")
-    pre = "sendln 'UserData Set StillSnapDistanceCm 500'\nmpause 300\n"
-    assert len(meter) + len(tag) + 120 <= rc.RELAY_SIZE - 24, len(meter) + len(tag)
-    assert len(pre) + len(meter) + 120 <= rc.RELAY_SIZE - 24          # the redraw line: the tag on its own
+    assert len(tag.replace("%s", "GRSNAP:65535:999999")) + frame <= rc.RELAY_SIZE - 7
+    assert "AUD_beep" not in sub
 
 
 def test_frame_batch_fits_the_relay():
@@ -388,16 +559,22 @@ def test_macro_refuses_snap_focus(tmp_path):
 
 
 def test_meter_measures_again_on_every_new_distance_but_not_at_the_snap_distance(tmp_path):
+    """Fn back to AF between the measurements; the lens rests at the snap distance (the hyperfocal one for the
+    far subject), which is the base, not a subject."""
     h = 1000 / fb.half_zone(2.8)                                           # hyperfocal mm at f/2.8
     far = 30000
     rows = [(1, "U2", "2.8", 7000, 2500, 1, 100), (2, "U2", "2.8", 7000, 1330, 1, 101),
-            (3, "U2", "2.8", 7000, 1330, 1, 102), (4, "U2", "2.8", 7000, far, 1, 103),
-            (5, "U2", "2.8", 7000, far, 1, 104), (6, "U2", "2.8", 7001, round(h) + 50, 1, 105),
-            (7, "U2", "2.8", 7001, round(h) + 50, 1, 106)]
-    log, relay, patch = run_watch(tmp_path, rows, limit=8)
+            (3, "U2", "2.8", 7000, 1330, 1, 102), (4, "U2", "2.8", 7000, 1330, 10, 103),
+            (5, "U2", "2.8", 7000, 1330, 1, 104), (6, "U2", "2.8", 7000, far, 1, 105),
+            (7, "U2", "2.8", 7000, far, 1, 106), (8, "U2", "2.8", 7000, round(h), 10, 107),
+            (9, "U2", "2.8", 7000, round(h), 1, 108), (10, "U2", "2.8", 7001, round(h) + 50, 1, 109),
+            (11, "U2", "2.8", 7001, round(h) + 50, 1, 110)]
+    log, relay, patch = run_watch(tmp_path, rows, limit=12)
     assert "meter subject 1330 av 2.8 snap 1330" in log
     assert f"meter subject {far} av 2.8 snap {round(h)}" in log or f"meter subject {far} av 2.8 snap {round(h) + 1}" in log
+    assert f"meter subject {round(h) + 50} " in log and f"meter subject {round(h)} " not in log
     assert "StillSnapDistanceCm 150'" in relay and "StillSnapDistanceCm 500'" in relay
+    assert log.count("meter focus 1 backup 13") == 2
 
 
 def test_fn_back_to_af_measures_again_even_at_the_same_distance(tmp_path):
@@ -408,8 +585,8 @@ def test_fn_back_to_af_measures_again_even_at_the_same_distance(tmp_path):
             (9, "U2", "2.8", 7001, 900, 1, 108), (10, "U2", "2.8", 7001, 1330, 1, 109)]
     log, relay, patch = run_watch(tmp_path, rows, limit=12)
     lines = [l for l in log.splitlines() if l.startswith("meter ")]
-    assert [l.split(" av")[0] for l in lines if "subject" in l or l == "meter focus 1"] == [
-        "meter focus 1", "meter subject 1330", "meter focus 1", "meter subject 1330"]
+    assert [l.split(" av")[0] for l in lines if "subject" in l or l.startswith("meter focus")] == [
+        "meter subject 1330", "meter focus 1 backup 13", "meter subject 1330"]
     assert relay.count("StillFocus Snap'") == 2 and relay.count("StillBackUpFocus Select'") == 2
 
 
@@ -432,43 +609,85 @@ def test_in_snap_a_moving_lens_is_not_measured(tmp_path):
     assert log.count("meter subject") == 1
 
 
-def test_snap_dropped_by_the_camera_is_sent_again_twice_at_most(tmp_path):
-    """Seen on the camera: three batches acked, focus stayed AF. Retries after 5 s, then gives up."""
-    rows = [(1, "U2", "2.8", 7000, 2500, 1, 100), (2, "U2", "2.8", 7000, 1330, 1, 101),
-            (3, "U2", "2.8", 7000, 1330, 1, 102), (4, "U2", "2.8", 7000, 1330, 1, 104),
-            (5, "U2", "2.8", 7000, 1330, 1, 108), (6, "U2", "2.8", 7000, 1330, 1, 110),
-            (7, "U2", "2.8", 7000, 1330, 1, 114), (8, "U2", "2.8", 7000, 1330, 1, 120),
-            (9, "U2", "2.8", 7000, 1330, 1, 126)]
-    log, relay, patch = run_watch(tmp_path, rows, limit=10)
-    assert "meter snap retry 1" in log and "meter snap retry 2" in log and log.count("meter snap failed") == 1
-    assert relay.count("StillFocus Snap'") == 3 and relay.count("AUD_beep'") == 1
-    assert relay.count("StillBackUpFocus Select'") == 3
+def batches(relay):
+    return [b for b in relay.split("----\n") if b]
+
+
+def snap_rows(n=6):
+    return [(1, "U2", "2.8", 7000, 2500, 1, 100), (2, "U2", "2.8", 7000, 1330, 1, 101)] + [
+        (k, "U2", "2.8", 7000, 1330, 1, 100 + k) for k in range(3, n + 1)]
+
+
+def test_snap_is_read_back_and_only_the_missing_line_sent_again(tmp_path):
+    """Runs 13 to 16: the camera stayed AF after an acknowledged batch. The cm and back-up stores took; Snap
+    did not: the next batch is StillFocus Snap alone."""
+    log, relay, patch = run_watch(tmp_path, snap_rows(), limit=7, drop=1)
+    b = batches(relay)
+    assert "StillSnapDistanceCm 150'" in b[0] and "StillBackUpFocus Select'" in b[0] and "StillFocus Snap'" in b[0]
+    assert b[1] == "sendln 'UserData Set StillFocus Snap'\nmpause 300\n"
+    assert "meter set 1 focus 1 backup 1 cm 150" in log and "meter set 2 focus 10 backup 1 cm 150" in log
+    assert "snap failed" not in log and "meter tag GRSNAP:1330:1330" in log
+    assert log.index("meter set 2") < log.index("meter tag")                # the tag only after Snap is there
+
+
+def test_a_dropped_batch_is_sent_again_whole(tmp_path):
+    log, relay, patch = run_watch(tmp_path, snap_rows(), limit=7, drop_all=1)
+    b = batches(relay)
+    assert b[0] == b[1] and "StillFocus Snap'" in b[1]
+    assert "meter set 1 focus 1 backup 13 cm 250" in log and "meter set 2 focus 10 backup 1 cm 150" in log
+
+
+def test_snap_gives_up_after_three_batches(tmp_path):
+    log, relay, patch = run_watch(tmp_path, snap_rows(), limit=7, drop=5)
+    assert relay.count("StillFocus Snap'") == 3 and "meter set 3 focus 1" in log and "meter snap failed" in log
+    assert "GRSNAP" not in relay                                            # no tag without Snap
+    assert log.count("meter subject") == 1                                  # the lens did not move again
+
+
+def test_snap_the_camera_takes_back_is_sent_again(tmp_path):
+    """Focus back to the AF mode with the back-up still the AF mode (not 13, as Fn writes): not the user."""
+    log, relay, patch = run_watch(tmp_path, snap_rows(8), limit=9, revert=1)
+    assert "meter focus 1 backup 1" in log and "meter snap lost 1" in log
+    assert relay.count("StillFocus Snap'") == 2
+    lost = log[log.index("meter snap lost 1"):]
+    assert "meter set 1 focus 10 backup 1 cm 150" in lost
+    assert batches(relay)[2] == "sendln 'UserData Set StillFocus Snap'\nmpause 300\n"   # Snap, tag, Snap again
+
+
+def test_fn_back_to_af_is_not_taken_back(tmp_path):
+    rows = snap_rows(4) + [(5, "U2", "2.8", 7000, 1330, 10, 105), (6, "U2", "2.8", 7000, 1330, 1, 106),
+                           (7, "U2", "2.8", 7000, 1330, 1, 107), (8, "U2", "2.8", 7000, 1330, 1, 108)]
+    log, relay, patch = run_watch(tmp_path, rows, limit=9)
+    assert "meter focus 1 backup 13" in log and "snap lost" not in log and relay.count("StillFocus Snap'") == 1
 
 
 def test_snap_that_came_is_not_sent_again(tmp_path):
-    rows = [(1, "U2", "2.8", 7000, 2500, 1, 100), (2, "U2", "2.8", 7000, 1330, 1, 101),
-            (3, "U2", "2.8", 7000, 1330, 1, 102), (4, "U2", "2.8", 7000, 1330, 10, 104),
-            (5, "U2", "2.8", 7000, 1330, 1, 110), (7, "U2", "2.8", 7000, 1330, 1, 120)]
-    log, relay, patch = run_watch(tmp_path, rows, limit=9)
-    assert "retry" not in log and relay.count("StillFocus Snap'") == 1
+    log, relay, patch = run_watch(tmp_path, snap_rows(8), limit=9)
+    assert "meter set 2" not in log and relay.count("StillFocus Snap'") == 1
 
 
 def test_snap_photos_carry_the_exact_distance_and_af_photos_do_not(tmp_path):
-    """Copyright empty: GRSNAP:<snap>:<subject> with the Snap batch; Fn back to AF clears it in one batch."""
+    """Copyright empty: GRSNAP:<snap>:<subject> in its own batch once Snap is read back; Fn back to AF clears
+    it in one batch, once the lens has been quiet for two rounds."""
     rows = [(1, "U2", "2.8", 7000, 2500, 1, 100), (2, "U2", "2.8", 7000, 479, 1, 101),
             (3, "U2", "2.8", 7000, 479, 1, 102), (4, "U2", "2.8", 7000, 479, 10, 104),
-            (5, "U2", "2.8", 7000, 479, 1, 106), (6, "U2", "2.8", 7000, 479, 1, 107)]
-    log, relay, patch = run_watch(tmp_path, rows, limit=7)
-    batches = relay.split("----\n")
-    snap = next(b for b in batches if "StillFocus Snap'" in b)
-    assert "SetupCopyright GRSNAP:479:479'" in snap and "SetupCopyrightAttach On'" in snap
-    assert snap.index("StillFocus Snap") < snap.index("GRSNAP")          # Snap first, the tag after
-    off = next(b for b in batches if "SetupCopyright x'" in b)
-    assert "SetupCopyrightAttach Off'" in off                            # attach byte 1: it was Off
+            (5, "U2", "2.8", 7000, 479, 1, 106), (6, "U2", "2.8", 7000, 479, 1, 107),
+            (7, "U2", "2.8", 7000, 479, 1, 108), (8, "U2", "2.8", 7000, 479, 1, 109)]
+    log, relay, patch = run_watch(tmp_path, rows, limit=9)
+    b = batches(relay)
+    assert "StillFocus Snap'" in b[0] and "GRSNAP" not in b[0]
+    assert "SetupCopyright GRSNAP:479:479'" in b[1] and "SetupCopyrightAttach On'" in b[1]
+    assert "SetupCopyright x'" in b[2] and "SetupCopyrightAttach Off'" in b[2]   # attach byte 1: it was Off
     assert patch.splitlines()[:5] == ["M.BIN ", "CPTAG.BIN ", "CPTAG.BIN restore", "CPEMPTY.BIN ", "CPEMPTY.BIN restore"]
     assert "meter tag GRSNAP:479:479" in log and "tag cleared attach Off" in log
+    assert log.index("meter focus 1 backup 13") < log.index("tag cleared")
     # The card marker: put with the tag (attach byte 1), deleted with the clear (PULL.SH does both).
     assert (tmp_path / "w" / "tag.put").read_text() == "1\n" and (tmp_path / "w" / "tag.del").exists()
+
+
+def test_the_tag_stays_while_in_snap(tmp_path):
+    log, relay, patch = run_watch(tmp_path, snap_rows(8), limit=9)
+    assert "meter tag GRSNAP:1330:1330" in log and "tag cleared" not in log
 
 
 def test_snap_meter_leaves_a_set_copyright_alone(tmp_path):
@@ -549,6 +768,59 @@ def test_label_text_is_at_most_four_characters(mm, text):
     assert out == text and len(out) <= 4
 
 
+def still_rows(mm, n=4):
+    return [(k, "U2", "2.8", 7000, mm, 1, 100 + k) for k in range(1, n + 1)]
+
+
+def test_a_half_press_held_on_entering_the_mode_counts(tmp_path):
+    """Power-on in U2 and AF done before the first look: the lens does not move any more, the switch is held."""
+    log, relay, patch = run_watch(tmp_path, still_rows(1330), limit=5, s1=1)
+    assert "meter entry lens 1330 focus 1 backup 13 cm 250 pos 0 s1 1 samp 1" in log
+    assert "meter subject 1330" in log and "meter tron lens s1p s1 s2 sub4 sub8 focus cm cur pos caf" in log
+
+
+def test_without_the_half_press_an_unmoved_lens_is_no_subject(tmp_path):
+    log, relay, patch = run_watch(tmp_path, still_rows(1330), limit=5, s1=0)
+    assert "s1 0 samp 1" in log and "meter subject" not in log
+
+
+def test_an_unchecked_switch_is_not_used(tmp_path):
+    log, relay, patch = run_watch(tmp_path, still_rows(1330), limit=5, s1=5, s1_class=0x53000000)
+    assert "s1 none samp 1" in log and "meter subject" not in log and "tron lens focus cm" in log
+
+
+def test_without_samp_the_peek_path_still_measures(tmp_path):
+    log, relay, patch = run_watch(tmp_path, meter_rows(1330), limit=6, samp=False)
+    assert log.count("meter samp off") == 1 and "samp 0" in log and "meter subject 1330" in log
+    assert "meter set 1 focus 10 backup 1 cm 150" in log and "tron" not in log
+
+
+def test_a_broken_samp_falls_back(tmp_path):
+    log, relay, patch = run_watch(tmp_path, meter_rows(1330), limit=6, samp_broken=True)
+    assert "meter samp off 0" in log and "meter subject 1330" in log
+
+
+def test_the_meter_waits_in_samp(tmp_path):
+    """One wait per round: the lens with base and moved flag, the focus byte, then cm, +0x108, the switch."""
+    log, relay, patch = run_watch(tmp_path, meter_rows(1330), limit=6, s1=0)
+    calls = (tmp_path / "samp.txt").read_text().splitlines()
+    waits = [c.split() for c in calls if c.startswith("w ") and c.split()[1] != "0"]
+    lens = f"{LC + p3.LENS_MM:x}"
+    assert waits[0][1:8] == [f"{fw.WAIT_MS:x}", f"{fw.STABLE_MS:x}", lens, f"{1000:x}", "0", f"{OBJ + p3.OFF['focus']:x}", "1"]
+    assert waits[0][8:] == [f"{OBJ + p3.OFF['snap']:x}", f"{OBJ + p3.OFF['pos']:x}", f"{S1Q + 8:x}"]
+    assert waits[1][5] == "0" and waits[2][5] == "1"                       # moved (lens left 1000), carried over
+    assert any(c.split()[7] == "a" and c.split()[3] == "0" for c in calls if c.startswith("w "))   # Snap: focus only
+
+
+def test_the_tracer_runs_per_visit_and_is_drained(tmp_path):
+    log, relay, patch = run_watch(tmp_path, still_rows(2500, 12), limit=13)
+    calls = (tmp_path / "samp.txt").read_text().splitlines()
+    tracers = [c for c in calls if c.startswith("t ")]
+    assert 1 < len(tracers) <= fw.TRACE_MAX and tracers[0].split()[1:3] == [f"{fw.TRACE_MS:x}", f"{fw.TRACE_RECORDS:x}"]
+    assert log.count("meter tron") == 1 and "tr 100.000 0 7 7" in log and "tr 101.005 1 7 7" in log
+    assert not (tmp_path / "tr.dat").exists() and not (tmp_path / "tr.d").exists()
+
+
 def test_meter_warns_when_fn_is_not_the_af_snap_toggle(tmp_path):
     rows = [(1, "U2", "2.8", 7000, 2500, 1, 100), (2, "U2", "2.8", 7000, 2500, 1, 101)]
     log, relay, patch = run_watch(tmp_path, rows, limit=3, fn=0)
@@ -567,10 +839,23 @@ def test_a_tag_left_by_a_power_off_is_cleared_at_start(tmp_path):
     rows = [(1, "P", "2.8", 7000, -1, 1, 100)]
     log, relay, patch = run_watch(tmp_path, rows, cpy_first=0, attach=0, limit=2, tag_file="1\n")
     lines = log.splitlines()
-    assert lines[1:4] == ["tag leftover attach 1", "tag cleared attach Off", "tag on attach 0"]
+    assert lines[1:4] == ["tag leftover attach 1", "tag cleared attach Off", "watch mode P"]
     assert "SetupCopyright x'" in relay and "SetupCopyrightAttach Off'" in relay
     w = tmp_path / "w"
     assert not (w / "TAG").exists() and (w / "tag.del").exists()
+
+
+def test_a_leftover_tag_on_the_meter_mode_waits_for_a_quiet_moment(tmp_path):
+    """Power-on in U2: the loop starts at once; the tag is cleared after two quiet rounds."""
+    log, relay, patch = run_watch(tmp_path, still_rows(2500, 5), cpy_first=0x47, limit=6, tag_file="1\n")
+    assert log.index("meter entry") < log.index("tag cleared attach Off")
+    assert "tag on" not in log and "tag off" not in log                      # the copyright read is our tag
+
+
+def test_a_measurement_before_the_leftover_is_cleared_replaces_it(tmp_path):
+    log, relay, patch = run_watch(tmp_path, snap_rows(8), cpy_first=0x47, limit=9, tag_file="1\n")
+    assert "meter tag GRSNAP:1330:1330" in log and "tag cleared" not in log   # Snap photos keep the new tag
+    assert not (tmp_path / "w" / "tag.put").exists()                         # the marker is still the original
 
 
 def test_the_first_lens_reads_may_be_zero(tmp_path):
@@ -601,3 +886,16 @@ def test_pull_sh_writes_and_removes_the_marker(tmp_path):
     (www / "watch" / "tag.del").write_text("")
     subprocess.run(["sh", "-c", pull], check=True)
     assert not (d / "WATCH" / "TAG").exists() and not (www / "watch" / "tag.del").exists()
+
+
+def test_the_log_decoder_merges_the_tracer_by_time():
+    lines = ["solo watch start macro U1 meter U2 1.0", "solo meter subject 1 2.0", "solo watch start macro U1 meter U2 8.32",
+             "solo meter tron lens s1p s1 focus 20.5", "solo tr 20.400 3 851969 851969 21.0",
+             "solo meter subject 893 av 2.8 snap 893 slot 150 patch 0 label 89cm 30.9",
+             "solo tr 30.105 2 0 1 31.0", "solo tr 31.205 3 851969 65546 31.5", "ack 3 35.26"]
+    got = fw.decode_log(lines)
+    assert got == [(8.32, "watch start macro U1 meter U2"), (20.4, "  tr focus Select backup 13 (start)"),
+                   (20.5, "meter tron lens s1p s1 focus"), (30.105, "  tr s1 0 -> 1"),
+                   (30.9, "meter subject 893 av 2.8 snap 893 slot 150 patch 0 label 89cm"),
+                   (31.205, "  tr focus Select backup 13 -> Snap backup Select")]
+    assert len(fw.decode_log(lines, every=True)) == len(got) + 2

@@ -5,3 +5,4 @@ optuna>=3        # tools/af/af_optimize.py
 pytest>=7        # tools/tests
 Pillow>=10       # photo imports: tools/effects/effects_solo.py, tools/focus/focus_probe.py
 scipy>=1.10      # tools/focus/focus_probe.py (the focus fit)
+unicorn>=2      # tools/tests/test_samp.py (SAMP.BIN in an ARM emulator; skipped without it)
