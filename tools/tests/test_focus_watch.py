@@ -170,6 +170,8 @@ def cam():
 
 
 def lens():
+    if rd("lensov", ""):
+        return int(rd("lensov"))
     z = int(rd("lz"))
     if z > 0:
         wr("lz", z - 1)
@@ -186,6 +188,8 @@ def value(a):
     fixed.update({int(k): v for k, v in C["extra"].items()})
     if a == C["lc"] + C["lensmm"]:
         return lens()
+    if a == C["caf"]:
+        return 2 if rd("afrun") == "1" else 1
     if C["s1"] is not None and a == C["s1w"]:
         n = int(rd("s1"))
         if n > 0:
@@ -222,7 +226,28 @@ elif mode == "samp":
         sys.exit(8)
     f = value(fa) if fa else 0
     res, out = 1, 0xFFFFFFFF
-    if la:
+    if fa == C["caf"] and to:                      # an AF run: started at a props call (afp), ends at the next wait
+        if exp == 1 and to >= 8000 and C["press"]:  # the watch during a batch: wait for the press a while
+            import time
+            for _ in range(40):
+                if rd("afp") == "1":
+                    break
+                time.sleep(0.05)
+        if exp == 1 and rd("afp") == "1":
+            wr("afp", 0)
+            wr("afrun", 1)
+            res, f = 2, 2
+        elif exp != 1 and rd("afrun") == "1":
+            wr("afrun", 0)
+            res, f = 2, 1
+    if la and base == 0 and moved == 1 and st:     # the lens after an AF run: where it is
+        if C["af_slow"]:                           # its still check outlasts the batch (camera run 18)
+            import time
+            time.sleep(C["af_slow"])
+        L = lens()
+        if 0 < L < 1000000:
+            res, out = 0, L
+    elif la:
         L = lens()
         valid = 0 < L < 1000000
         if valid:
@@ -234,7 +259,7 @@ elif mode == "samp":
             if valid and moved and str(L) == prev:
                 res = 0
             wr("prev", L if valid else "")
-    if res == 1 and to and fa and exp < 256 and (f & 255) != exp:
+    if res == 1 and to and fa and fa != C["caf"] and exp < 256 and (f & 255) != exp:
         res = 2
     vals = []
     for x in extras:
@@ -259,6 +284,9 @@ elif mode == "props":
                 f, b = nf, 13                      # Fn back to AF: 0x532b0b6c writes 13
         else:
             f = nf
+    AF = (0, 1, 4, 5, 6, 14, 15)
+    if cam()[0] in AF and f in AF and (row(k)[4] != row(k - 1)[4] or (len(row(k)) > 7 and row(k)[7] == "af")):
+        wr("afp", 1)                               # an AF run: the lens moved in an AF mode, or the row says so
     if rd("revnext") == "1" and f == 10:
         f = b                                      # the camera drops Snap, back-up unchanged
         wr("revnext", 0)
@@ -285,28 +313,35 @@ elif mode == "batch":
                     wr("revert", int(rd("revert")) - 1)
                     wr("revnext", 1)
     wr("cam", f"{f} {b} {c}")
+    n = int(rd("press", "0"))
+    if n > 0 and "StillFocus Snap'" in text:       # the user half-presses on another subject meanwhile
+        wr("press", n - 1)
+        wr("lensov", C["press_mm"])
+        wr("afp", 1)
+        import time
+        time.sleep(1.0)
 """
 
-S1P, S1Q, S2Q = 0x55001000, 0x55002000, 0x55003000
 
 
-def run_watch(t, rows, cpy_first=0, attach=1, limit=None, lens_zero=0, tag_file=None, fn=3, lang=None, s1=None,
-              s1_class=None, samp=True, samp_broken=False, drop=0, drop_all=0, revert=0, pos=0):
+def run_watch(t, rows, cpy_first=0, attach=1, limit=None, lens_zero=0, tag_file=None, fn=3, lang=None,
+              samp=True, samp_broken=False, drop=0, drop_all=0, revert=0, pos=0, press=0, press_mm=700, af_slow=0):
     """rows: (props call k, U mode, av, last photo number, lens mm, focus code, uptime s); the state for props
     call k is the last row with row k <= k. Each round on the meter mode is one props call and one SAMP.BIN
     wait: the lens has settled when a wait sees the same moved lens as the wait before.
     The camera model ($T/cam: focus, back-up, snap cm) starts with the first row's focus, back-up 13, 250 cm;
     the relay batches change it as the camera would (drop: that many StillFocus Snap lines ignored; drop_all:
     that many Snap batches ignored; revert: Snap dropped again by the camera at the next round, back-up kept).
-    A change of the table's focus is the user: to 10 Fn from AF, from 10 to AF Fn back (back-up 13).
+    A change of the table's focus is the user: to 10 Fn from AF, from 10 to AF Fn back (back-up 13). A lens
+    change between rows in an AF mode is an AF run (the action word leaves 1), as is a row with an 8th
+    column "af" (AF landing where the lens was).
     lens_zero: the first that many lens reads give 0. tag_file: a WATCH/TAG the boot copied to RAM.
-    fn: the Fn button setting. lang: the label chain answers (table index 0, whatever the language). s1: the
-    half-press switch answers, held (1) for that many reads of its state; s1_class: another class word.
+    fn: the Fn button setting. lang: the label chain answers (table index 0, whatever the language).
     samp False: no SAMP.BIN (the PEEK path); samp_broken: it exits 8."""
     import json
     (t / "k").write_text("0\n")
     (t / "lz").write_text(f"{lens_zero}\n")
-    for n, v in (("drop", drop), ("dropall", drop_all), ("revert", revert), ("s1", s1 or 0)):
+    for n, v in (("drop", drop), ("dropall", drop_all), ("revert", revert), ("press", press)):
         (t / n).write_text(f"{v}\n")
     (t / "cam").write_text(f"{rows[0][5]} 13 250\n")
     (t / "table").write_text("\n".join(" ".join(map(str, r)) for r in rows) + "\n")
@@ -316,15 +351,11 @@ def run_watch(t, rows, cpy_first=0, attach=1, limit=None, lens_zero=0, tag_file=
         for ids in fw.LABEL_IDS.values():
             for i in ids:
                 extra.update({LBL_TAB + 4 * i: lbl_ent(i), lbl_ent(i): 261, lbl_ent(i) + 4: lbl_str(i)})
-    if s1 is not None:
-        extra.update({fw.S1_ROOT: S1P, S1P + fw.S1_OFF: S1Q, S1P + fw.S2_OFF: S2Q, S1Q: s1_class or fw.S1_CLASS,
-                      S1Q + 12: fw.S1_EVENT, S1Q + 16: 0})
-    else:
-        extra[fw.S1_ROOT] = 0
     cfg = dict(obj=OBJ, settings=p3.SETTINGS_PTR, focus=p3.OFF["focus"], snap=p3.OFF["snap"], fn=fw.OFF_FN - 2,
                fnv=fn, cur=fw.OFF_CUR - 2, pos=p3.OFF["pos"], posv=pos, cpy=p3.OFF_COPYRIGHT - 1, cpyv=cpy_first << 8,
                att=p3.OFF_ATTACH - 3, attv=attach << 24, lroot=p3.LENS_ROOT, la=LA, lensa=p3.LENS_A, lb=LB, lc=LC,
-               lensmm=p3.LENS_MM, extra={str(k): v for k, v in extra.items()}, s1=s1, s1w=S1Q + 8,
+               lensmm=p3.LENS_MM, extra={str(k): v for k, v in extra.items()}, s1=None, s1w=0,
+               caf=card.CAF_OBJECT + fw.CAF_ACTION, press_mm=press_mm, press=press, af_slow=af_slow,
                samp_broken=samp_broken, codes={n: c for c, n in fw.FOCUS_NAMES.items()})
     (t / "cfg.json").write_text(json.dumps(cfg))
     (t / "mock.py").write_text(MOCK)
@@ -582,7 +613,7 @@ def test_fn_back_to_af_measures_again_even_at_the_same_distance(tmp_path):
     rows = [(1, "U2", "2.8", 7000, 2500, 1, 100), (2, "U2", "2.8", 7000, 1330, 1, 101),
             (3, "U2", "2.8", 7000, 1330, 1, 102), (4, "U2", "2.8", 7000, 1330, 10, 103),
             (6, "U2", "2.8", 7001, 1330, 10, 105), (7, "U2", "2.8", 7001, 1330, 1, 106),
-            (9, "U2", "2.8", 7001, 900, 1, 108), (10, "U2", "2.8", 7001, 1330, 1, 109)]
+            (9, "U2", "2.8", 7001, 1330, 1, 108, "af"), (10, "U2", "2.8", 7001, 1330, 1, 109)]
     log, relay, patch = run_watch(tmp_path, rows, limit=12)
     lines = [l for l in log.splitlines() if l.startswith("meter ")]
     assert [l.split(" av")[0] for l in lines if "subject" in l or l.startswith("meter focus")] == [
@@ -772,21 +803,42 @@ def still_rows(mm, n=4):
     return [(k, "U2", "2.8", 7000, mm, 1, 100 + k) for k in range(1, n + 1)]
 
 
-def test_a_half_press_held_on_entering_the_mode_counts(tmp_path):
-    """Power-on in U2 and AF done before the first look: the lens does not move any more, the switch is held."""
-    log, relay, patch = run_watch(tmp_path, still_rows(1330), limit=5, s1=1)
-    assert "meter entry lens 1330 focus 1 backup 13 cm 250 pos 0 s1 1 samp 1" in log
-    assert "meter subject 1330" in log and "meter tron lens s1p s1 s2 sub4 sub8 focus cm cur pos caf" in log
+def test_af_before_the_watcher_looked_at_power_on(tmp_path):
+    """Power-on in U2 and AF done before the first look: the lens reads valid (1000000 until the first AF)."""
+    rows = [(k, "U2", "2.8", 7000, 1330, 1, 20 + k) for k in range(1, 5)]
+    log, relay, patch = run_watch(tmp_path, rows, limit=5)
+    assert "meter entry lens 1330 focus 1 backup 13 cm 250 pos 0 caf 1 samp 1" in log
+    assert "meter subject before the start 1330" in log and log.count("meter subject 1330") == 1
 
 
-def test_without_the_half_press_an_unmoved_lens_is_no_subject(tmp_path):
-    log, relay, patch = run_watch(tmp_path, still_rows(1330), limit=5, s1=0)
-    assert "s1 0 samp 1" in log and "meter subject" not in log
+def test_no_af_yet_at_power_on(tmp_path):
+    rows = [(k, "U2", "2.8", 7000, 1000000, 1, 20 + k) for k in range(1, 4)] + [(4, "U2", "2.8", 7000, 1795, 1, 24)]
+    log, relay, patch = run_watch(tmp_path, rows, limit=6)
+    assert "meter entry lens 4294967295" in log and "before the start" not in log
+    assert "meter af 2." in log and log.count("meter subject 1795") == 1
 
 
-def test_an_unchecked_switch_is_not_used(tmp_path):
-    log, relay, patch = run_watch(tmp_path, still_rows(1330), limit=5, s1=5, s1_class=0x53000000)
-    assert "s1 none samp 1" in log and "meter subject" not in log and "tron lens focus cm" in log
+def test_later_an_unmoved_lens_is_no_subject(tmp_path):
+    log, relay, patch = run_watch(tmp_path, still_rows(1330), limit=5)
+    assert "meter subject" not in log and "meter af" not in log
+
+
+def test_a_press_during_a_batch_is_measured_next(tmp_path):
+    """Run 17: half-pressed on a new subject while the Snap batch of the one before went out."""
+    log, relay, patch = run_watch(tmp_path, snap_rows(6), limit=7, press=1, press_mm=700)
+    assert "meter pressed during batch 700" in log
+    subj = [l for l in log.splitlines() if l.startswith("meter subject")]
+    assert subj[0].startswith("meter subject 1330") and subj[1].startswith("meter subject 700")
+    assert "meter tag GRSNAP:1330" not in log and "meter tag GRSNAP:700:700" in log
+
+
+def test_a_press_ending_with_the_batch_is_not_lost(tmp_path):
+    """Run 18 (34.9 s, 57.1 s): Fn and a half-press during the tag batch; the AF ended just before the batch did,
+    and the background watch was killed inside its lens check. It is now waited for."""
+    log, relay, patch = run_watch(tmp_path, snap_rows(6), limit=7, press=1, press_mm=700, af_slow=1.5)
+    assert "meter pressed during batch 700 waited" in log
+    subj = [l for l in log.splitlines() if l.startswith("meter subject")]
+    assert subj[1].startswith("meter subject 700")
 
 
 def test_without_samp_the_peek_path_still_measures(tmp_path):
@@ -801,15 +853,18 @@ def test_a_broken_samp_falls_back(tmp_path):
 
 
 def test_the_meter_waits_in_samp(tmp_path):
-    """One wait per round: the lens with base and moved flag, the focus byte, then cm, +0x108, the switch."""
-    log, relay, patch = run_watch(tmp_path, meter_rows(1330), limit=6, s1=0)
-    calls = (tmp_path / "samp.txt").read_text().splitlines()
-    waits = [c.split() for c in calls if c.startswith("w ") and c.split()[1] != "0"]
+    """AF: one wait per round on the action word (leaves 1), then the lens once it is back; Snap: the focus word."""
+    log, relay, patch = run_watch(tmp_path, meter_rows(1330), limit=6)
+    calls = [c.split() for c in (tmp_path / "samp.txt").read_text().splitlines() if c.startswith("w ")]
+    caf = f"{card.CAF_OBJECT + fw.CAF_ACTION:x}"
     lens = f"{LC + p3.LENS_MM:x}"
-    assert waits[0][1:8] == [f"{fw.WAIT_MS:x}", f"{fw.STABLE_MS:x}", lens, f"{1000:x}", "0", f"{OBJ + p3.OFF['focus']:x}", "1"]
-    assert waits[0][8:] == [f"{OBJ + p3.OFF['snap']:x}", f"{OBJ + p3.OFF['pos']:x}", f"{S1Q + 8:x}"]
-    assert waits[1][5] == "0" and waits[2][5] == "1"                       # moved (lens left 1000), carried over
-    assert any(c.split()[7] == "a" and c.split()[3] == "0" for c in calls if c.startswith("w "))   # Snap: focus only
+    extras = [f"{OBJ + p3.OFF['snap']:x}", f"{OBJ + p3.OFF['pos']:x}", f"{OBJ + p3.OFF['focus']:x}"]
+    af = [c for c in calls if c[1] == f"{fw.WAIT_MS:x}" and c[6] == caf]
+    assert af and af[0][1:8] == [f"{fw.WAIT_MS:x}", "0", "0", "0", "0", caf, "1"] and af[0][8:] == extras
+    still = [c for c in calls if c[3] == lens and c[5] == "1"]
+    assert still and still[0][1:8] == [f"{500:x}", f"{fw.AF_STILL_MS:x}", lens, "0", "1", "0", "100"]
+    assert any(c[6] == f"{OBJ + p3.OFF['focus']:x}" and c[7] == "a" for c in calls)   # Snap: the focus word
+    assert "meter af 2." in log and "meter subject 1330" in log
 
 
 def test_the_tracer_runs_per_visit_and_is_drained(tmp_path):
@@ -817,7 +872,8 @@ def test_the_tracer_runs_per_visit_and_is_drained(tmp_path):
     calls = (tmp_path / "samp.txt").read_text().splitlines()
     tracers = [c for c in calls if c.startswith("t ")]
     assert 1 < len(tracers) <= fw.TRACE_MAX and tracers[0].split()[1:3] == [f"{fw.TRACE_MS:x}", f"{fw.TRACE_RECORDS:x}"]
-    assert log.count("meter tron") == 1 and "tr 100.000 0 7 7" in log and "tr 101.005 1 7 7" in log
+    assert "meter tron lens focus cm cur pos caf" in log and log.count("meter tron") == 1
+    assert "tr 100.000 0 7 7" in log and "tr 101.005 1 7 7" in log
     assert not (tmp_path / "tr.dat").exists() and not (tmp_path / "tr.d").exists()
 
 

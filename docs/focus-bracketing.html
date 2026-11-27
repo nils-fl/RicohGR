@@ -772,6 +772,53 @@ into the log while idle (<code>tr</code>, decoded by
 <code>focus_watch.py log</code>), 200 per tracer, six tracers per visit.
 If <code>SAMP.BIN</code> is missing or fails, the same waits run through
 <code>PEEK.BIN</code> (<code>meter samp off</code>).</p>
+<p><strong>Seventeenth run:</strong> <code>samp 1</code>; all seven Snaps
+were in place after the first batch (<code>meter set 1 focus 10</code>),
+1.2 to 1.4 s after the subject. The tracer showed three things.
+<strong>The half-press switch words</strong> (S1 +4/+8, S2 +8, the
+sub-CPU snapshot) never changed at 200 Hz through every press, so they are
+not used. <strong>The contrast AF action word</strong> (CAF object
++0xc44c) runs 1 → 2 → 4 (→ 2 → 4) → 8 or 0x40 → 0x80 → 1 on each AF,
+and the lens reaches its end within 50 ms of the 1. The lens reads
+1000000 from power-on until the first AF. The lens alone gave the subject
+0.7 to 2.6 s after AF; at power-on it was caught only by a 4 mm drift.
+<strong>The "snap lost" was Fn:</strong> Fn writes the focus mode first and
+the back-up 13 about 10 ms later, and the watcher had read in between and
+sent Snap again. <strong>A half-press during the Snap batch</strong>
+(55.5 s, AF on a subject near 32 cm) was overwritten when the batch's Snap
+of the subject before moved the lens back to 2.5 m: the "previous
+distance". Now an AF run (the action word leaving 1) starts the
+measurement, and the lens 120 ms after the word returns to 1 is the
+subject, also when it lands at the same distance as before. During every
+batch the same watch runs in the background, and a newer subject is
+measured right after (<code>meter pressed during batch</code>). A back-up
+other than 13 is read again after 100 ms. Entering U2 within 40 s of
+power-on with a valid lens counts as an AF done before the watcher
+looked. The S1 code is gone; the tracer keeps lens, focus, cm, focus in
+use, +0x108 and the action word.</p>
+<p><strong>Eighteenth run</strong> (2026-11-27, two power-ons, no photos):
+the action word marked every AF run (1 → 2 → 4 → 8 → 0x80 → 1, 0.2 to
+0.6 s), and eight subjects from 38 cm to 1.8 m went to Snap. The new paths
+all worked: a half-press before the watcher started (1805 mm, "subject
+before the start"), Fn back to AF with no "snap lost", and two presses
+during a Snap batch (992 and 382 mm, measured next). <strong>Two presses
+were lost</strong> (34.9 s and 57.1 s): Fn and a half-press came about
+2 s after Snap, while the GRSNAP tag batch was still running. The background
+watch saw the AF start, but the AF ended (35.05, 57.66 s) 120 ms before the
+batch did (35.17, 57.78 s), and <code>afbgend</code> killed the watch 30 ms
+after the batch, inside its 120 ms lens check. Now the watch marks an AF run
+it has seen start (<code>af.run</code>), and the end of the batch waits for
+it, up to 3 s (<code>meter pressed during batch &lt;mm&gt; waited
+&lt;n x 50 ms&gt;</code>).</p>
+<p><strong>Nineteenth run</strong> (2026-11-27, one power-on, fast
+half-press and release cycles on purpose, about one every 3 to 4 s): 19
+subjects from 44 cm to 1.8 m, each pressed while the batch of the one
+before was still out, each measured next, so the newest subject always
+won; Snap landed only in the pauses. The wait for an AF run under way
+was needed three times (<code>waited 5</code>, 250 ms). No press was
+missed. Still open: no watch runs in the 0.8 to 1.5 s between a measured
+press and its first batch (patch and label), and the tracer drains only
+while idle, so it recorded nothing during the series.</p>
 <p><code>tools/focus/focus_watch.py card --macro U1 --meter U2</code>.
 REMOTE.SH starts <code>WATCH.SH</code> at every power-on.</p>
 <ul>

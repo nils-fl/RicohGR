@@ -84,16 +84,14 @@ LABEL_IDS = {30: (0x3E, 0x3F), 150: (0x41,), 250: (0x43,), 350: (0x44,)}
 LABEL_STOCK = {0x3E: (0x002E0030, 0x006D0033), 0x3F: (0x002E0030, 0x006D0034), 0x41: (0x002E0031, 0x006D0035),
                0x43: (0x002E0032, 0x006D0035), 0x44: (0x002E0033, 0x006D0035)}
 LABEL_LEN = 0x105
-# The shutter half-press (S1): the SwitchMonitor at [S1_ROOT] (factory 0x5536c604, built by 0x536a4040)
-# keeps the S1 CpuSwitch at +S1_OFF (0x536a4574); its word +8 is 1 while half-pressed (scan 0x536a5c38,
-# active-low line). Checked before use: class pointer, event id 0x21600201, key code 0. Read once on
-# entering the meter mode (held: the settled lens is a subject) and by the tracer.
-S1_ROOT, S1_OFF, S1_CLASS, S1_EVENT = 0x5536C608, 0x5C, 0x53D5B9C0, 0x21600201
-S2_OFF = 0x60      # the S2 (full press) CpuSwitch, event 0x2160021c, key code 1 (0x536a459c)
-SUB_OFF = 0xD0     # the sub-CPU switch snapshot in the monitor (word +4, byte +8; copied by 0x536a5100)
-# Camera run 16: S1 read 0 in almost every one-per-second read, so the meter does not wait on it; the tracer
-# records it at 200 Hz for the next decision.
-CAF_ACTION = 0xC44C  # the contrast AF object's action word (tracer only)
+# The half-press switch words (SwitchMonitor [0x5536c608] +0x5c S1, +0x60 S2, +0xd0 the sub-CPU snapshot;
+# docs §8) never changed in /dev/mem during camera run 17's presses, traced at 200 Hz: not used. The AF
+# runs show in the contrast AF object's action word instead (CAF_OBJECT + CAF_ACTION): 1 idle, 2 and 4 the
+# scan, 8 or 0x40, 0x80 at the end, every press.
+CAF_ACTION = 0xC44C
+AF_MS, AF_STILL_MS = 1500, 120   # an AF run's step at most; the lens still after it
+AF_BG_MS = 3000    # after a batch, how long an AF run the background watch saw start may still take
+BOOT_S = 40        # entering the meter mode this soon after power-on with a valid lens: AF ran before the watcher
 REDRAW_CM, REDRAW_ALT = 500, 350   # sent before the setting when it is already in use: the widget skips an unchanged id
 
 
@@ -285,45 +283,55 @@ rdn() { if [ "$zsamp" = 1 ]; then set -- $(samp w 0 0 0 0 0 0 100 "$@"); [ $# -g
 sampck() { zsamp=0; [ -x $W/SAMP.BIN ] && set -- $(samp w 0 0 0 0 0 0 100 @SETTINGS@) && [ $# = 7 ] && [ "$1" = 1 ] && [ "$7" = "$(num @SETTINGS@)" ] && { zsamp=1; return 0; }
  [ -n "$zsoff" ] || log meter samp off $#; zsoff=1; }
 # The meter's addresses, resolved once per visit (hex): zfa the focus word (setting +0x11c byte 0, back-up
-# +0x11e byte 2), zca snap cm, zua focus in use, zpa +0x108, zla the lens mm, zs1a the half-press word; the
-# tracer's words (ztrw, names ztrk); zlbc the label entries.
-mres() { zla=; zs1a=; ztrw=; ztrk=; zlbc=; zfa=
- set -- $(rdn @SETTINGS@ @LENSROOT@ @S1ROOT@); [ $# = 3 ] && [ "$1" != 0 ] || return 1
- zo=$1; za=$2; zp1=$3
+# +0x11e byte 2), zca snap cm, zua focus in use, zpa +0x108, zla the lens mm, zcafa the contrast AF action
+# word (static); the tracer's words (ztrw, names ztrk); zlbc the label entries.
+mres() { zla=; ztrw=; ztrk=; zlbc=; zfa=; zcafa=@CAFW@
+ set -- $(rdn @SETTINGS@ @LENSROOT@); [ $# = 2 ] && [ "$1" != 0 ] || return 1
+ zo=$1; za=$2
  zfa=$(hx $((zo + @OFFFOCUS@))); zca=$(hx $((zo + @OFFSNAP@))); zua=$(hx $((zo + @OFFCURW@))); zpa=$(hx $((zo + @OFFPOS@)))
  if [ "$za" != 0 ]; then set -- $(rdn $(hx $((za + @LENSA@)))); [ "${1:-0}" != 0 ] && set -- $(rdn $(hx $1)) && [ "${1:-0}" != 0 ] && zla=$(hx $(($1 + @LENSMM@))); fi
- # The half-press switch (S1_* in focus_watch.py): checked class, event id and key code; S2 and the sub-CPU
- # snapshot it is copied from only for the tracer.
- if [ "$zp1" != 0 ]; then set -- $(rdn $(hx $((zp1 + @S1OFF@))) $(hx $((zp1 + @S2OFF@)))); zq1=${1:-0}; zq2=${2:-0}
-  if [ "$zq1" != 0 ]; then set -- $(rdn $(hx $zq1) $(hx $((zq1 + 12))) $(hx $((zq1 + 16))))
-   [ "$1" = @S1CLASS@ ] && [ "$2" = @S1EVENT@ ] && [ $(( ${3:-1} & 255 )) = 0 ] && { zs1a=$(hx $((zq1 + 8))); ztrw="$(hx $((zq1 + 4))) $zs1a"; ztrk="s1p s1"; }
-  fi
-  [ -n "$zs1a" ] && [ "$zq2" != 0 ] && { ztrw="$ztrw $(hx $((zq2 + 8)))"; ztrk="$ztrk s2"; }
-  [ -n "$zs1a" ] && { ztrw="$ztrw $(hx $((zp1 + @SUBOFF@ + 4))) $(hx $((zp1 + @SUBOFF@ + 8)))"; ztrk="$ztrk sub4 sub8"; }
- fi
- ztrw="$ztrw $zfa $zca $zua $zpa @CAFW@"; ztrk="$ztrk focus cm cur pos caf"
+ ztrw="$zfa $zca $zua $zpa $zcafa"; ztrk="focus cm cur pos caf"
  set -- $(rdn @LANGTABX@); zt6=${1:-0}
  [ "$zt6" != 0 ] && for zi6 in @LBLALL@; do set -- $(rdn $(hx $((zt6 + 4 * zi6)))); ze6=${1:-0}; [ "$ze6" != 0 ] || continue
   set -- $(rdn $(hx $ze6) $(hx $((ze6 + 4)))); [ "$1" = @LBLLEN@ ] && [ "${2:-0}" != 0 ] && zlbc="$zlbc $zi6:$ze6:$2"; done
  return 0; }
 # swait TIMEOUT STABLE BASE MOVED EXPECT (ms and values decimal; TIMEOUT 0: one snapshot), the lens at zlw (0:
-# not watched): until the lens left BASE (or MOVED) and stood still STABLE ms, the focus byte is not EXPECT
-# (256: not watched), or the time out. -> zr result (0 settled, 1 time out, 2 focus), zl lens (4294967295: no
-# valid reading), zm moved, zfw the focus word, zcw snap cm, zpw +0x108, zs1w the half-press (empty: unknown).
-swait() { if [ "$zsamp" = 1 ]; then set -- $(samp w $(hx $1) $(hx $2) ${zlw:-0} $(hx ${3:-0}) ${4:-0} ${zfa:-0} $(hx $5) ${zca:-0} ${zpa:-0} ${zs1a:-${zca:-0}}); else set -- $(swaitsh "$@"); fi
- [ $# = 9 ] || return 1; zr=$1; zl=$4; zm=$5; zfw=$6; zcw=$7; zpw=$8; zs1w=$9; [ -n "$zs1a" ] || zs1w=; return 0; }
-swaitsh() { zt5=0; zl5=4294967295; zm5=${4:-0}; zq5=0
+# not watched), the word at zwa (0: none): until the lens left BASE (or MOVED) and stood still STABLE ms, the
+# low byte of the word is not EXPECT (256: not watched), or the time out. -> zr result (0 settled, 1 time out,
+# 2 the word changed), zl lens (4294967295: no valid reading), zm moved, zww the word, zcw snap cm, zpw +0x108,
+# zfw the focus word.
+swait() { if [ "$zsamp" = 1 ]; then set -- $(samp w $(hx $1) $(hx $2) ${zlw:-0} $(hx ${3:-0}) ${4:-0} ${zwa:-0} $(hx $5) ${zca:-0} ${zpa:-0} ${zfa:-0}); else set -- $(swaitsh "$@"); fi
+ [ $# = 9 ] || return 1; zr=$1; zl=$4; zm=$5; zww=$6; zcw=$7; zpw=$8; zfw=$9; return 0; }
+swaitsh() { zt5=0; zl5=4294967295; zm5=${4:-0}; zq5=0; zw5=0
  while :; do
   if [ "${zlw:-0}" != 0 ]; then zv5=$(num $zlw)
    if [ -z "$zv5" ] || [ "$zv5" = 0 ] || [ "$zv5" -ge 1000000 ]; then zl5=4294967295; zq5=$zt5
    else [ "$zv5" != "$3" ] && zm5=1; if [ "$zv5" != "$zl5" ]; then zl5=$zv5; zq5=$zt5; elif [ $zm5 = 1 ] && [ $((zt5 - zq5)) -ge $2 ]; then zr5=0; break; fi; fi
   fi
-  zf5=$(num $zfa); [ $5 -lt 256 ] && [ $(( ${zf5:-0} & 255 )) != $5 ] && { zr5=2; break; }
+  [ "${zwa:-0}" != 0 ] && zw5=$(num $zwa); [ $5 -lt 256 ] && [ $(( ${zw5:-0} & 255 )) != $5 ] && { zr5=2; break; }
   [ $zt5 -ge $1 ] && { zr5=1; break; }
   zsl 200000; zt5=$((zt5 + 300))
  done
- zc5=$(num $zca); zp5=$(num $zpa); echo $zr5 $zt5 1 $zl5 $zm5 ${zf5:-0} ${zc5:-0} ${zp5:-0} 0; }
-snap1() { zlw=${zla:-0}; swait 0 0 0 0 256; }
+ zc5=$(num $zca); zp5=$(num $zpa); zf5=$(num $zfa); echo $zr5 $zt5 1 $zl5 $zm5 ${zw5:-0} ${zc5:-0} ${zp5:-0} ${zf5:-0}; }
+snap1() { zlw=${zla:-0}; zwa=${zcafa:-0}; swait 0 0 0 0 256; }
+# afdone: the AF run under way ends (the contrast AF action word CAF_ACTION: 1 idle, 2 and 4 the scan, 8 or 0x40,
+# then 0x80 at the end; camera run 17), then the lens holds @AFSTILL@ ms (it reached its end within 50 ms of the
+# word going back to 1). -> zl the subject, zafp the words seen; 2: the word never went back to 1.
+afdone() { zafp=; zj8=0; zlw=0; zwa=$zcafa; swait 0 0 0 0 256 || return 1
+ while [ $(( zww & 255 )) != 1 ]; do zafp="$zafp$(hx $((zww & 255)))."; zj8=$((zj8 + 1)); [ $zj8 -le 8 ] || return 2
+  swait @AFMS@ 0 0 0 $((zww & 255)) || return 1; done
+ zlw=${zla:-0}; zwa=0; swait 500 @AFSTILL@ 0 1 256 && [ "$zr" = 0 ]; }
+# A half-press while a batch runs (run 17, 55.5 s: AF on a new subject, then our Snap of the one before moved
+# the lens away) is watched in the background; the newer subject (zpq) is measured right after the batch.
+# An AF run already under way when the batch ends (af.run) is waited for, up to @AFBGN@ x 50 ms: in camera run
+# 18 two presses (Fn, then a half-press during the tag batch) ended just as the batch did, and the watch was
+# killed inside its @AFSTILL@ ms lens check.
+afbg() { [ "$zsamp" = 1 ] && [ -n "$zcafa" ] || return 0; rm -f $w/af.new $w/af.run; ( zwa=$zcafa; zlw=0; swait 8000 0 0 0 1 && [ "$zr" = 2 ] && : >$w/af.run && afdone && echo $zl >$w/af.new; rm -f $w/af.run ) >/dev/null 2>&1 & zafb=$!; }
+afbgend() { [ -n "$zafb" ] || return 0; zj9=0
+ kill -0 $zafb 2>/dev/null && zsl 30000
+ while kill -0 $zafb 2>/dev/null && [ -f $w/af.run ] && [ $zj9 -lt @AFBGN@ ]; do zsl 50000; zj9=$((zj9 + 1)); done
+ kill -0 $zafb 2>/dev/null && kill $zafb 2>/dev/null; wait $zafb 2>/dev/null; zafb=
+ [ -s $w/af.new ] && read zl9 _ <$w/af.new && [ -n "$zl9" ] && { zpq=$zl9; log meter pressed during batch $zl9 waited $zj9; }; rm -f $w/af.new $w/af.run; return 0; }
 # The tracer (SAMP.BIN t) while on the meter mode, for the camera runs: each change of the lens and the words
 # in ztrk with its time, drained into the log while idle as "tr <s.ms> <index> <old> <new>" (index 0 the lens;
 # focus_watch.py log decodes them). At most @TRMAX@ tracers per visit, @TRREC@ records each.
@@ -370,11 +378,13 @@ meter_send() { # $2 "again": Snap the camera took back, the label is drawn alrea
   [ "$zpre" != 1 ] && [ $zf4 = 10 ] && [ $zb4 = $zaf ] && [ "$zcw" = $1 ] && { zok=1; break; }
   [ $zi4 -lt 3 ] || break
   zi4=$((zi4 + 1))
+  afbg
   { [ "$zpre" = 1 ] && printf "@MSETCM@" $zpv
     [ "$zpre" = 1 ] || [ "$zcw" != $1 ] && printf "@MSETCM@" $1
     [ $zb4 = $zaf ] || printf "@MSETBK@" $(fname $zaf)
     [ $zf4 = 10 ] || printf "@MSETSNAP@"; } | b
-  zpre=
+  afbgend; zpre=
+  [ -n "$zpq" ] && { zsnap=; return 0; }        # pressed again meanwhile: that one next
  done
  if [ "$zok" = 1 ]; then zsnap=$(zup); zoff=; meter_tag; else zsnap=; log meter snap failed; fi
 }
@@ -383,23 +393,27 @@ meter_send() { # $2 "again": Snap the camera took back, the label is drawn alrea
 meter_tag() { [ "$ztag" = 1 ] || return 0
  pt $W/CPTAG.BIN; zrc=$?; [ $zrc = 0 ] || { log tag patch $zrc; pt $W/CPTAG.BIN restore; return 0; }
  [ "$zmtag" = 1 ] || echo ${za0:-1} >$W/tag.put
- printf "@METERTAG@" GRSNAP:$zms:$zmd | b; pt $W/CPTAG.BIN restore; zmtag=1; zleft=; log meter tag GRSNAP:$zms:$zmd; }
+ afbg; printf "@METERTAG@" GRSNAP:$zms:$zmd | b; afbgend; pt $W/CPTAG.BIN restore; zmtag=1; zleft=; log meter tag GRSNAP:$zms:$zmd; }
 # The tag off in one batch (Fn back to AF, or leaving the mode): empty copyright (CPEMPTY.BIN while the RTOS
 # runs it), the attach setting as it was.
 mtagoff() { [ "$zmtag" = 1 ] || return 0; zmtag=; zv=Off; [ "$za0" = 0 ] && zv=On
- if pt $W/CPEMPTY.BIN; then printf "@METERUNTAG@" $zv | b; pt $W/CPEMPTY.BIN restore; else pt $W/CPEMPTY.BIN restore; send "UserData Set SetupCopyrightAttach $zv" 500; fi
+ if pt $W/CPEMPTY.BIN; then afbg; printf "@METERUNTAG@" $zv | b; afbgend; pt $W/CPEMPTY.BIN restore; else pt $W/CPEMPTY.BIN restore; send "UserData Set SetupCopyrightAttach $zv" 500; fi
  rm -f $W/TAG; : >$W/tag.del; log tag cleared attach $zv; }
 # Only the RAM patch: the settings belong to the U mode, and the dial recalls the next mode's own.
 meter_off() { [ "$zlon" = 1 ] && { pt $W/L.BIN restore; zrc9=$?; [ $zrc9 = 0 ] || log meter label restore $zrc9; zlon=; }
  [ "$zmon" = 1 ] || return 0; pt $W/M.BIN restore; log meter restore $?; zmon=; zms=; }
-meter_enter() { ztrn=0; zlb=$zlpre; zmv=0; zsnap=; zlost=0; zoff=; zidle=0; zredraw=; zfw=0
+meter_enter() { ztrn=0; zlb=$zlpre; zmv=0; zsnap=; zlost=0; zoff=; zidle=0; zredraw=; zfw=0; zpq=
  sampck; mres || log meter resolve failed
  [ -n "$zla" ] || log meter lens off
  if [ -n "$zfa" ] && snap1; then zf=$((zfw & 255)); isaf $zf && zaf=$zf
-  log meter entry lens $zl focus $zf backup $(( (zfw >> 16) & 255 )) cm $zcw pos $zpw s1 ${zs1w:-none} samp $zsamp
-  # A half-press right after turning the dial (seen only at the next poll): the lens from before the turn
-  # is the base. The switch still held: the lens where it settles is the subject.
-  [ -n "$zlb" ] || zlb=$zl; [ "$zs1w" = 1 ] && zmv=1
+  log meter entry lens $zl focus $zf backup $(( (zfw >> 16) & 255 )) cm $zcw pos $zpw caf $(hx $((zww & 255))) samp $zsamp
+  [ -n "$zlb" ] || zlb=$zl
+  # AF done before the watcher looked: right after turning the dial (the lens moved from where it was before
+  # the turn), or right after power-on (the lens reads 1000000 until the first AF; camera run 17).
+  if [ "$zsamp" = 1 ] && isaf $zf && [ "$zl" != 4294967295 ]; then
+   if [ -n "$zlpre" ]; then [ "$zl" != "$zlpre" ] && { zpq=$zl; log meter subject before the dial $zl; }
+   elif [ "$(zup)" -lt @BOOTS@ ]; then zpq=$zl; log meter subject before the start $zl; fi
+  fi
  fi
  # Fn not on AF/Snap toggle in the meter mode: no way back to AF, say so once.
  obj && zx4=$(at $zo @OFFFNW@) && zmfn=$(( (zx4 >> 16) & 255 )) && [ $zmfn != 3 ] && log meter fn $zmfn not af snap toggle
@@ -407,24 +421,44 @@ meter_enter() { ztrn=0; zlb=$zlpre; zmv=0; zsnap=; zlost=0; zoff=; zidle=0; zred
 meter_leave() { troff; trdrain; pbstop; }
 # The AF focus modes (FOCUS_NAMES); anything else (Snap, MF, Infinity, 13 "computed") has no subject.
 isaf() { case $1 in @AFCODES@) return 0 ;; esac; return 1; }
-# One round on the meter mode: wait in SAMP.BIN for the lens (AF) or the focus mode (Snap, MF, Infinity).
+sampbad() { log meter samp failed; zsamp=0; zsl 300000; }
+# One round on the meter mode: wait in SAMP.BIN for an AF run (AF modes) or the focus mode (Snap, MF, Infinity).
 meter_step() {
  [ -n "$zfa" ] || { zsl 1000000; mres; return; }
+ if [ -n "$zpq" ]; then zl=$zpq; zpq=; zidle=0; meter_on $zl; return; fi
  zf=$((zfw & 255)); zaf=${zaf:-1}
- if isaf $zf; then
-  if [ -z "$zlb" ] || [ "$zlb" = 4294967295 ]; then snap1 && zlb=$zl; zmv=0; [ "$zlb" = 4294967295 ] && zsl 300000; return; fi
-  zlw=${zla:-0}; swait @WAITMS@ @STABLE@ $zlb $zmv $zf
- else zlw=0; swait @WAITMS@ 0 0 0 $zf; fi || { log meter samp failed; zsamp=0; zsl 300000; return; }
+ if ! isaf $zf; then zwa=$zfa; zlw=0; swait @WAITMS@ 0 0 0 $zf || { sampbad; return; }
+  case $zr in 2) zidle=0; meter_focus ;; *) meter_idle ;; esac; return
+ fi
+ if [ "$zsamp" = 1 ] && [ -n "$zcafa" ]; then
+  # Every AF run takes the action word away from 1; the lens where it ends is the subject, also at the
+  # distance it was at before (the lens alone did not show that).
+  zwa=$zcafa; zlw=0; swait @WAITMS@ 0 0 0 1 || { sampbad; return; }
+  [ $((zfw & 255)) = $zf ] || { zidle=0; meter_focus; return; }
+  [ "$zr" = 2 ] || { meter_idle; return; }
+  zidle=0; afdone; zrc8=$?
+  case $zrc8 in
+   0) log meter af $zafp; meter_on $zl ;;
+   2) log meter caf off $zafp; zcafa= ;;
+   *) log meter af $zafp no lens ;;
+  esac; return
+ fi
+ # Without SAMP.BIN or the action word: the lens moved away from the base and stood still.
+ if [ -z "$zlb" ] || [ "$zlb" = 4294967295 ]; then snap1 && zlb=$zl; zmv=0; [ "$zlb" = 4294967295 ] && zsl 300000; return; fi
+ zwa=$zfa; zlw=${zla:-0}; swait @WAITMS@ @STABLE@ $zlb $zmv $zf || { sampbad; return; }
  case $zr in
   0) zidle=0; zlb=$zl; zmv=0; meter_on $zl ;;
   2) zidle=0; meter_focus ;;
-  *) isaf $zf && zmv=$zm; meter_idle ;;
+  *) zmv=$zm; meter_idle ;;
  esac
 }
 # The focus mode changed (zf the old one, zfw the new word). Into AF from Snap with the back-up 13: the
-# AF/Snap toggle (Fn; 0x532b0b6c writes 13); the back-up still the AF mode soon after our Snap: the camera
-# changed it back, Snap again (twice at most).
-meter_focus() { zf2=$((zfw & 255)); zb2=$(( (zfw >> 16) & 255 )); log meter focus $zf2 backup $zb2
+# AF/Snap toggle (Fn); it writes the focus mode first and the back-up 13 about 10 ms later (0x532b0b6c;
+# camera run 17), so a back-up that is not 13 is read again. Still the AF mode soon after our Snap: the
+# camera changed it back, Snap again (twice at most).
+meter_focus() { zf2=$((zfw & 255)); zb2=$(( (zfw >> 16) & 255 ))
+ if [ "$zf" = 10 ] && isaf $zf2 && [ $zb2 != 13 ]; then zsl 100000; snap1; zf2=$((zfw & 255)); zb2=$(( (zfw >> 16) & 255 )); fi
+ log meter focus $zf2 backup $zb2
  isaf $zf2 || return 0
  if [ "$zf" = 10 ] && [ -n "$zsnap" ] && [ $zb2 != 13 ] && [ $(( $(zup) - zsnap )) -le @LOSTS@ ] && [ $zlost -lt 2 ]; then
   zlost=$((zlost + 1)); log meter snap lost $zlost; zaf=$zf2; meter_send $zslot again; return 0; fi
@@ -484,8 +518,7 @@ def watch_sh(macro="U1", meter="U2"):
         "@LAMPON@": ttl("Af_Led_On", 300), "@LAMPEND@": ttl("Af_Led_On", 3000) + ttl("Af_Led_Off", 300),
         "@MSETCM@": msetcm, "@MSETBK@": msetbk, "@MSETSNAP@": msetsnap,
         "@METERTAG@": metertag, "@METERUNTAG@": meteruntag,
-        "@LANGTABX@": f"{LANG_TAB:x}", "@S1ROOT@": f"{S1_ROOT:x}", "@S1OFF@": str(S1_OFF),
-        "@S1CLASS@": str(S1_CLASS), "@S1EVENT@": str(S1_EVENT), "@S2OFF@": str(S2_OFF), "@SUBOFF@": str(SUB_OFF),
+        "@LANGTABX@": f"{LANG_TAB:x}", "@AFMS@": str(AF_MS), "@AFSTILL@": str(AF_STILL_MS), "@AFBGN@": str(AF_BG_MS // 50), "@BOOTS@": str(BOOT_S),
         "@REDRAW@": str(REDRAW_CM), "@REDRAW2@": str(REDRAW_ALT), "@LBLLEN@": str(LABEL_LEN),
         "@LBLALL@": " ".join(str(i) for ids in LABEL_IDS.values() for i in ids),
         "@OFFPOS@": f"{p3.OFF['pos']:#x}", "@CAFW@": f"{card.CAF_OBJECT + CAF_ACTION:x}",
