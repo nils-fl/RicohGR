@@ -275,7 +275,7 @@ through ApplySnapDistance with its millimetres rewritten in RAM, seven frames pe
 round. `check` reads each photo's lens position from the maker notes and confirms
 that the frames follow the plan.
 
-### 10. Focus modes on the dial (stock firmware; built, not yet run)
+### 10. Focus modes on the dial (stock firmware; snap meter run 19 passed 2026-11-27)
 
 ```sh
 python3 tools/focus/focus_watch.py card --macro U1 --meter U2   # writes work/focus-watch/
@@ -293,7 +293,8 @@ shows the exact distance (48cm, 1.6m, 12m) on the 0.3/1.5/2.5/3.5 m setting near
 copyright field empty, Snap photos carry `GRSNAP:<snap mm>:<subject mm>` in EXIF Copyright. To measure again
 press Fn (back to AF) and half-press on the new subject. Use a tripod for U1 and ignore the stock distance labels on screen; a
 bracket cut off by switching off clears its copyright tag at the next power-on. Details and the probe 3
-results behind it: [`docs/focus-bracketing.html` §8](docs/focus-bracketing.html#modes).
+results behind it: [`docs/focus-bracketing.html` §8](docs/focus-bracketing.html#modes); the snap meter
+has its own document, [`docs/snap-meter.html`](docs/snap-meter.html).
 
 ### 11. Focus probe 3 (stock firmware; run 2026-11-25)
 
@@ -359,7 +360,8 @@ script's docstring and in [`docs/focus-bracketing.html` §8](docs/focus-bracketi
 | `focus_probe.py` | Probe card for focus bracketing (setup 8): off-menu snap distances, camera state on the card; `import` estimates each frame's focus |
 | `focus_bracket.py` | Focus bracket (setup 9): plan by depth of field, the card, and `check` of the frames' lens positions |
 | `focus_probe3.py` | Probe 3 (setup 11): dial, distance through Mf, AF result, copyright tag |
-| `focus_watch.py` | Focus modes on the dial (setup 10): macro stack and snap meter, a watcher on the recipe card |
+| `focus_watch.py` | Focus modes on the dial (setup 10): the watcher on the recipe card, the macro stack, the card and the log decoder |
+| `snap_meter.py` | The snap meter's part of the watcher (setup 10): its shell, constants, label patches and tracer decoding |
 
 ## Documents
 
@@ -371,7 +373,8 @@ script's docstring and in [`docs/focus-bracketing.html` §8](docs/focus-bracketi
 | [`af-charts.html`](docs/af-charts.html) | Charts of the AF measurements |
 | [`firmware-mod-feasibility.html`](docs/firmware-mod-feasibility.html) | Whether a modified firmware is accepted (checksum and version rule, no signature) and what a failure means |
 | [`remote-control.html`](docs/remote-control.html) | What the Wi-Fi API and USB can set |
-| [`focus-bracketing.html`](docs/focus-bracketing.html) | Focus bracketing from the SD card: the snap distance from the shell to the lens, the one-word RAM patch, the probe |
+| [`focus-bracketing.html`](docs/focus-bracketing.html) | Focus bracketing from the SD card: the snap distance from the shell to the lens, the one-word RAM patch, the probe, the focus modes on the dial |
+| [`snap-meter.html`](docs/snap-meter.html) | The snap meter on U2: using it, how it finds the AF run and sets Snap, the firmware behind it, camera runs 4–19, a firmware version |
 | [`recipe-format.html`](docs/recipe-format.html) | The `RECIPES.TXT` format, the firmware's value sets and sending recipes to Custom 1/2 |
 | [`image-effects.html`](docs/image-effects.html) | Grain and the digital-filter stage: where grain is gated per control, grain strength, candidate changes |
 | [`gr-mod-landscape.html`](docs/gr-mod-landscape.html) | Community mods (GRKit, GR Mod, others), built-in AF debug logging, recipes via `UserData Set` |

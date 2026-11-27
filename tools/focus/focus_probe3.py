@@ -48,6 +48,9 @@ RAM = f"{rc.WWW}/probe3"
 
 SETTINGS_PTR = 0x55063F34
 OFF = {"pos": 0x108, "focus": 0x11C, "snap": 0x130, "timer": 0x484}
+# The focus mode byte at OFF["focus"] (codes from the StillFocus matcher 0x532ddd7c).
+FOCUS_NAMES = {0: "AutoArea", 1: "Select", 4: "Pinpoint", 5: "Follow", 6: "Continuous", 9: "Mf", 10: "Snap",
+               11: "Infinity", 14: "AutoAreaM", 15: "ZoneSelect"}
 OFF_COPYRIGHT, OFF_ATTACH = 0x945, 0x967
 LENS_ROOT, LENS_A, LENS_MM = 0x553458B0, 0x518, 0x698
 

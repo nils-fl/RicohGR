@@ -55,6 +55,8 @@ strong{font-weight:650}
 <li><a href="#result">5a. Probe result (2026-11-25)</a></li>
 <li><a href="#apply">5b. ApplySnapDistance and probe 2</a></li>
 <li><a href="#planner">6. The bracket planner and card</a></li>
+<li><a href="#modes">8. Focus modes on the dial</a></li>
+<li><a href="snap-meter.html">Snap meter (own document)</a></li>
 <li><a href="#next">6a. Still open</a></li>
 <li><a href="#repro">7. Reproducing</a></li>
 </ul></li>
@@ -392,7 +394,7 @@ address after every power-on, and that <code>av</code> holds the aperture
 in Av mode. If the pointer does not look like RAM, the watcher does
 nothing.</p>
 
-<h2 id="modes">8. Focus modes on the dial (probe 3 run; watcher built, not yet run)</h2>
+<h2 id="modes">8. Focus modes on the dial</h2>
 <p>The self-timer watcher in §6b gives way to two modes on the mode dial,
 U1 and U2 by default (chosen 2026-11-25; real menu entries would need a
 flash and are left for later):</p>
@@ -491,7 +493,7 @@ text.</td></tr>
 Follow 5, Continuous 6, Mf 9, Snap 10, Infinity 11, AutoAreaM 14,
 ZoneSelect 15.</p>
 
-<h3 id="watcher">The mode watcher (first run failed, fixed, not yet rerun)</h3>
+<h3 id="watcher">The mode watcher (runs 1 to 3)</h3>
 <p><strong>First run, 2026-11-25:</strong> the dial and the lens distance were read
 (U2 metered 1887 and 12164 mm), but every patch file failed its readback, so no
 lens moved. The camera's BusyBox 1.24.1 <code>dd</code> knows only
@@ -510,7 +512,7 @@ run the rebuilt file: "Permission denied", exit 126. The new file from
 <code>&gt;$1.t</code> has no execute bit. It is now set with <code>chmod 755</code>
 before the <code>mv</code>, and the test mocks run a patch file only when it is
 executable.</p>
-<p><strong>Third run (2026-11-26):</strong> U1 worked.
+<p><strong>Third run (2026-11-26):</strong> U1 worked.</p>
 <ul>
 <li>AF gave near 863 and far 388 mm. Twelve frames were planned (401 … ~860 mm), and frames
 1–9 were shot about every 8.2 s. Each carries <code>GRFS:7308:&lt;i&gt;/12:&lt;mm&gt;</code> in
@@ -545,280 +547,10 @@ focus mode.</li>
 30 cm). So when the dial has moved, the watcher sends no settings back and only undoes its RAM
 patches and the tag.</li>
 </ul>
-<p><strong>Fourth run (2026-11-26, U2 only):</strong> the meter measured
-again on every half-press (1.7, 1.7, 1.9, 2.1, 6.0 m, hyperfocal) with
-every patch at rc 0. The user read the snap distance as stuck at 0.3 m.
-The Full Press Snap photo R0007319 (EXIF focus mode Snap) is not focused
-at 0.3 m, though: the objects at 0.3–0.4 m are badly blurred, and a folding
-rule at about 1.5–2 m is nearly sharp. The 0.3 m was the screen label of
-the borrowed 30 cm setting. This fits the firmware: ApplySnapDistance
-(0x532af3d8) only acts in Snap and Infinity, and a Full Press Snap shot
-(shutter path 0x5323a578, event 0x7b instead of 0x7a) is recorded as focus
-mode Snap. The new <code>meter shot</code> log line will confirm it. One
-garbage reading (536870893 mm) right after turning to U2 metered the
-hyperfocal distance. Changes: the meter borrows the setting nearest to the
-distance, lens readings of 1000 m and more are ignored, and each photo
-logs the lens position. This run was on the GR Mod dim-light AF build;
-the multipatch checks of the stock words passed (rc 0).</p>
-<p><strong>Decision after run 4:</strong> U2 switches the camera into
-real Snap after the measurement, as in the second run. To measure again,
-use a stock key function: the custom key options (CustomSwitchFn handler
-0x5332e6ec) include <code>ToggleAfSnap</code>, so the Fn button is set to
-AF/Snap toggle. Fn gives AF-S with the lens still at the snap distance.
-The watcher takes that reading as the base (<code>meter remeasure</code>)
-and meters once the lens has moved and holds for two readings. That
-includes AF settling back on the same distance after hunting. In Snap
-itself the lens is never measured. Full Press Snap is no longer used.</p>
-<p><strong>Fifth run (2026-11-26):</strong> with upper-case template names
-(<code>Ts0.BIN</code> was not found on the camera: every meter logged
-<code>build failed</code>) the meter switched to Snap at the measured
-distance, and photo R0007321 logged lens 5618 mm at snap 5618 mm. A new
-aperture recomputed it each time. Fn did nothing: it had been set to
-AF/Snap toggle in another mode, and U2 recalls its own button setup. Fn
-is stored at settings +0x922 (3 = <code>ToggleAfSnap</code>); the watcher
-logs it on entering U2 (<code>meter fn 3</code>).</p>
-<p><strong>Sixth run:</strong> with Fn on AF/Snap toggle in U2 (log
-<code>meter fn 3</code>), Fn still did nothing. Reason (Read): the toggle
-switches the focus mode <em>in use</em>, settings +0xc6 (setter 0x532b03b4,
-read by 0x5326c5f8, which ApplySnapDistance tests), between Snap and the
-focus <em>setting</em> +0x11c. The watcher had set the setting itself to
-Snap, so the toggle had no AF mode to return to. Now the watcher leaves
-the setting at AF-S: it sets the snap distance and presses Fn itself
-through the remote key <code>SW_fn</code> (next to <code>SW_sws</code> and
-<code>SW_swr</code> in the debug command table). It reads +0xc6 to
-check that Snap came: if not within three polls, it presses again (a
-press while the shutter is still half down may be ignored), three times at
-most. The user presses Fn to go back to AF. Without the toggle on Fn the
-watcher sets the focus mode to Snap as before.</p>
-<p><strong>Seventh run:</strong> the watcher's Fn press (log <code>meter fn
-press</code>) did bring Snap (<code>meter in snap</code>), but afterwards
-the physical Fn no longer went back to AF. Before it, the user's own Fn
-presses had toggled both ways. The remote key handlers (<code>SW_fn</code>,
-like <code>SW_sws</code>) write a separate virtual key state (0x536a7474),
-which may keep overriding the button. Replaced: the focus mode in use has its
-own remote setting, <code>CommonTempFocus</code> (handler 0x532dd620,
-values AutoArea … Snap, Infinity, None = follow the setting), which
-calls the +0xc6 setter and applies the focus (ApplySnapDistance). The meter
-now sends the snap setting, <code>CommonTempFocus Snap</code> and its
-three blinks as one relay batch. Leaving U2 with Snap still in use while the
-new mode's setting is not Snap sends <code>CommonTempFocus None</code>.
-Speed: the run took 4–8 s from AF to Snap, because every round made two web
-requests (props and photos, about 2 s each) and the meter used five relay
-batches (about 2 s each). Now on U2 the lens is read every round (about
-0.5 s), props only every fourth round, and the photo list not at all; a
-measurement needs three equal readings (about 1 s at rest).</p>
-<p><strong>Eighth run:</strong> <code>CommonTempFocus Snap</code> worked
-(log <code>meter focus 10</code> 4 s after the measurement). Fn then put
-the AF-C icon on the screen, but the camera stayed in Snap with no focus
-frame, and the focus mode in use (+0xc6) stayed 10. The toggle keeps its
-own state below the temporary focus. Probe: while the meter's Snap is in
-use, the watcher compares the settings block (+0 to +0xb00) with the
-snapshot taken when Snap came and logs each changed word once
-(<code>meter probe off:old&gt;new</code>). If one of the words read by
-the in-use focus functions (+0x44, +0x110, +0x11c, +0xa3c, +0xa40)
-changes, it sends <code>CommonTempFocus None</code>
-(<code>meter fn seen</code>).</p>
-<p><strong>Ninth run:</strong> the probe found the toggle. Fn changed only
-the word at +0x11c: <code>000d0001&gt;0001000a</code>, i.e. the focus
-setting +0x11c went from Select (1) to Snap (10), and +0x11e, empty (13)
-before, now holds Select. Pressed again, it swaps back. So AF/Snap toggle
-swaps the focus setting with a back-up slot, which has its own remote setting
-<code>StillBackUpFocus</code> (handler 0x532ddf84, setter 0x53242618).
-When the watcher set <code>StillFocus Snap</code> alone, the slot was empty
-and Fn had nothing to return to. The temporary focus of the eighth run sat
-on top of the toggle, so the two fought ("sometimes it worked"). Now the
-meter makes exactly the toggle's state: <code>StillBackUpFocus
-&lt;AF mode&gt;</code>, then <code>StillFocus Snap</code>. The probe,
-<code>CommonTempFocus</code> and the blinks are gone; the batch starts
-with <code>AUD_beep</code> (the AF beep, debug command 0x5302257c)
-as feedback. Snap came 4–5 s after each measurement (relay plus card sync).
-One measurement read 1761 mm where the user had focused at about 5 m; the
-log now lists the readings on the way (<code>path</code>).</p>
-<p><strong>Tenth run:</strong> Fn and Snap worked (six measurements,
-including 6.2 m). Two faults. (1) Snap came back without a half-press:
-in P the aperture follows the light, and every change re-metered and
-sent Snap, even in AF. Now a new aperture counts only while in Snap, and
-only when it moves the snap distance (subject beyond the hyperfocal
-distance); then only the distance is sent, without a beep. (2) The first
-half-press after turning the dial to U2 was missed: the dial is noticed
-at the next poll (2–3 s), and the first lens reading in U2 (the base) was
-already the subject. Now the last lens reading in the previous mode is
-the base.</p>
-<p><strong>Eleventh run:</strong> works (14 measurements from 0.2 m to
-infinity). Three batches in a row were acked but the focus stayed AF;
-the user was half-pressing again around that time. Now Snap is sent once
-more if the focus is still AF 5 s after the batch, twice at most
-(<code>meter snap retry</code>, <code>meter snap failed</code>); Snap
-that came and went is Fn and is left alone. The development log lines
-are gone (lens path, focus in use, remeasure, file list, Fn code); the
-watcher logs the Fn code only when it is not AF/Snap toggle.</p>
-<p><strong>Exact distance on screen and in the photo (next run):</strong>
-the snap label is text. The setting's cm maps to a label id (0x53291ec4:
-30 → 0x3e, 40 → 0x3f, 100 → 0x40, 150 → 0x41, 200 → 0x42, 250 → 0x43,
-350 → 0x44, 500 → 0x45), the widget (setter 0x53396f80, which skips an
-unchanged id) resolves it via <code>[[0x55002bac + 4·language] +
-4·id]</code> to an entry {u16 length with NUL, u16 1, pointer to UTF-16}
-(0x5339666c). The language is the byte at +0x9ba (getter 0x532465dc,
-index switch 0x533963f8). The four-character labels (0.3m, 1.5m, 2.5m,
-3.5m) sit in 12 bytes, so five characters fit with the length 5 → 6.
-The meter now uses 1.5, 2.5 or 3.5 m (not 0.3 m, which 0x532af020 can
-show as 0.4 m), never the one in use, so the new id redraws. It writes
-the text (<code>0.48m</code>, <code>12.2m</code>) with LB2–LB4.BIN
-(only the words that change), and restores it with the mm patch. The patch
-tool checks every stock word first. If the chain does not check out it
-logs <code>meter label off lang N</code> and falls back to the nearest
-stock setting. With the camera's copyright empty, the Snap batch also sets
-<code>GRSNAP:&lt;snap mm&gt;:&lt;subject mm&gt;</code> as the copyright
-(attached), using CPTAG.BIN as the U1 bracket does. Fn back to AF and
-leaving the mode clear it in one batch (CPEMPTY.BIN).</p>
-<p><strong>Twelfth run:</strong> the label patch wrote (exit 0) but the
-screen kept "2.5m"/"3.5m", and the meter's choice of 1.5/2.5/3.5 m
-instead of the nearest setting put the labels far off. Cause: for the
-snap ids (0x3e–0x45, 0xc) the widget setter 0x53396f80 forces language
-0x14 (0x53396f4c: +0x10c = 1, +0x10d = 0x14), and 0x533963f8 maps 0x14 to
-table index 0. So the label always comes from <code>[0x55002bac]</code>,
-not from the table of the language that is set. Neither the size code
-(0x5339666c, cached only while +0xf3 is clear) nor the draw (0x533970a4)
-caches the text. Now: table index 0, and the nearest setting again. The
-text goes in only when the nearest setting is 1.5, 2.5 or 3.5 m. When that
-setting is already in use, 5 m is sent first so that the widget sees a
-new id. The tag then goes in its own batch, because both would not fit
-the 512-byte relay batch.</p>
-<p><strong>Thirteenth run:</strong> one measurement landed on 1.5 m and
-was patched to <code>1.60m</code>. The user saw "1.6", so the label
-draws, perhaps cut to the stock width. The six others landed on settings
-without room (0.3, 1, 2 m). Now every measurement uses the nearest of the
-four settings with four-character labels (0.3, 1.5, 2.5, 3.5 m; for 0.3 m
-both ids 0x3e and 0x3f). The text is at most four characters: under 1 m
-<code>48cm</code>, up to 10 m <code>1.6m</code>, beyond that
-<code>12m</code> (length word 5 → 4). Only words that change are written,
-1 to 6 of them (LB1–LB6.BIN). Photo tag confirmed: R0007322–24 carry
-<code>GRSNAP:346:346</code>, <code>GRSNAP:1089:1089</code>,
-<code>GRSNAP:1730:1730</code>, focus mode Snap.</p>
-<p><strong>Fourteenth run:</strong> labels shown as measured (1.6m, 98cm,
-56cm, 1.8m, 9.3m). Twice the camera dropped the Snap batch, and the
-retry brought Snap about 9 s after the measurement, which felt like Snap
-without a half-press. The watcher measures while the half-press is still
-held (lens still for about 1 s), and Snap sent then seems to be ignored.
-<strong>The half-press switch:</strong> the static SwitchMonitorFactory at
-0x5536c604 (initialiser 0x536a3edc) holds the SwitchMonitor at +4
-(0x5536c608, allocated by 0x536a4040). Its init 0x536a439c builds the S1
-CpuSwitch (ctor 0x536a6030; key code 0, event 0x21600201) at +0x5c
-(0x536a4574), and S2 at +0x60 (event 0x2160021c, key code 1). The scan
-0x536a5c38 keeps the last state at +4 and the current one at +8, 1 while
-pressed (active-low line). A remote SW_ override, once used, masks the
-button until the next power cycle. The meter checks the class pointer
-0x53d5b9c0, the event id and the key code once per visit
-(<code>meter s1 ok</code> or <code>off</code>). It then waits for the
-release before the Snap batch, up to 15 s (<code>meter s1 held
-N</code>, in 0.1 s polls). The beep is gone at the user's request;
-the Snap label with the exact distance is the feedback.</p>
-<p><strong>Fifteenth run:</strong> <code>meter s1 ok</code> (the checks
-held), but no wait was ever logged, so the word read 0 at every
-measurement. Without the beep the user held the half-press longer, and
-almost every first batch was dropped. The retries sent only
-<code>StillBackUpFocus</code> + <code>StillFocus Snap</code>, so Snap
-came at the old setting: stock distance and label, "reset to a previous
-one". Now each retry also sends <code>StillSnapDistanceCm</code>. The
-probe logs the S1 words (+4, +8) and S2 +8 each time they change
-(<code>meter s1 words</code>).</p>
-<p><strong>Sixteenth run:</strong> the first half-press after power-on
-did nothing: the watcher only started its loop at 20 s, after clearing a
-leftover tag in two batches (the relay's first acknowledgement came at
-17 s). The subject at 1066 mm was logged and its batches acknowledged
-three times, but focus never read Snap, and 541 mm came only with the
-first retry. After the 893 mm Snap, focus read Snap at 36.6 s and AF again
-at 37.05 s. The S1 word read <code>0 0 0</code> except once.
-<strong>Why it was slow and unsure:</strong> every lens reading was
-<code>PEEK.BIN | hexdump | awk</code> per pointer (30+ processes a round),
-each round slept 0.3 s, and every fourth round waited about 2 s for
-<code>/v1/props</code>. A subject was logged 2 to 5 s after focus, the
-batch was acknowledged 2.5 to 3 s later, and focus was looked at about
-once a second, so a Snap that came and went within a second was never
-seen. A press that left the lens where it was, or came while a batch or
-the props request blocked the loop, was missed.
-<strong>Firmware (Read, 1.60):</strong> the remote <code>StillFocus</code>
-handler 0x532ddd7c calls the setter 0x532730f8. The setter stores
-settings +0x11c first, then sends synchronous requests to the
-lens/capture controller (0x53273084 → 0x5354b564, mutex and wait, both
-without a timeout), then posts UI event 0x177. The Fn toggle uses the same
-setter: 0x532b0b0c saves the focus mode to the back-up +0x11e, and
-0x532b0b6c sets focus = back-up, then back-up = 13.
-<code>StillSnapDistanceCm</code> (0x53242680) and
-<code>StillBackUpFocus</code> (0x53242618) are plain stores. The suspected
-reset 0x5326cc40 (via 0x5327a058) is a menu dialog action, not a revert.
-The S1 state comes from a sub-CPU snapshot in the monitor (+0xd0: word +4,
-byte +8, copied by 0x536a5100 in the monitor loop 0x536a51ac).
-<strong>Rebuilt for run 17:</strong> <code>SAMP.BIN</code>
-(<code>af_debug_card.SAMP_S</code>, tested in the unicorn ARM emulator)
-samples the lens and the focus word every 5 ms in one process and returns
-when the lens has moved and stood still 250 ms, when the focus byte
-changes, or after 1 s. <code>/v1/props</code> runs in the background.
-The Snap batch sends the plain stores first (snap cm, back-up = the AF
-mode, 150 ms each), then <code>StillFocus Snap</code> (300 ms). After the
-acknowledgement the watcher reads focus, back-up and cm back
-(<code>meter set N focus F backup B cm C</code>) and sends only what is
-missing, three batches at most. The tag follows in its own batch. In Snap
-it waits on the focus byte: back to AF with the back-up 13 is Fn; with the
-back-up still the AF mode within 5 s it is the camera, and Snap goes again
-(<code>meter snap lost</code>). The leftover tag and the tag-off after Fn
-wait for two quiet rounds, so they no longer stand between a press and the
-loop. On entering U2 the watcher logs lens, focus, back-up, cm, +0x108
-and S1 (<code>meter entry</code>); S1 held there makes the settled lens a
-subject. A tracer (<code>SAMP.BIN t</code>) records each change of the
-lens (every 50 ms), the S1/S2 words, the sub-CPU snapshot, settings
-+0x11c, +0x130, +0xc4, +0x108 and the AF action word. Records are drained
-into the log while idle (<code>tr</code>, decoded by
-<code>focus_watch.py log</code>), 200 per tracer, six tracers per visit.
-If <code>SAMP.BIN</code> is missing or fails, the same waits run through
-<code>PEEK.BIN</code> (<code>meter samp off</code>).</p>
-<p><strong>Seventeenth run:</strong> <code>samp 1</code>; all seven Snaps
-were in place after the first batch (<code>meter set 1 focus 10</code>),
-1.2 to 1.4 s after the subject. The tracer showed three things.
-<strong>The half-press switch words</strong> (S1 +4/+8, S2 +8, the
-sub-CPU snapshot) never changed at 200 Hz through every press, so they are
-not used. <strong>The contrast AF action word</strong> (CAF object
-+0xc44c) runs 1 → 2 → 4 (→ 2 → 4) → 8 or 0x40 → 0x80 → 1 on each AF,
-and the lens reaches its end within 50 ms of the 1. The lens reads
-1000000 from power-on until the first AF. The lens alone gave the subject
-0.7 to 2.6 s after AF; at power-on it was caught only by a 4 mm drift.
-<strong>The "snap lost" was Fn:</strong> Fn writes the focus mode first and
-the back-up 13 about 10 ms later, and the watcher had read in between and
-sent Snap again. <strong>A half-press during the Snap batch</strong>
-(55.5 s, AF on a subject near 32 cm) was overwritten when the batch's Snap
-of the subject before moved the lens back to 2.5 m: the "previous
-distance". Now an AF run (the action word leaving 1) starts the
-measurement, and the lens 120 ms after the word returns to 1 is the
-subject, also when it lands at the same distance as before. During every
-batch the same watch runs in the background, and a newer subject is
-measured right after (<code>meter pressed during batch</code>). A back-up
-other than 13 is read again after 100 ms. Entering U2 within 40 s of
-power-on with a valid lens counts as an AF done before the watcher
-looked. The S1 code is gone; the tracer keeps lens, focus, cm, focus in
-use, +0x108 and the action word.</p>
-<p><strong>Eighteenth run</strong> (2026-11-27, two power-ons, no photos):
-the action word marked every AF run (1 → 2 → 4 → 8 → 0x80 → 1, 0.2 to
-0.6 s), and eight subjects from 38 cm to 1.8 m went to Snap. The new paths
-all worked: a half-press before the watcher started (1805 mm, "subject
-before the start"), Fn back to AF with no "snap lost", and two presses
-during a Snap batch (992 and 382 mm, measured next). <strong>Two presses
-were lost</strong> (34.9 s and 57.1 s): Fn and a half-press came about
-2 s after Snap, while the GRSNAP tag batch was still running. The background
-watch saw the AF start, but the AF ended (35.05, 57.66 s) 120 ms before the
-batch did (35.17, 57.78 s), and <code>afbgend</code> killed the watch 30 ms
-after the batch, inside its 120 ms lens check. Now the watch marks an AF run
-it has seen start (<code>af.run</code>), and the end of the batch waits for
-it, up to 3 s (<code>meter pressed during batch &lt;mm&gt; waited
-&lt;n x 50 ms&gt;</code>).</p>
-<p><strong>Nineteenth run</strong> (2026-11-27, one power-on, fast
-half-press and release cycles on purpose, about one every 3 to 4 s): 19
-subjects from 44 cm to 1.8 m, each pressed while the batch of the one
-before was still out, each measured next, so the newest subject always
-won; Snap landed only in the pauses. The wait for an AF run under way
-was needed three times (<code>waited 5</code>, 250 ms). No press was
-missed. Still open: no watch runs in the 0.8 to 1.5 s between a measured
-press and its first batch (patch and label), and the tracer drains only
-while idle, so it recorded nothing during the series.</p>
+<p><strong>Runs 4 to 19</strong> (2026-11-26 and 27) were the snap
+meter's: how it measures, sets Snap, shows and tags the exact distance,
+and every run behind it are in <a href="snap-meter.html">the snap meter
+document</a>.</p>
 <p><code>tools/focus/focus_watch.py card --macro U1 --meter U2</code>.
 REMOTE.SH starts <code>WATCH.SH</code> at every power-on.</p>
 <ul>
@@ -828,15 +560,9 @@ photo gives near and far. The frames between them are spaced in dioptres
 for the aperture, as in §6, with at least 5 and at most 35. Afterwards the
 focus mode and snap distance are set back. The dial is checked after each
 round; no second photo within 60 s forgets the near point.</li>
-<li><strong>Snap meter:</strong> in AF modes, once the lens has moved
-and stood still for 250 ms (<code>SAMP.BIN</code>), the camera is
-switched to Snap at that distance, or at the hyperfocal distance when the
-subject lies beyond it, and the result is read back in RAM. Fn (AF/Snap
-toggle) and a half-press measure again. The setting with a four-character
-label nearest to it in dioptres (0.3, 1.5, 2.5, 3.5 m) is rewritten in RAM
-to the exact distance and label (single-slot templates TS0–TS6.BIN, label
-patches LB1–LB6.BIN). It stays so while the dial is on the meter's U
-mode; leaving it puts the stock words back.</li>
+<li><strong>Snap meter:</strong> see <a href="snap-meter.html">the snap
+meter document</a> (its part of the watcher is
+<code>tools/focus/snap_meter.py</code>).</li>
 <li><strong>Millimetres in the camera:</strong> the near and far points
 are only known in the camera, so the card holds multipatch templates
 T1–T7.BIN with placeholder words. The shell writes each
